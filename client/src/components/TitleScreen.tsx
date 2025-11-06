@@ -16,10 +16,10 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
             className="w-32 h-32 object-contain animate-scale-in"
           />
           <h1 className="font-heading text-5xl font-bold text-center bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent">
-            Dilemme
+            Dilemme Plastique
           </h1>
           <p className="text-lg text-muted-foreground text-center">
-            Analysez des images avec l'IA
+            Prototype simplifié
           </p>
         </div>
 
