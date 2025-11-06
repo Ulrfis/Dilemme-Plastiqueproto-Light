@@ -28,9 +28,9 @@ export class MemStorage implements IStorage {
     const session: TutorialSession = {
       id,
       userName: insertSession.userName,
-      foundClues: insertSession.foundClues || [],
+      foundClues: (insertSession.foundClues || []) as string[],
       score: insertSession.score || 0,
-      audioMode: insertSession.audioMode || 'voice',
+      audioMode: (insertSession.audioMode || 'voice') as 'voice' | 'text',
       completed: insertSession.completed || 0,
       createdAt: new Date(),
     };
@@ -48,7 +48,11 @@ export class MemStorage implements IStorage {
 
     const updated: TutorialSession = {
       ...session,
-      ...updates,
+      userName: updates.userName !== undefined ? updates.userName : session.userName,
+      foundClues: updates.foundClues !== undefined ? updates.foundClues as string[] : session.foundClues,
+      score: updates.score !== undefined ? updates.score : session.score,
+      audioMode: updates.audioMode !== undefined ? updates.audioMode as 'voice' | 'text' : session.audioMode,
+      completed: updates.completed !== undefined ? updates.completed : session.completed,
     };
     this.sessions.set(id, updated);
     return updated;
@@ -59,7 +63,7 @@ export class MemStorage implements IStorage {
     const message: ConversationMessage = {
       id,
       sessionId: insertMessage.sessionId,
-      role: insertMessage.role,
+      role: insertMessage.role as 'user' | 'assistant',
       content: insertMessage.content,
       detectedClue: insertMessage.detectedClue || null,
       createdAt: new Date(),

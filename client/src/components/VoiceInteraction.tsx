@@ -3,37 +3,32 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Mic, Square, Send, Loader2 } from "lucide-react";
 import peterImage from "@assets/generated_images/Peter_AI_mascot_character_ddfcb150.png";
-
-type AudioState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
+import type { AudioState } from "@/hooks/useVoiceInteraction";
 
 interface VoiceInteractionProps {
-  onMessage: (message: string) => void;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
+  onSendText: (text: string) => void;
+  onRecoverFromError?: () => void;
   state: AudioState;
   transcription?: string;
   fallbackMode?: boolean;
 }
 
 export default function VoiceInteraction({ 
-  onMessage, 
+  onStartRecording,
+  onStopRecording,
+  onSendText,
+  onRecoverFromError,
   state, 
   transcription = '',
   fallbackMode = false 
 }: VoiceInteractionProps) {
   const [textInput, setTextInput] = useState("");
 
-  const handleStartRecording = () => {
-    console.log('Start recording');
-    onMessage('voice-recording-started');
-  };
-
-  const handleStopRecording = () => {
-    console.log('Stop recording');
-    onMessage('voice-recording-stopped');
-  };
-
   const handleSendText = () => {
     if (textInput.trim()) {
-      onMessage(textInput.trim());
+      onSendText(textInput.trim());
       setTextInput("");
     }
   };
@@ -56,7 +51,7 @@ export default function VoiceInteraction({
             />
             <Button
               onClick={handleSendText}
-              disabled={!textInput.trim()}
+              disabled={!textInput.trim() || state === 'processing'}
               size="icon"
               className="w-12 h-12 rounded-xl"
               data-testid="button-send-text"
@@ -111,7 +106,7 @@ export default function VoiceInteraction({
           {state === 'idle' && (
             <div className="relative">
               <Button
-                onClick={handleStartRecording}
+                onClick={onStartRecording}
                 size="icon"
                 className="w-20 h-20 rounded-full"
                 data-testid="button-mic"
@@ -124,7 +119,7 @@ export default function VoiceInteraction({
 
           {state === 'recording' && (
             <Button
-              onClick={handleStopRecording}
+              onClick={onStopRecording}
               size="icon"
               variant="destructive"
               className="w-12 h-12 rounded-full"
@@ -134,11 +129,29 @@ export default function VoiceInteraction({
             </Button>
           )}
 
+          {state === 'error' && (
+            <div className="text-center space-y-2">
+              <p className="text-sm text-destructive">Erreur audio</p>
+              <Button
+                onClick={() => {
+                  if (onRecoverFromError) onRecoverFromError();
+                  onStartRecording();
+                }}
+                size="sm"
+                variant="outline"
+                data-testid="button-recover-error"
+              >
+                Réessayer
+              </Button>
+            </div>
+          )}
+
           <p className="text-sm text-muted-foreground text-center">
             {state === 'idle' && 'Appuyez pour parler'}
             {state === 'recording' && 'Enregistrement en cours...'}
             {state === 'processing' && 'Traitement...'}
             {state === 'playing' && 'Peter vous répond...'}
+            {state === 'error' && 'Une erreur est survenue'}
           </p>
         </div>
       </div>

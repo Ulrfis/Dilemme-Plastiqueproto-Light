@@ -1,58 +1,103 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
 import tutorialImage from "@assets/generated_images/Tutorial_analysis_image_85409a9b.png";
 import VoiceInteraction from "./VoiceInteraction";
 import SuccessFeedback from "./SuccessFeedback";
+import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
+import { sendChatMessage, textToSpeech } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface TutorialScreenProps {
+  sessionId: string;
   userName: string;
-  onComplete: (score: number) => void;
+  onComplete: (score: number, foundClues: string[]) => void;
 }
 
-type AudioState = 'idle' | 'recording' | 'processing' | 'playing';
-
-const TARGET_CLUES = ['ADN', 'bébé', 'penseur de Rodin', 'plastique'];
-
-export default function TutorialScreen({ userName, onComplete }: TutorialScreenProps) {
+export default function TutorialScreen({ sessionId, userName, onComplete }: TutorialScreenProps) {
   const [foundClues, setFoundClues] = useState<string[]>([]);
-  const [audioState, setAudioState] = useState<AudioState>('idle');
-  const [transcription, setTranscription] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
   const [lastClue, setLastClue] = useState('');
   const [showHelp, setShowHelp] = useState(false);
+  const [fallbackMode, setFallbackMode] = useState(false);
+  
+  const { toast } = useToast();
+  
+  const {
+    audioState,
+    transcription,
+    startRecording,
+    stopRecording,
+    playAudio,
+    checkMicrophonePermission,
+    recoverFromError,
+  } = useVoiceInteraction();
 
-  const handleMessage = (message: string) => {
-    console.log('User message:', message);
-    
-    setAudioState('processing');
-    
-    setTimeout(() => {
-      const messageLower = message.toLowerCase();
-      let clueFound = false;
-      
-      TARGET_CLUES.forEach(clue => {
-        if (messageLower.includes(clue.toLowerCase()) && !foundClues.includes(clue)) {
-          setFoundClues(prev => [...prev, clue]);
-          setLastClue(clue);
-          setShowSuccess(true);
-          clueFound = true;
-          setTimeout(() => setShowSuccess(false), 3000);
-        }
+  useEffect(() => {
+    checkMicPermission();
+  }, []);
+
+  const checkMicPermission = async () => {
+    const hasPermission = await checkMicrophonePermission();
+    if (!hasPermission) {
+      setFallbackMode(true);
+      toast({
+        title: "Mode texte activé",
+        description: "Le microphone n'est pas disponible. Vous pouvez utiliser le mode texte.",
+        variant: "destructive",
       });
+    }
+  };
 
-      setTranscription(message);
-      setAudioState('playing');
+  const handleStartRecording = async () => {
+    await startRecording();
+  };
+
+  const handleStopRecording = async () => {
+    const text = await stopRecording();
+    if (text) {
+      await processMessage(text);
+    }
+  };
+
+  const handleSendText = async (text: string) => {
+    await processMessage(text);
+  };
+
+  const processMessage = async (userMessage: string) => {
+    try {
+      const result = await sendChatMessage(sessionId, userMessage);
       
-      setTimeout(() => {
-        setAudioState('idle');
-      }, 2000);
-    }, 1000);
+      if (result.detectedClue && !foundClues.includes(result.detectedClue)) {
+        setFoundClues(result.foundClues);
+        setLastClue(result.detectedClue);
+        setShowSuccess(true);
+        setTimeout(() => setShowSuccess(false), 3000);
+      }
+
+      if (!fallbackMode) {
+        try {
+          const audioBlob = await textToSpeech(result.response);
+          await playAudio(audioBlob);
+        } catch (error) {
+          console.error('TTS error, showing text only:', error);
+          recoverFromError();
+        }
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+      recoverFromError();
+      toast({
+        title: "Erreur",
+        description: "Impossible de traiter votre message. Réessayez.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleFinish = () => {
-    onComplete(foundClues.length);
+    onComplete(foundClues.length, foundClues);
   };
 
   return (
@@ -138,9 +183,13 @@ export default function TutorialScreen({ userName, onComplete }: TutorialScreenP
       </div>
 
       <VoiceInteraction
-        onMessage={handleMessage}
+        onStartRecording={handleStartRecording}
+        onStopRecording={handleStopRecording}
+        onSendText={handleSendText}
+        onRecoverFromError={recoverFromError}
         state={audioState}
         transcription={transcription}
+        fallbackMode={fallbackMode}
       />
 
       {showSuccess && <SuccessFeedback clueName={lastClue} />}

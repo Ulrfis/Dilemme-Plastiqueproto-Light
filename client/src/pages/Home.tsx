@@ -4,12 +4,14 @@ import VideoIntro from "@/components/VideoIntro";
 import WelcomeSetup from "@/components/WelcomeSetup";
 import TutorialScreen from "@/components/TutorialScreen";
 import ScoreScreen from "@/components/ScoreScreen";
+import { createSession } from "@/lib/api";
 
 type Screen = 'title' | 'video' | 'welcome' | 'tutorial' | 'score';
 
 export default function Home() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('title');
   const [userName, setUserName] = useState('');
+  const [sessionId, setSessionId] = useState('');
   const [score, setScore] = useState(0);
   const [foundClues, setFoundClues] = useState<string[]>([]);
 
@@ -21,22 +23,48 @@ export default function Home() {
     setCurrentScreen('welcome');
   };
 
-  const handleWelcomeComplete = (name: string) => {
+  const handleWelcomeComplete = async (name: string) => {
     setUserName(name);
-    setCurrentScreen('tutorial');
+    
+    try {
+      const session = await createSession({
+        userName: name,
+        foundClues: [],
+        score: 0,
+        audioMode: 'voice',
+        completed: 0,
+      });
+      
+      setSessionId(session.id);
+      setCurrentScreen('tutorial');
+    } catch (error) {
+      console.error('Failed to create session:', error);
+    }
   };
 
-  const handleTutorialComplete = (finalScore: number) => {
+  const handleTutorialComplete = (finalScore: number, clues: string[]) => {
     setScore(finalScore);
-    const allClues = ['ADN', 'bébé', 'penseur de Rodin', 'plastique'];
-    setFoundClues(allClues.slice(0, finalScore));
+    setFoundClues(clues);
     setCurrentScreen('score');
   };
 
-  const handleReplay = () => {
-    setScore(0);
-    setFoundClues([]);
-    setCurrentScreen('tutorial');
+  const handleReplay = async () => {
+    try {
+      const session = await createSession({
+        userName: userName,
+        foundClues: [],
+        score: 0,
+        audioMode: 'voice',
+        completed: 0,
+      });
+      
+      setSessionId(session.id);
+      setScore(0);
+      setFoundClues([]);
+      setCurrentScreen('tutorial');
+    } catch (error) {
+      console.error('Failed to create new session:', error);
+    }
   };
 
   const handleNextLevel = () => {
@@ -48,8 +76,12 @@ export default function Home() {
       {currentScreen === 'title' && <TitleScreen onStart={handleStart} />}
       {currentScreen === 'video' && <VideoIntro onComplete={handleVideoComplete} />}
       {currentScreen === 'welcome' && <WelcomeSetup onStart={handleWelcomeComplete} />}
-      {currentScreen === 'tutorial' && (
-        <TutorialScreen userName={userName} onComplete={handleTutorialComplete} />
+      {currentScreen === 'tutorial' && sessionId && (
+        <TutorialScreen 
+          sessionId={sessionId}
+          userName={userName} 
+          onComplete={handleTutorialComplete} 
+        />
       )}
       {currentScreen === 'score' && (
         <ScoreScreen

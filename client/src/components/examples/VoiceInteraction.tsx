@@ -5,25 +5,34 @@ export default function VoiceInteractionExample() {
   const [state, setState] = useState<'idle' | 'recording' | 'processing' | 'playing'>('idle');
   const [transcription, setTranscription] = useState('');
 
-  const handleMessage = (msg: string) => {
-    console.log('Message:', msg);
-    if (msg === 'voice-recording-started') {
-      setState('recording');
+  const handleStartRecording = () => {
+    console.log('Start recording');
+    setState('recording');
+    setTimeout(() => {
+      setState('processing');
       setTimeout(() => {
-        setState('processing');
-        setTimeout(() => {
-          setTranscription('Ceci est un test de transcription');
-          setState('playing');
-          setTimeout(() => setState('idle'), 2000);
-        }, 1000);
-      }, 2000);
-    }
+        setTranscription('Ceci est un test de transcription');
+        setState('playing');
+        setTimeout(() => setState('idle'), 2000);
+      }, 1000);
+    }, 2000);
+  };
+
+  const handleStopRecording = () => {
+    console.log('Stop recording');
+    setState('processing');
+  };
+
+  const handleSendText = (text: string) => {
+    console.log('Text message:', text);
   };
 
   return (
     <div className="min-h-screen bg-background">
       <VoiceInteraction 
-        onMessage={handleMessage}
+        onStartRecording={handleStartRecording}
+        onStopRecording={handleStopRecording}
+        onSendText={handleSendText}
         state={state}
         transcription={transcription}
       />
