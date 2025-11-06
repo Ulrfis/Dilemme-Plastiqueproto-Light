@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import logoImage from "@assets/generated_images/Dilemme_app_logo_f1e850c1.png";
+import logoImage from "@assets/PlaceDesNations_Dilemme_1762433446634.png";
 
 interface TitleScreenProps {
   onStart: () => void;
@@ -12,8 +12,8 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
         <div className="flex flex-col items-center space-y-4">
           <img 
             src={logoImage} 
-            alt="Dilemme Logo" 
-            className="w-32 h-32 object-contain animate-scale-in"
+            alt="Place des Nations - Dilemme Plastique" 
+            className="w-64 h-40 object-cover rounded-lg shadow-lg animate-scale-in"
           />
           <h1 className="font-heading text-5xl font-bold text-center bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent">
             Dilemme Plastique
