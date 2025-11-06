@@ -21,6 +21,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [lastClue, setLastClue] = useState('');
   const [showHelp, setShowHelp] = useState(false);
   const [fallbackMode, setFallbackMode] = useState(false);
+  const [lastAssistantMessage, setLastAssistantMessage] = useState('');
   
   const { toast } = useToast();
   
@@ -69,6 +70,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     try {
       const result = await sendChatMessage(sessionId, userMessage);
       
+      // Store assistant response to display it
+      setLastAssistantMessage(result.response);
+      setTimeout(() => setLastAssistantMessage(''), 8000);
+      
       if (result.detectedClue && !foundClues.includes(result.detectedClue)) {
         setFoundClues(result.foundClues);
         setLastClue(result.detectedClue);
@@ -101,11 +106,25 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   };
 
   return (
-    <div className="min-h-screen flex flex-col pb-64">
-      <header className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border px-4 py-4 flex items-center justify-between">
+    <div className="relative min-h-screen flex flex-col">
+      {/* Image plein écran en arrière-plan */}
+      <div className="absolute inset-0 z-0">
+        <img 
+          src={tutorialImage} 
+          alt="Image à analyser" 
+          className="w-full h-full object-cover select-none"
+          draggable={false}
+          data-testid="img-tutorial"
+        />
+        {/* Overlay sombre pour lisibilité */}
+        <div className="absolute inset-0 bg-black/30" />
+      </div>
+
+      {/* Header avec compteur */}
+      <header className="relative z-10 bg-black/50 backdrop-blur-sm px-4 py-4 flex items-center justify-between">
         <Badge 
           variant="secondary" 
-          className="text-lg px-4 py-2 rounded-full"
+          className="text-lg px-4 py-2 rounded-full bg-background/90"
           data-testid="badge-clue-counter"
         >
           <span className="font-bold text-primary">{foundClues.length}</span>
@@ -116,7 +135,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           size="icon"
           variant="ghost"
           onClick={() => setShowHelp(!showHelp)}
-          className="w-10 h-10"
+          className="w-10 h-10 bg-background/90 hover:bg-background"
           data-testid="button-help"
         >
           <HelpCircle className="w-5 h-5" />
@@ -124,73 +143,69 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       </header>
 
       {showHelp && (
-        <div className="bg-muted/50 border-b border-border px-4 py-4 animate-slide-up">
-          <p className="text-sm text-muted-foreground">
+        <div className="relative z-10 bg-black/70 backdrop-blur px-4 py-4 animate-slide-up">
+          <p className="text-sm text-white">
             Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
           </p>
         </div>
       )}
 
-      <div className="flex-1 flex flex-col items-center justify-start p-4 space-y-6">
-        <div className="w-full max-w-2xl space-y-4">
-          <div className="text-center space-y-1">
-            <h2 className="text-2xl font-bold">Bonjour {userName}!</h2>
-            <p className="text-muted-foreground">
-              Que voyez-vous dans cette image?
+      {/* Contenu central - réponse de Peter et indices */}
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-end p-4 pb-72 space-y-4">
+        {/* Réponse de l'assistant */}
+        {lastAssistantMessage && (
+          <div className="w-full max-w-md bg-black/80 backdrop-blur-md rounded-2xl p-4 animate-slide-up">
+            <p className="text-sm font-medium text-white/70 mb-2">Peter dit:</p>
+            <p className="text-base text-white" data-testid="text-assistant-message">
+              {lastAssistantMessage}
             </p>
           </div>
+        )}
 
-          <div className="relative rounded-xl overflow-hidden shadow-lg">
-            <img 
-              src={tutorialImage} 
-              alt="Image à analyser" 
-              className="w-full h-auto select-none"
-              draggable={false}
-              data-testid="img-tutorial"
-            />
-          </div>
-
-          {foundClues.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Indices trouvés:</p>
-              <div className="flex flex-wrap gap-2">
-                {foundClues.map((clue, index) => (
-                  <Badge 
-                    key={index} 
-                    variant="default" 
-                    className="animate-scale-in"
-                    data-testid={`badge-clue-${index}`}
-                  >
-                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                    {clue}
-                  </Badge>
-                ))}
-              </div>
+        {/* Indices trouvés */}
+        {foundClues.length > 0 && (
+          <div className="w-full max-w-md bg-black/70 backdrop-blur-md rounded-2xl p-4 space-y-2">
+            <p className="text-sm font-medium text-white">Indices trouvés:</p>
+            <div className="flex flex-wrap gap-2">
+              {foundClues.map((clue, index) => (
+                <Badge 
+                  key={index} 
+                  variant="default" 
+                  className="animate-scale-in bg-primary/90"
+                  data-testid={`badge-clue-${index}`}
+                >
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  {clue}
+                </Badge>
+              ))}
             </div>
-          )}
-
-          {foundClues.length >= 2 && (
-            <Button
-              onClick={handleFinish}
-              variant="outline"
-              className="w-full rounded-xl"
-              data-testid="button-finish"
-            >
-              Terminer le niveau
-            </Button>
-          )}
-        </div>
+            
+            {foundClues.length >= 2 && (
+              <Button
+                onClick={handleFinish}
+                variant="outline"
+                className="w-full rounded-xl mt-2 bg-background/90 hover:bg-background"
+                data-testid="button-finish"
+              >
+                Terminer le niveau
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
-      <VoiceInteraction
-        onStartRecording={handleStartRecording}
-        onStopRecording={handleStopRecording}
-        onSendText={handleSendText}
-        onRecoverFromError={recoverFromError}
-        state={audioState}
-        transcription={transcription}
-        fallbackMode={fallbackMode}
-      />
+      {/* Contrôles vocaux superposés sur l'image */}
+      <div className="relative z-20">
+        <VoiceInteraction
+          onStartRecording={handleStartRecording}
+          onStopRecording={handleStopRecording}
+          onSendText={handleSendText}
+          onRecoverFromError={recoverFromError}
+          state={audioState}
+          transcription={transcription}
+          fallbackMode={fallbackMode}
+        />
+      </div>
 
       {showSuccess && <SuccessFeedback clueName={lastClue} />}
     </div>
