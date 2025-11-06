@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
-import tutorialImage from "@assets/generated_images/Tutorial_analysis_image_85409a9b.png";
+import tutorialImage from "@assets/PlaceDesNations_Dilemme_1762432136623.png";
 import VoiceInteraction from "./VoiceInteraction";
 import SuccessFeedback from "./SuccessFeedback";
 import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
