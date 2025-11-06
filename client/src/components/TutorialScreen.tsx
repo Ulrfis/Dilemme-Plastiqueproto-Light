@@ -35,24 +35,31 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     recoverFromError,
   } = useVoiceInteraction();
 
+  // Auto-switch to text mode when audio error occurs
   useEffect(() => {
-    checkMicPermission();
-  }, []);
-
-  const checkMicPermission = async () => {
-    const hasPermission = await checkMicrophonePermission();
-    if (!hasPermission) {
+    if (audioState === 'error' && !fallbackMode) {
       setFallbackMode(true);
       toast({
         title: "Mode texte activé",
-        description: "Le microphone n'est pas disponible. Vous pouvez utiliser le mode texte.",
+        description: "Le microphone n'est pas disponible. Utilisez le mode texte.",
+        variant: "default",
+      });
+      recoverFromError();
+    }
+  }, [audioState, fallbackMode, toast, recoverFromError]);
+
+  const handleStartRecording = async () => {
+    try {
+      await startRecording();
+    } catch (error) {
+      console.error('Recording start error:', error);
+      setFallbackMode(true);
+      toast({
+        title: "Mode texte activé",
+        description: "Impossible d'accéder au microphone. Utilisez le mode texte.",
         variant: "destructive",
       });
     }
-  };
-
-  const handleStartRecording = async () => {
-    await startRecording();
   };
 
   const handleStopRecording = async () => {
