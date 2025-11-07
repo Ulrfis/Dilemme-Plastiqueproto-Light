@@ -33,7 +33,9 @@ export function useVoiceInteraction(): UseVoiceInteractionResult {
   }, []);
 
   const startRecording = useCallback(async () => {
+    console.log('[useVoiceInteraction] startRecording called');
     try {
+      console.log('[useVoiceInteraction] Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
@@ -41,25 +43,30 @@ export function useVoiceInteraction(): UseVoiceInteractionResult {
           sampleRate: 44100,
         }
       });
+      console.log('[useVoiceInteraction] Microphone access granted, stream:', stream);
 
       audioChunksRef.current = [];
       
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: 'audio/webm',
       });
+      console.log('[useVoiceInteraction] MediaRecorder created');
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
+          console.log('[useVoiceInteraction] Audio chunk received:', event.data.size, 'bytes');
         }
       };
 
       mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
       setAudioState('recording');
+      console.log('[useVoiceInteraction] Recording started successfully');
     } catch (error) {
-      console.error('Error starting recording:', error);
+      console.error('[useVoiceInteraction] Error starting recording:', error);
       setAudioState('error');
+      throw error;
     }
   }, []);
 

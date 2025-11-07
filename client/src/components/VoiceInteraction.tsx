@@ -106,14 +106,17 @@ export default function VoiceInteraction({
           {state === 'idle' && (
             <div className="relative">
               <Button
-                onClick={onStartRecording}
+                onClick={() => {
+                  console.log('[VoiceInteraction] Mic button clicked!');
+                  onStartRecording();
+                }}
                 size="icon"
                 className="w-20 h-20 rounded-full"
                 data-testid="button-mic"
               >
                 <Mic className="w-8 h-8" />
               </Button>
-              <div className="absolute inset-0 rounded-full border-2 border-primary/30 animate-pulse-ring" />
+              <div className="absolute inset-0 rounded-full border-2 border-primary/30 animate-pulse-ring pointer-events-none" />
             </div>
           )}
 

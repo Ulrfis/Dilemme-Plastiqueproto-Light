@@ -5,6 +5,7 @@ import { HelpCircle, CheckCircle2 } from "lucide-react";
 import tutorialImage from "@assets/PlaceDesNations_Dilemme_1762432136623.png";
 import VoiceInteraction from "./VoiceInteraction";
 import SuccessFeedback from "./SuccessFeedback";
+import ZoomableImage from "./ZoomableImage";
 import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
 import { sendChatMessage, textToSpeech } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -49,10 +50,13 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   }, [audioState, fallbackMode, toast, recoverFromError]);
 
   const handleStartRecording = async () => {
+    console.log('[TutorialScreen] handleStartRecording called');
     try {
+      console.log('[TutorialScreen] Calling startRecording...');
       await startRecording();
+      console.log('[TutorialScreen] startRecording completed successfully');
     } catch (error) {
-      console.error('Recording start error:', error);
+      console.error('[TutorialScreen] Recording start error:', error);
       setFallbackMode(true);
       toast({
         title: "Mode texte activé",
@@ -114,17 +118,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   return (
     <div className="relative min-h-screen flex flex-col">
-      {/* Image plein écran en arrière-plan */}
+      {/* Image plein écran zoomable en arrière-plan */}
       <div className="absolute inset-0 z-0">
-        <img 
+        <ZoomableImage 
           src={tutorialImage} 
-          alt="Image à analyser" 
-          className="w-full h-full object-cover select-none"
-          draggable={false}
-          data-testid="img-tutorial"
+          alt="Image à analyser"
         />
         {/* Overlay sombre pour lisibilité */}
-        <div className="absolute inset-0 bg-black/30" />
+        <div className="absolute inset-0 bg-black/30 pointer-events-none" />
       </div>
 
       {/* Header avec compteur */}
