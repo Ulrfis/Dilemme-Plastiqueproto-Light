@@ -159,10 +159,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       )}
 
       {/* Contenu central - réponse de Peter et indices */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-end p-4 pb-72 space-y-4">
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-end p-4 pb-72 space-y-4 pointer-events-none">
         {/* Réponse de l'assistant */}
         {lastAssistantMessage && (
-          <div className="w-full max-w-md bg-black/80 backdrop-blur-md rounded-2xl p-4 animate-slide-up">
+          <div className="w-full max-w-md bg-black/80 backdrop-blur-md rounded-2xl p-4 animate-slide-up pointer-events-auto">
             <p className="text-sm font-medium text-white/70 mb-2">Peter dit:</p>
             <p className="text-base text-white" data-testid="text-assistant-message">
               {lastAssistantMessage}
@@ -172,7 +172,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
         {/* Indices trouvés */}
         {foundClues.length > 0 && (
-          <div className="w-full max-w-md bg-black/70 backdrop-blur-md rounded-2xl p-4 space-y-2">
+          <div className="w-full max-w-md bg-black/70 backdrop-blur-md rounded-2xl p-4 space-y-2 pointer-events-auto">
             <p className="text-sm font-medium text-white">Indices trouvés:</p>
             <div className="flex flex-wrap gap-2">
               {foundClues.map((clue, index) => (
