@@ -2,6 +2,10 @@ import { useState, useRef, useCallback } from 'react';
 
 export type AudioState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
 
+interface UseVoiceInteractionOptions {
+  onAudioStart?: () => void;
+}
+
 interface UseVoiceInteractionResult {
   audioState: AudioState;
   transcription: string;
@@ -14,7 +18,8 @@ interface UseVoiceInteractionResult {
   recoverFromError: () => void;
 }
 
-export function useVoiceInteraction(): UseVoiceInteractionResult {
+export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVoiceInteractionResult {
+  const { onAudioStart } = options || {};
   const [audioState, setAudioState] = useState<AudioState>('idle');
   const [transcription, setTranscription] = useState('');
   
@@ -134,13 +139,22 @@ export function useVoiceInteraction(): UseVoiceInteractionResult {
         reject(error);
       };
 
+      // Appeler onAudioStart quand l'audio commence VRAIMENT à jouer
+      // Cet événement se déclenche après que play() réussit
+      audio.onplaying = () => {
+        console.log('[useVoiceInteraction] Audio started playing, calling onAudioStart');
+        if (onAudioStart) {
+          onAudioStart();
+        }
+      };
+
       audio.play().catch((error) => {
         console.error('Error playing audio:', error);
         setAudioState('error');
         reject(error);
       });
     });
-  }, []);
+  }, [onAudioStart]);
 
   // Fonction pour arrêter immédiatement la lecture audio de Peter
   const stopAudio = useCallback(() => {

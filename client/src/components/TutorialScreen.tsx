@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
@@ -29,6 +29,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [fallbackMode, setFallbackMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [textInput, setTextInput] = useState('');
+  const [pendingAssistantMessage, setPendingAssistantMessage] = useState<string | null>(null);
 
   const { toast } = useToast();
 
@@ -40,6 +41,16 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     }]);
   }, [userName]);
   
+  // Callback appelé juste avant que l'audio commence à jouer
+  // C'est le moment parfait pour ajouter le message de Peter au tableau
+  const handleAudioStart = useCallback(() => {
+    if (pendingAssistantMessage) {
+      console.log('[TutorialScreen] Audio starting, adding assistant message now for typewriter sync');
+      setMessages(prev => [...prev, { role: 'assistant', content: pendingAssistantMessage }]);
+      setPendingAssistantMessage(null);
+    }
+  }, [pendingAssistantMessage]);
+
   const {
     audioState,
     transcription,
@@ -49,20 +60,32 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     stopAudio,
     checkMicrophonePermission,
     recoverFromError,
-  } = useVoiceInteraction();
+  } = useVoiceInteraction({ onAudioStart: handleAudioStart });
 
-  // Auto-switch to text mode when audio error occurs
-  useEffect(() => {
-    if (audioState === 'error' && !fallbackMode) {
-      setFallbackMode(true);
-      toast({
-        title: "Mode texte activé",
-        description: "Le microphone n'est pas disponible. Utilisez le mode texte.",
-        variant: "default",
-      });
-      recoverFromError();
+  // Fonction helper pour appeler le TTS avec retry automatique
+  const textToSpeechWithRetry = async (text: string, maxRetries = 2): Promise<Blob> => {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[TutorialScreen] TTS attempt ${attempt + 1}/${maxRetries + 1}`);
+        const audioBlob = await textToSpeech(text);
+        console.log('[TutorialScreen] TTS successful');
+        return audioBlob;
+      } catch (error) {
+        lastError = error as Error;
+        console.warn(`[TutorialScreen] TTS attempt ${attempt + 1} failed:`, error);
+        
+        // Petit délai avant retry sauf au dernier essai
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
     }
-  }, [audioState, fallbackMode, toast, recoverFromError]);
+    
+    // Tous les essais ont échoué
+    throw lastError || new Error('TTS failed after retries');
+  };
 
   // Fonction pour interrompre Peter et permettre à l'utilisateur de parler
   const handleInterruptPeter = () => {
@@ -88,12 +111,28 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       console.log('[TutorialScreen] startRecording completed successfully');
     } catch (error) {
       console.error('[TutorialScreen] Recording start error:', error);
-      setFallbackMode(true);
-      toast({
-        title: "Mode texte activé",
-        description: "Impossible d'accéder au microphone. Utilisez le mode texte.",
-        variant: "destructive",
-      });
+      
+      // Vérifier si c'est une erreur de permission définitive
+      const errorMessage = error instanceof Error ? error.message : '';
+      const isPermissionDenied = errorMessage.includes('denied') || errorMessage.includes('permission');
+      
+      if (isPermissionDenied) {
+        // Seulement basculer en fallbackMode si permissions refusées définitivement
+        setFallbackMode(true);
+        toast({
+          title: "Mode texte activé",
+          description: "Permissions microphone refusées. Utilisez le mode texte.",
+          variant: "default",
+        });
+      } else {
+        // Erreur temporaire, afficher un message mais garder le mode vocal
+        toast({
+          title: "Erreur temporaire",
+          description: "Veuillez réessayer d'appuyer sur le microphone.",
+          variant: "default",
+        });
+        recoverFromError();
+      }
     }
   };
 
@@ -114,9 +153,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
 
       const result = await sendChatMessage(sessionId, userMessage);
-
-      // NE PAS ajouter la réponse de l'assistant tout de suite
-      // On l'ajoutera juste avant de jouer la voix pour synchroniser le typewriter
 
       // Détecter les NOUVEAUX indices en comparant avec l'état actuel
       const previousClues = foundClues;
@@ -139,20 +175,31 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       // Toujours jouer le TTS si on n'est pas en fallback mode
       if (!fallbackMode) {
         try {
-          console.log('[TutorialScreen] Generating TTS for response...');
-          const audioBlob = await textToSpeech(result.response);
-          console.log('[TutorialScreen] TTS generated, playing audio...');
+          console.log('[TutorialScreen] Generating TTS for response with retry...');
+          const audioBlob = await textToSpeechWithRetry(result.response);
+          console.log('[TutorialScreen] TTS generated successfully');
 
-          // AJOUTER le message de l'assistant JUSTE AVANT de jouer la voix
-          // Ainsi le typewriter se synchronisera avec la voix
-          setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
+          // Stocker le message en attente - il sera ajouté au tableau quand l'audio démarre
+          // via le callback handleAudioStart, synchronisant parfaitement le typewriter avec la voix
+          setPendingAssistantMessage(result.response);
 
           await playAudio(audioBlob);
           console.log('[TutorialScreen] Audio playback completed');
         } catch (error) {
-          console.error('TTS error, showing text only:', error);
-          // En cas d'erreur, afficher quand même le message
+          console.error('TTS failed after all retries, showing text only:', error);
+          
+          // Afficher un toast informatif (pas d'erreur destructive)
+          toast({
+            title: "Voix temporairement indisponible",
+            description: "La réponse de Peter s'affiche en texte. Le mode vocal reste actif.",
+            variant: "default",
+          });
+          
+          // Afficher le message immédiatement en mode texte pour cette réponse seulement
           setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
+          setPendingAssistantMessage(null);
+          
+          // NE PAS activer fallbackMode - garder le mode vocal pour les prochains échanges
         }
       } else {
         // En mode texte, afficher le message immédiatement

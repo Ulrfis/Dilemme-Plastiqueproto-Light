@@ -26,7 +26,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
           // Tenter de verrouiller en mode paysage (si disponible)
           if (screen.orientation && 'lock' in screen.orientation) {
             try {
-              await screen.orientation.lock('landscape');
+              await (screen.orientation.lock as any)('landscape');
               console.log('[VideoIntro] Screen locked to landscape');
             } catch (err) {
               console.log('[VideoIntro] Could not lock orientation:', err);
