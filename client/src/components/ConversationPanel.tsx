@@ -113,15 +113,7 @@ export default function ConversationPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Zone de transcription temporaire */}
-      {transcription && (
-        <div className="px-4 pb-2">
-          <div className="bg-muted/80 backdrop-blur-sm rounded-xl p-3 animate-slide-up">
-            <p className="text-xs text-muted-foreground mb-1">Vous avez dit:</p>
-            <p className="text-sm" data-testid="text-transcription">{transcription}</p>
-          </div>
-        </div>
-      )}
+      {/* Zone de transcription temporaire - ENLEVÉE */}
 
       {/* Zone d'input et contrôles */}
       <div className="px-4 pb-4 pt-2">
