@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
@@ -29,7 +29,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [fallbackMode, setFallbackMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [textInput, setTextInput] = useState('');
-  const [pendingAssistantMessage, setPendingAssistantMessage] = useState<string | null>(null);
+  
+  // Utiliser une ref au lieu d'un state pour éviter les problèmes de stale closure
+  // Le callback handleAudioStart sera stable et lira toujours la dernière valeur
+  const pendingAssistantMessageRef = useRef<string | null>(null);
 
   const { toast } = useToast();
 
@@ -41,15 +44,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     }]);
   }, [userName]);
   
-  // Callback appelé juste avant que l'audio commence à jouer
-  // C'est le moment parfait pour ajouter le message de Peter au tableau
+  // Callback appelé quand l'audio commence VRAIMENT à jouer (via audio.onplaying)
+  // Utilise une ref pour éviter les stale closures - le callback reste stable
   const handleAudioStart = useCallback(() => {
-    if (pendingAssistantMessage) {
-      console.log('[TutorialScreen] Audio starting, adding assistant message now for typewriter sync');
-      setMessages(prev => [...prev, { role: 'assistant', content: pendingAssistantMessage }]);
-      setPendingAssistantMessage(null);
+    if (pendingAssistantMessageRef.current) {
+      console.log('[TutorialScreen] Audio started playing, adding assistant message for typewriter sync');
+      setMessages(prev => [...prev, { role: 'assistant', content: pendingAssistantMessageRef.current! }]);
+      pendingAssistantMessageRef.current = null;
     }
-  }, [pendingAssistantMessage]);
+  }, []); // Pas de dépendances - le callback ne change jamais
 
   const {
     audioState,
@@ -93,6 +96,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     // Arrêter immédiatement la lecture audio de Peter
     stopAudio();
+    
+    // Nettoyer le message en attente pour éviter qu'il s'affiche plus tard
+    pendingAssistantMessageRef.current = null;
 
     console.log('[TutorialScreen] Peter interrupted, user can now speak');
   };
@@ -192,9 +198,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           const audioBlob = await textToSpeechWithRetry(result.response);
           console.log('[TutorialScreen] TTS generated successfully');
 
-          // Stocker le message en attente - il sera ajouté au tableau quand l'audio démarre
+          // Stocker le message en attente dans la ref - il sera ajouté au tableau quand l'audio démarre
           // via le callback handleAudioStart, synchronisant parfaitement le typewriter avec la voix
-          setPendingAssistantMessage(result.response);
+          pendingAssistantMessageRef.current = result.response;
 
           await playAudio(audioBlob);
           console.log('[TutorialScreen] Audio playback completed');
@@ -210,7 +216,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           
           // Afficher le message immédiatement en mode texte pour cette réponse seulement
           setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
-          setPendingAssistantMessage(null);
+          pendingAssistantMessageRef.current = null;
           
           // NE PAS activer fallbackMode - garder le mode vocal pour les prochains échanges
         }
