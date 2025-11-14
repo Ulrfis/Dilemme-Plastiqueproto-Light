@@ -6,24 +6,22 @@ interface VideoIntroProps {
 }
 
 export default function VideoIntro({ onComplete }: VideoIntroProps) {
-  // URL de la vidéo Gumlet
+  // URL de la vidéo Gumlet avec autoplay
   const videoId = "65562242f2825d5b7aca4366";
-  const embedUrl = `https://play.gumlet.io/embed/${videoId}`;
+  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true`;
 
   return (
-    <div className="fixed inset-0 bg-black z-50 flex items-center justify-center">
-      {/* Player Gumlet avec iframe */}
-      <div className="w-full h-full">
-        <iframe
-          src={embedUrl}
-          title="Vidéo d'introduction"
-          className="w-full h-full"
-          frameBorder="0"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-          data-testid="video-intro"
-        />
-      </div>
+    <div className="fixed inset-0 bg-black z-50">
+      {/* Player Gumlet en plein écran */}
+      <iframe
+        src={embedUrl}
+        title="Vidéo d'introduction"
+        className="absolute inset-0 w-full h-full border-0"
+        frameBorder="0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+        allowFullScreen
+        data-testid="video-intro"
+      />
 
       {/* Bouton skip en haut à droite */}
       <Button

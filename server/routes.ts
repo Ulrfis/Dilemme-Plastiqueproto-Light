@@ -116,7 +116,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-      const VOICE_ID = 'ErXwobaYiN019PkySvjV';
+      const VOICE_ID = 'CBP9p4KAWPqrMHTDtWPR'; // Peter mai 2025 FR
 
       if (!ELEVENLABS_API_KEY) {
         return res.status(500).json({ error: 'ElevenLabs API key not configured' });
@@ -174,35 +174,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
         detectedClue: detectedClue || undefined,
       });
 
+      // Use OpenAI Assistant API with the specified assistant ID
+      const ASSISTANT_ID = 'asst_vh6vk5M5izsuBYGDubIJOUwI';
+
+      // Create a thread for this conversation
+      const thread = await openai.beta.threads.create();
+
+      // Get recent messages from storage to provide context
       const messages = await storage.getSessionMessages(sessionId);
-      
-      const systemPrompt = `Tu es Peter, un assistant IA éducatif amical qui aide les étudiants à analyser une image contenant 4 indices cachés: ADN, bébé, penseur de Rodin, et plastique/pollution.
+      const contextMessages = messages.slice(-6);
 
-Indices déjà trouvés: ${session.foundClues.join(', ') || 'aucun'}
+      // Add context and current message to the thread
+      // Include found clues as context
+      const contextPrompt = `Indices déjà trouvés: ${session.foundClues.join(', ') || 'aucun'}`;
 
-Règles:
-- Réponds en 1-2 phrases courtes et encourageantes en français
-- Si l'utilisateur mentionne un indice non trouvé, félicite-le avec enthousiasme
-- Guide l'utilisateur avec des questions ouvertes sans donner directement les réponses
-- Sois chaleureux et positif
-- Ne mentionne jamais les indices non trouvés directement`;
-
-      const chatMessages = [
-        { role: 'system' as const, content: systemPrompt },
-        ...messages.slice(-6).map(msg => ({
-          role: msg.role as 'user' | 'assistant',
-          content: msg.content
-        }))
-      ];
-
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: chatMessages,
-        max_tokens: 150,
-        temperature: 0.7,
+      // Add context message
+      await openai.beta.threads.messages.create(thread.id, {
+        role: 'user',
+        content: `${contextPrompt}\n\nHistorique récent:\n${contextMessages.map(m => `${m.role}: ${m.content}`).join('\n')}\n\nMessage actuel: ${userMessage}`
       });
 
-      const assistantResponse = completion.choices[0]?.message?.content || "Je n'ai pas compris, peux-tu reformuler?";
+      // Run the assistant
+      const run = await openai.beta.threads.runs.create(thread.id, {
+        assistant_id: ASSISTANT_ID,
+      });
+
+      // Poll for completion
+      let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      let attempts = 0;
+      const maxAttempts = 30; // 30 seconds max wait
+
+      while (runStatus.status !== 'completed' && attempts < maxAttempts) {
+        if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
+          throw new Error(`Assistant run failed with status: ${runStatus.status}`);
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+        attempts++;
+      }
+
+      if (runStatus.status !== 'completed') {
+        throw new Error('Assistant run timeout');
+      }
+
+      // Get the assistant's response
+      const threadMessages = await openai.beta.threads.messages.list(thread.id);
+      const assistantMessage = threadMessages.data.find(msg => msg.role === 'assistant');
+
+      let assistantResponse = "Je n'ai pas compris, peux-tu reformuler?";
+      if (assistantMessage && assistantMessage.content[0]?.type === 'text') {
+        assistantResponse = assistantMessage.content[0].text.value;
+      }
 
       await storage.addMessage({
         sessionId,
