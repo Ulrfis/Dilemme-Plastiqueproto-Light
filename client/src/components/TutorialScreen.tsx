@@ -24,7 +24,7 @@ interface TutorialScreenProps {
 export default function TutorialScreen({ sessionId, userName, onComplete }: TutorialScreenProps) {
   const [foundClues, setFoundClues] = useState<string[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [lastClue, setLastClue] = useState('');
+  const [newClues, setNewClues] = useState<string[]>([]);
   const [showHelp, setShowHelp] = useState(false);
   const [fallbackMode, setFallbackMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -101,25 +101,32 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       // Ajouter la réponse de l'assistant
       setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
 
-      if (result.detectedClue && !foundClues.includes(result.detectedClue)) {
+      // Détecter les NOUVEAUX indices en comparant avec l'état actuel
+      const previousClues = foundClues;
+      const detectedNewClues = result.foundClues.filter(clue => !previousClues.includes(clue));
+
+      if (detectedNewClues.length > 0) {
         setFoundClues(result.foundClues);
-        setLastClue(result.detectedClue);
+        setNewClues(detectedNewClues);
         setShowSuccess(true);
         setTimeout(() => setShowSuccess(false), 3000);
       }
 
+      // Toujours jouer le TTS si on n'est pas en fallback mode
       if (!fallbackMode) {
         try {
+          console.log('[TutorialScreen] Generating TTS for response...');
           const audioBlob = await textToSpeech(result.response);
+          console.log('[TutorialScreen] TTS generated, playing audio...');
           await playAudio(audioBlob);
+          console.log('[TutorialScreen] Audio playback completed');
         } catch (error) {
           console.error('TTS error, showing text only:', error);
-          recoverFromError();
+          // Ne pas appeler recoverFromError ici car cela peut bloquer le TTS futur
         }
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      recoverFromError();
       toast({
         title: "Erreur",
         description: "Impossible de traiter votre message. Réessayez.",
@@ -223,7 +230,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         />
       </div>
 
-      {showSuccess && <SuccessFeedback clueName={lastClue} />}
+      {showSuccess && <SuccessFeedback clueNames={newClues} />}
     </div>
   );
 }
