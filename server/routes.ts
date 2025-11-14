@@ -69,8 +69,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         score: z.number().int().min(0).max(4).optional(),
         audioMode: z.enum(['voice', 'text']).optional(),
         completed: z.number().int().min(0).max(1).optional(),
+        threadId: z.string().optional().nullable(),
       });
-      
+
       const updates = updateSchema.parse(req.body);
       const session = await storage.updateSession(req.params.id, updates);
       if (!session) {
@@ -194,49 +195,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ASSISTANT_ID = 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9';
       console.log('[Chat API] Using OpenAI Assistant:', ASSISTANT_ID);
 
-      // Create a thread for this conversation
-      console.log('[Chat API] Creating thread...');
-      const thread = await openai.beta.threads.create();
-      console.log('[Chat API] Thread created:', thread.id);
+      // Réutiliser le thread existant ou en créer un nouveau
+      let threadId = session.threadId;
 
-      // Get recent messages from storage to provide context
-      const messages = await storage.getSessionMessages(sessionId);
-      const contextMessages = messages.slice(-6);
+      if (!threadId) {
+        console.log('[Chat API] Creating new thread for session...');
+        const thread = await openai.beta.threads.create();
+        threadId = thread.id;
 
-      // Add context and current message to the thread
-      // Include found clues as context
-      const contextPrompt = `Indices déjà trouvés: ${session.foundClues.join(', ') || 'aucun'}`;
+        // Sauvegarder le threadId dans la session
+        await storage.updateSession(sessionId, { threadId });
+        console.log('[Chat API] Thread created and saved:', threadId);
 
-      // Add context message
-      console.log('[Chat API] Adding message to thread...');
-      await openai.beta.threads.messages.create(thread.id, {
-        role: 'user',
-        content: `${contextPrompt}\n\nHistorique récent:\n${contextMessages.map(m => `${m.role}: ${m.content}`).join('\n')}\n\nMessage actuel: ${userMessage}`
-      });
+        // Premier message : ajouter le contexte initial
+        const contextPrompt = `Indices déjà trouvés: ${session.foundClues.join(', ') || 'aucun'}`;
+        await openai.beta.threads.messages.create(threadId, {
+          role: 'user',
+          content: `${contextPrompt}\n\n${userMessage}`
+        });
+      } else {
+        console.log('[Chat API] Reusing existing thread:', threadId);
+
+        // Messages suivants : juste ajouter le message utilisateur
+        // Le thread garde déjà tout le contexte
+        await openai.beta.threads.messages.create(threadId, {
+          role: 'user',
+          content: userMessage
+        });
+      }
 
       // Run the assistant
-      console.log('[Chat API] Running assistant...', { assistantId: ASSISTANT_ID, threadId: thread.id });
-      const run = await openai.beta.threads.runs.create(thread.id, {
+      console.log('[Chat API] Running assistant...', { assistantId: ASSISTANT_ID, threadId });
+      const run = await openai.beta.threads.runs.create(threadId, {
         assistant_id: ASSISTANT_ID,
       });
-      console.log('[Chat API] Run started:', { runId: run.id, threadId: thread.id, status: run.status });
+      console.log('[Chat API] Run started:', { runId: run.id, threadId, status: run.status });
 
-      // Poll for completion
-      let runStatus = await openai.beta.threads.runs.retrieve(run.id, { thread_id: thread.id });
+      // Poll for completion avec délai réduit pour meilleure réactivité
+      let runStatus = await openai.beta.threads.runs.retrieve(run.id, { thread_id: threadId });
       let attempts = 0;
-      const maxAttempts = 30; // 30 seconds max wait
+      const maxAttempts = 100; // 100 attempts x 200ms = 20 seconds max
+      const pollDelay = 200; // 200ms au lieu de 1000ms pour 5x plus de réactivité
 
-      console.log('[Chat API] Initial run status:', { 
-        runId: run.id, 
-        threadId: thread.id, 
+      console.log('[Chat API] Initial run status:', {
+        runId: run.id,
+        threadId,
         status: runStatus.status,
-        assistantId: runStatus.assistant_id 
+        assistantId: runStatus.assistant_id
       });
 
       while (runStatus.status !== 'completed' && attempts < maxAttempts) {
         console.log(`[Chat API] Polling run status (attempt ${attempts + 1}/${maxAttempts}):`, {
           runId: run.id,
-          threadId: thread.id,
+          threadId,
           status: runStatus.status
         });
 
@@ -244,16 +255,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const errorDetails = {
             status: runStatus.status,
             runId: run.id,
-            threadId: thread.id,
+            threadId,
             assistantId: ASSISTANT_ID,
             lastError: runStatus.last_error
           };
           console.error('[Chat API] Assistant run failed:', errorDetails);
-          throw new Error(`Assistant run failed - Status: ${runStatus.status}, Run ID: ${run.id}, Thread ID: ${thread.id}, Error: ${JSON.stringify(runStatus.last_error)}`);
+          throw new Error(`Assistant run failed - Status: ${runStatus.status}, Run ID: ${run.id}, Thread ID: ${threadId}, Error: ${JSON.stringify(runStatus.last_error)}`);
         }
 
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-        runStatus = await openai.beta.threads.runs.retrieve(run.id, { thread_id: thread.id });
+        await new Promise(resolve => setTimeout(resolve, pollDelay));
+        runStatus = await openai.beta.threads.runs.retrieve(run.id, { thread_id: threadId });
         attempts++;
       }
 
@@ -263,21 +274,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           maxAttempts,
           finalStatus: runStatus.status,
           runId: run.id,
-          threadId: thread.id,
+          threadId,
           assistantId: ASSISTANT_ID
         };
         console.error('[Chat API] Assistant run timeout:', timeoutDetails);
-        throw new Error(`Assistant run timeout après ${attempts} tentatives - Status: ${runStatus.status}, Run ID: ${run.id}, Thread ID: ${thread.id}`);
+        throw new Error(`Assistant run timeout après ${attempts} tentatives - Status: ${runStatus.status}, Run ID: ${run.id}, Thread ID: ${threadId}`);
       }
 
-      console.log('[Chat API] Run completed successfully:', { 
-        runId: run.id, 
-        threadId: thread.id,
-        totalAttempts: attempts 
+      console.log('[Chat API] Run completed successfully:', {
+        runId: run.id,
+        threadId,
+        totalAttempts: attempts
       });
 
       // Get the assistant's response
-      const threadMessages = await openai.beta.threads.messages.list(thread.id);
+      const threadMessages = await openai.beta.threads.messages.list(threadId);
       const assistantMessage = threadMessages.data.find(msg => msg.role === 'assistant');
 
       let assistantResponse = "Je n'ai pas compris, peux-tu reformuler?";

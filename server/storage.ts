@@ -9,7 +9,7 @@ import { randomUUID } from "crypto";
 export interface IStorage {
   createSession(session: InsertTutorialSession): Promise<TutorialSession>;
   getSession(id: string): Promise<TutorialSession | undefined>;
-  updateSession(id: string, updates: Partial<InsertTutorialSession>): Promise<TutorialSession | undefined>;
+  updateSession(id: string, updates: Partial<TutorialSession>): Promise<TutorialSession | undefined>;
   addMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
   getSessionMessages(sessionId: string): Promise<ConversationMessage[]>;
 }
@@ -32,6 +32,7 @@ export class MemStorage implements IStorage {
       score: insertSession.score || 0,
       audioMode: (insertSession.audioMode || 'voice') as 'voice' | 'text',
       completed: insertSession.completed || 0,
+      threadId: null,
       createdAt: new Date(),
     };
     this.sessions.set(id, session);
@@ -42,7 +43,7 @@ export class MemStorage implements IStorage {
     return this.sessions.get(id);
   }
 
-  async updateSession(id: string, updates: Partial<InsertTutorialSession>): Promise<TutorialSession | undefined> {
+  async updateSession(id: string, updates: Partial<TutorialSession>): Promise<TutorialSession | undefined> {
     const session = this.sessions.get(id);
     if (!session) return undefined;
 
@@ -53,6 +54,7 @@ export class MemStorage implements IStorage {
       score: updates.score !== undefined ? updates.score : session.score,
       audioMode: updates.audioMode !== undefined ? updates.audioMode as 'voice' | 'text' : session.audioMode,
       completed: updates.completed !== undefined ? updates.completed : session.completed,
+      threadId: updates.threadId !== undefined ? updates.threadId : session.threadId,
     };
     this.sessions.set(id, updated);
     return updated;
