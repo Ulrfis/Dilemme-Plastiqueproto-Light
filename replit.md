@@ -39,6 +39,12 @@ Preferred communication style: Simple, everyday language.
 - Accessibility-first approach with immediate visual and auditory feedback
 - Progressive enhancement with fallback modes
 
+**Video Introduction Flow** (Recent Enhancement):
+- Immediate autoplay after "Commencer" button click (no secondary button)
+- Automatic landscape orientation and fullscreen attempt on mobile
+- Skip button visible throughout playback for quick navigation
+- Simplified UX: single click to start video experience
+
 ### Backend Architecture
 
 **Runtime**: Node.js with Express  
@@ -91,14 +97,32 @@ Preferred communication style: Simple, everyday language.
 - Transcription sent to backend for processing
 
 **Text-to-Speech**:
-- Client-side Web Speech API (speechSynthesis)
-- French language support (fr-FR)
-- Fallback to text mode if unavailable
+- ElevenLabs API for high-quality French voice synthesis
+- Retry mechanism (3 attempts) for robustness against temporary failures
+- Voice-synchronized typewriter effect for text display
+- Graceful degradation to text-only mode on persistent TTS failures
+- Vocal mode persists throughout conversation (no permanent fallback)
 
 **Audio State Machine**:
 - States: idle → recording → processing → playing → idle
 - Error recovery with user-friendly fallbacks
 - Permission handling for microphone access
+
+**Voice-Text Synchronization** (Recent Enhancement):
+- Typewriter effect synchronized with audio playback start
+- `onAudioStart` callback triggered by `audio.onplaying` event
+- Text appears word-by-word only when audio begins playing
+- Prevents duplicate messages when playback fails
+- Pending message system ensures one-to-one message correspondence
+
+**Microphone Fallback Logic** (Recent Enhancement):
+- Automatic text mode activation for permanent microphone errors:
+  - NotFoundError (no microphone device available)
+  - NotAllowedError (permissions denied)
+  - NotSupportedError (browser incompatibility)
+- Temporary errors preserve vocal mode with retry option
+- Toast notifications inform user of mode changes
+- Seamless UX in environments without microphone (e.g., Playwright tests)
 
 **Clue Detection Logic**:
 - Server-side keyword matching with variants
