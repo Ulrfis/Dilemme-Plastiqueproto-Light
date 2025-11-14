@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import peterImage from "@assets/generated_images/Peter_AI_mascot_character_ddfcb150.png";
 import type { AudioState } from "@/hooks/useVoiceInteraction";
+import { useTypewriter } from "@/hooks/useTypewriter";
 
 interface Message {
   role: 'assistant' | 'user';
@@ -38,12 +39,24 @@ export default function ConversationPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  // Récupérer le dernier message de l'assistant pour l'effet typewriter
+  const lastAssistantMessage = messages.length > 0 && messages[messages.length - 1].role === 'assistant'
+    ? messages[messages.length - 1]
+    : null;
+
+  // Effet typewriter pour le dernier message de Peter pendant qu'il parle
+  const { displayedText: typedText } = useTypewriter({
+    text: lastAssistantMessage?.content || '',
+    speed: 25,
+    enabled: state === 'playing',
+  });
+
   // Auto-scroll pour garder les deux derniers échanges visibles
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, typedText]);
 
   const handleSendText = () => {
     if (textInput.trim()) {
@@ -59,30 +72,44 @@ export default function ConversationPanel({
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
       >
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-slide-up`}
-          >
-            {message.role === 'assistant' && (
-              <div className="flex gap-2 max-w-[80%]">
-                <img
-                  src={peterImage}
-                  alt="Peter"
-                  className="w-10 h-10 rounded-full flex-shrink-0"
-                />
-                <div className="bg-card/90 backdrop-blur-sm rounded-2xl rounded-tl-none px-4 py-3 shadow-lg">
-                  <p className="text-sm text-left">{message.content}</p>
+        {messages.map((message, index) => {
+          // Déterminer si c'est le dernier message de l'assistant
+          const isLastAssistantMessage =
+            message.role === 'assistant' &&
+            index === messages.length - 1 &&
+            state === 'playing';
+
+          // Utiliser le texte tapé pour le dernier message si en train de jouer
+          const displayContent = isLastAssistantMessage ? typedText : message.content;
+
+          return (
+            <div
+              key={index}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-slide-up`}
+            >
+              {message.role === 'assistant' && (
+                <div className="flex gap-2 max-w-[80%]">
+                  <img
+                    src={peterImage}
+                    alt="Peter"
+                    className="w-10 h-10 rounded-full flex-shrink-0"
+                  />
+                  <div className="bg-card/90 backdrop-blur-sm rounded-2xl rounded-tl-none px-4 py-3 shadow-lg">
+                    <p className="text-sm text-left">
+                      {displayContent}
+                      {isLastAssistantMessage && <span className="animate-pulse">▌</span>}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
-            {message.role === 'user' && (
-              <div className="bg-primary/90 backdrop-blur-sm rounded-2xl rounded-tr-none px-4 py-3 shadow-lg max-w-[80%]">
-                <p className="text-sm text-primary-foreground text-right">{message.content}</p>
-              </div>
-            )}
-          </div>
-        ))}
+              )}
+              {message.role === 'user' && (
+                <div className="bg-primary/90 backdrop-blur-sm rounded-2xl rounded-tr-none px-4 py-3 shadow-lg max-w-[80%]">
+                  <p className="text-sm text-primary-foreground text-right">{message.content}</p>
+                </div>
+              )}
+            </div>
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 

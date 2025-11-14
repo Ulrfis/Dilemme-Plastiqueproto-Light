@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
-import { SkipForward } from "lucide-react";
+import { ChevronRight } from "lucide-react";
+import { useRef, useEffect } from "react";
 
 interface VideoIntroProps {
   onComplete: () => void;
@@ -9,11 +10,26 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   // URL de la vidéo Gumlet horizontale avec autoplay et son activé
   const videoId = "6916ff7ddf9720847e0868f0";
   const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true&muted=false`;
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Écouter les événements de la vidéo via postMessage
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      // Gumlet envoie des événements via postMessage
+      if (event.data && event.data.event === 'ended') {
+        onComplete();
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [onComplete]);
 
   return (
     <div className="fixed inset-0 bg-black z-50">
       {/* Player Gumlet en plein écran */}
       <iframe
+        ref={iframeRef}
         src={embedUrl}
         title="Vidéo d'introduction"
         className="absolute inset-0 w-full h-full border-0"
@@ -23,15 +39,15 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         data-testid="video-intro"
       />
 
-      {/* Bouton skip en haut à droite */}
+      {/* Bouton skip au centre droit de l'écran */}
       <Button
         onClick={onComplete}
-        variant="outline"
-        className="fixed top-4 right-4 bg-black/50 backdrop-blur-sm border-white/20 text-white hover:bg-black/70 z-10"
+        size="lg"
+        className="fixed top-1/2 right-8 -translate-y-1/2 h-16 px-6 rounded-2xl bg-primary/90 backdrop-blur-md border-2 border-white/10 text-white hover:bg-primary hover:scale-105 transition-all duration-200 shadow-2xl z-10"
         data-testid="button-skip"
       >
-        <SkipForward className="w-4 h-4 mr-2" />
-        Passer
+        <span className="text-lg font-medium mr-2">Continuer</span>
+        <ChevronRight className="w-6 h-6" />
       </Button>
     </div>
   );
