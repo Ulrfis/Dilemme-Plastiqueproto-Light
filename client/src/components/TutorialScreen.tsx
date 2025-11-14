@@ -133,9 +133,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      {/* Header avec compteur */}
-      <header className="bg-card border-b border-card-border px-4 py-3 flex items-center justify-between flex-shrink-0">
+    <div className="h-screen flex flex-col bg-background overflow-hidden">
+      {/* Header fixe en haut avec compteur */}
+      <header className="sticky top-0 z-30 bg-card border-b border-card-border px-4 py-3 flex items-center justify-between flex-shrink-0">
         <Badge
           variant="secondary"
           className="text-base px-3 py-1.5 rounded-full"
@@ -157,25 +157,25 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       </header>
 
       {showHelp && (
-        <div className="bg-muted/50 backdrop-blur px-4 py-3 animate-slide-up border-b border-card-border">
+        <div className="bg-muted/50 backdrop-blur px-4 py-3 animate-slide-up border-b border-card-border z-20">
           <p className="text-sm">
             Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
           </p>
         </div>
       )}
 
-      {/* Image zoomable - occupe environ 40% de l'écran en haut */}
-      <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '40vh', minHeight: '250px' }}>
+      {/* Image zoomable - 100% en horizontal */}
+      <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '35vh', minHeight: '200px' }}>
         <ZoomableImage
           src={tutorialImage}
           alt="Image à analyser"
         />
       </div>
 
-      {/* Indices trouvés - zone fixe entre image et conversation */}
-      {foundClues.length > 0 && (
-        <div className="px-4 py-3 bg-card border-y border-card-border flex-shrink-0">
-          <div className="flex items-center justify-between gap-2">
+      {/* Zone fixe pour les indices trouvés - toujours présente */}
+      <div className="px-4 py-2 bg-background border-b border-card-border flex-shrink-0 min-h-[60px] flex items-center">
+        {foundClues.length > 0 ? (
+          <div className="flex items-center justify-between gap-2 w-full">
             <div className="flex flex-wrap gap-2 flex-1">
               {foundClues.map((clue, index) => (
                 <Badge
@@ -202,10 +202,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               </Button>
             )}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-muted-foreground">Les indices apparaîtront ici...</p>
+        )}
+      </div>
 
-      {/* Zone de conversation - prend le reste de l'espace */}
+      {/* Zone de conversation - seule partie scrollable */}
       <div className="flex-1 overflow-hidden">
         <ConversationPanel
           messages={messages}

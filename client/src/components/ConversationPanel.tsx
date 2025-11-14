@@ -58,10 +58,6 @@ export default function ConversationPanel({
       <div
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
-        style={{
-          maxHeight: 'calc(100vh - 400px)',
-          minHeight: '200px'
-        }}
       >
         {messages.map((message, index) => (
           <div
