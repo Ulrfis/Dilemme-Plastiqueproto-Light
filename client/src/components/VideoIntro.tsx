@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ChevronRight, Play, Volume2 } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
 
 interface VideoIntroProps {
@@ -7,38 +7,42 @@ interface VideoIntroProps {
 }
 
 export default function VideoIntro({ onComplete }: VideoIntroProps) {
-  // URL de la vidéo Gumlet horizontale
   const videoId = "6916ff7ddf9720847e0868f0";
-  // IMPORTANT: On commence SANS autoplay pour forcer l'interaction utilisateur
-  const [embedUrl, setEmbedUrl] = useState(
-    `https://play.gumlet.io/embed/${videoId}?autoplay=false&preload=true&muted=false`
-  );
+  // Démarrer immédiatement en autoplay avec le son
+  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true&muted=false&loop=false`;
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [videoEnded, setVideoEnded] = useState(false);
-  const [showPlayOverlay, setShowPlayOverlay] = useState(true);
-  const [videoStarted, setVideoStarted] = useState(false);
 
-  // Fonction pour démarrer la vidéo avec son
-  const startVideoWithSound = () => {
-    console.log('[VideoIntro] Starting video with sound after user interaction');
-
-    // Cacher l'overlay
-    setShowPlayOverlay(false);
-    setVideoStarted(true);
-
-    // Changer l'URL pour activer l'autoplay
-    // CRUCIAL: Cette action se fait APRÈS une interaction utilisateur, donc le son sera autorisé
-    setEmbedUrl(`https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true&muted=false&loop=false`);
-
-    // Envoyer un message à l'iframe Gumlet pour démarrer la lecture
-    if (iframeRef.current?.contentWindow) {
+  // Tenter le plein écran en mode paysage au chargement
+  useEffect(() => {
+    const attemptFullscreenLandscape = async () => {
       try {
-        iframeRef.current.contentWindow.postMessage({ action: 'play' }, '*');
+        // Demander le plein écran sur le conteneur
+        if (containerRef.current && document.fullscreenEnabled) {
+          await containerRef.current.requestFullscreen();
+          console.log('[VideoIntro] Fullscreen activated');
+          
+          // Tenter de verrouiller en mode paysage (si disponible)
+          if (screen.orientation && 'lock' in screen.orientation) {
+            try {
+              await screen.orientation.lock('landscape');
+              console.log('[VideoIntro] Screen locked to landscape');
+            } catch (err) {
+              console.log('[VideoIntro] Could not lock orientation:', err);
+            }
+          }
+        }
       } catch (error) {
-        console.log('[VideoIntro] Could not send play message to iframe:', error);
+        console.log('[VideoIntro] Fullscreen not available or denied:', error);
       }
-    }
-  };
+    };
+
+    // Petit délai pour laisser le composant se monter
+    const timer = setTimeout(attemptFullscreenLandscape, 100);
+    
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     // Écouter les événements de la vidéo via postMessage
@@ -47,13 +51,6 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
 
       // Gumlet peut envoyer différents formats d'événements
       if (event.data) {
-        // Détecter le démarrage de la vidéo
-        if (event.data.event === 'play' || event.data.event === 'playing') {
-          console.log('[VideoIntro] Video started playing');
-          setVideoStarted(true);
-          setShowPlayOverlay(false);
-        }
-
         // Format 1: { event: 'ended' }
         if (event.data.event === 'ended' || event.data.event === 'end') {
           console.log('[VideoIntro] Video ended via postMessage');
@@ -76,31 +73,24 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
 
     window.addEventListener('message', handleMessage);
 
-    // IMPORTANT: Fallback avec timer automatique
-    // La durée approximative de la vidéo (à ajuster selon votre vidéo)
-    // Si Gumlet ne supporte pas postMessage, on passe automatiquement après X secondes
-    // MAIS seulement si la vidéo a démarré
-    let autoSkipTimer: NodeJS.Timeout | null = null;
-
-    if (videoStarted) {
-      const videoDuration = 65000; // 65 secondes (ajustez selon la vraie durée)
-      autoSkipTimer = setTimeout(() => {
-        console.log('[VideoIntro] Auto-skip triggered by timer');
-        if (!videoEnded) {
-          setVideoEnded(true);
-          onComplete();
-        }
-      }, videoDuration);
-    }
+    // Timer automatique de sécurité - passe à l'écran suivant après 65 secondes
+    const videoDuration = 65000;
+    const autoSkipTimer = setTimeout(() => {
+      console.log('[VideoIntro] Auto-skip triggered by timer');
+      if (!videoEnded) {
+        setVideoEnded(true);
+        onComplete();
+      }
+    }, videoDuration);
 
     return () => {
       window.removeEventListener('message', handleMessage);
-      if (autoSkipTimer) clearTimeout(autoSkipTimer);
+      clearTimeout(autoSkipTimer);
     };
-  }, [onComplete, videoEnded, videoStarted]);
+  }, [onComplete, videoEnded]);
 
   return (
-    <div className="fixed inset-0 bg-black z-50 overflow-hidden">
+    <div ref={containerRef} className="fixed inset-0 bg-black z-50 overflow-hidden">
       {/* Styles pour mobile - Assurer 100vh réel et pas de scroll */}
       <style>{`
         @media screen and (max-width: 768px) {
@@ -116,7 +106,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         }
       `}</style>
 
-      {/* Player Gumlet en plein écran - avec styles inline pour mobile */}
+      {/* Player Gumlet en plein écran avec autoplay */}
       <iframe
         ref={iframeRef}
         src={embedUrl}
@@ -137,60 +127,34 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         data-testid="video-intro"
       />
 
-      {/* OVERLAY DE DÉMARRAGE - Apparaît au début pour demander l'interaction utilisateur */}
-      {showPlayOverlay && (
-        <div className="absolute inset-0 bg-black/90 backdrop-blur-sm z-20 flex items-center justify-center p-4 overflow-hidden">
-          <div className="text-center space-y-4 sm:space-y-6 max-w-md w-full">
-            <div className="text-white space-y-2 sm:space-y-3">
-              <Volume2 className="w-12 h-12 sm:w-16 sm:h-16 mx-auto animate-pulse text-primary" />
-              <h2 className="text-xl sm:text-2xl md:text-3xl font-bold px-4">Vidéo d'introduction</h2>
-              <p className="text-sm sm:text-base md:text-lg text-white/80 px-4">
-                Appuyez pour lancer la vidéo avec le son
-              </p>
-            </div>
+      {/* Indication pour pivoter en mode paysage - s'affiche brièvement puis disparaît */}
+      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full text-white text-sm sm:text-base animate-pulse">
+        📱 Pivotez en mode paysage pour une meilleure expérience
+      </div>
 
-            <Button
-              onClick={startVideoWithSound}
-              size="lg"
-              className="h-16 sm:h-20 px-6 sm:px-8 rounded-2xl bg-primary hover:bg-primary/90 text-white text-lg sm:text-xl font-bold hover:scale-105 transition-all duration-200 shadow-2xl touch-manipulation w-full sm:w-auto"
-              data-testid="button-start-video"
-            >
-              <Play className="w-6 h-6 sm:w-8 sm:h-8 mr-2 sm:mr-3 fill-current" />
-              Lancer la vidéo
-            </Button>
-
-            <p className="text-xs sm:text-sm text-white/60 px-4">
-              📱 Sur smartphone, mettez votre appareil en mode paysage
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Bouton skip sur le CÔTÉ DROIT - Visible seulement une fois la vidéo lancée */}
-      {videoStarted && !showPlayOverlay && (
-        <Button
-          onClick={() => {
-            console.log('[VideoIntro] Skip button clicked');
-            if (!videoEnded) {
-              setVideoEnded(true);
-              onComplete();
-            }
-          }}
-          size="lg"
-          style={{
-            position: 'fixed',
-            top: '50%',
-            right: '1rem',
-            transform: 'translateY(-50%)',
-            zIndex: 30,
-          }}
-          className="h-14 w-14 sm:h-16 sm:w-auto sm:px-6 sm:right-8 rounded-2xl bg-primary/90 backdrop-blur-md border-2 border-white/10 text-white hover:bg-primary hover:scale-105 transition-all duration-200 shadow-2xl flex items-center justify-center"
-          data-testid="button-skip"
-        >
-          <span className="hidden sm:inline text-lg font-medium mr-2">Continuer</span>
-          <ChevronRight className="w-6 h-6 sm:w-6 sm:h-6" />
-        </Button>
-      )}
+      {/* Bouton skip sur le CÔTÉ DROIT - Toujours visible */}
+      <Button
+        onClick={() => {
+          console.log('[VideoIntro] Skip button clicked');
+          if (!videoEnded) {
+            setVideoEnded(true);
+            onComplete();
+          }
+        }}
+        size="lg"
+        style={{
+          position: 'fixed',
+          top: '50%',
+          right: '1rem',
+          transform: 'translateY(-50%)',
+          zIndex: 30,
+        }}
+        className="h-14 w-14 sm:h-16 sm:w-auto sm:px-6 sm:right-8 rounded-2xl bg-primary/90 backdrop-blur-md border-2 border-white/10 text-white hover:bg-primary hover:scale-105 transition-all duration-200 shadow-2xl flex items-center justify-center"
+        data-testid="button-skip"
+      >
+        <span className="hidden sm:inline text-lg font-medium mr-2">Continuer</span>
+        <ChevronRight className="w-6 h-6 sm:w-6 sm:h-6" />
+      </Button>
     </div>
   );
 }
