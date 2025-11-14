@@ -133,9 +133,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background overflow-hidden">
+    <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
       {/* Header fixe en haut avec compteur */}
-      <header className="sticky top-0 z-30 bg-card border-b border-card-border px-4 py-3 flex items-center justify-between flex-shrink-0">
+      <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-4 py-3 flex items-center justify-between">
         <Badge
           variant="secondary"
           className="text-base px-3 py-1.5 rounded-full"
@@ -157,7 +157,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       </header>
 
       {showHelp && (
-        <div className="bg-muted/50 backdrop-blur px-4 py-3 animate-slide-up border-b border-card-border z-20">
+        <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-4 py-3 animate-slide-up border-b border-card-border z-20">
           <p className="text-sm">
             Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
           </p>
