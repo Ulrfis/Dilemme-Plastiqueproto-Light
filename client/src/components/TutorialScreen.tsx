@@ -115,8 +115,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
       const result = await sendChatMessage(sessionId, userMessage);
 
-      // Ajouter la réponse de l'assistant
-      setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
+      // NE PAS ajouter la réponse de l'assistant tout de suite
+      // On l'ajoutera juste avant de jouer la voix pour synchroniser le typewriter
 
       // Détecter les NOUVEAUX indices en comparant avec l'état actuel
       const previousClues = foundClues;
@@ -135,20 +135,29 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           console.log('[TutorialScreen] Generating TTS for response...');
           const audioBlob = await textToSpeech(result.response);
           console.log('[TutorialScreen] TTS generated, playing audio...');
+
+          // AJOUTER le message de l'assistant JUSTE AVANT de jouer la voix
+          // Ainsi le typewriter se synchronisera avec la voix
+          setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
+
           await playAudio(audioBlob);
           console.log('[TutorialScreen] Audio playback completed');
         } catch (error) {
           console.error('TTS error, showing text only:', error);
-          // Ne pas appeler recoverFromError ici car cela peut bloquer le TTS futur
+          // En cas d'erreur, afficher quand même le message
+          setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
         }
+      } else {
+        // En mode texte, afficher le message immédiatement
+        setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
       }
     } catch (error) {
       console.error('Error processing message:', error);
-      
+
       // Extract detailed error information
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorResponse = (error as any)?.response?.data;
-      
+
       let detailedDescription = errorMessage;
       if (errorResponse) {
         detailedDescription = `${errorResponse.error || errorMessage}`;
@@ -159,7 +168,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           detailedDescription += `\n\nInfo technique: ${errorResponse.technicalInfo.errorType} - ${errorResponse.technicalInfo.timestamp}`;
         }
       }
-      
+
       toast({
         title: "Erreur de conversation avec Peter",
         description: detailedDescription,

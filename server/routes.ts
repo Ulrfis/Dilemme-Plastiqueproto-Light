@@ -20,20 +20,24 @@ const TARGET_CLUES = [
   { keyword: "plastique", variants: ["plastique", "pollution plastique", "déchets plastiques", "pollution"] }
 ];
 
-function detectClue(text: string, alreadyFound: string[]): string | null {
+function detectClues(text: string, alreadyFound: string[]): string[] {
   const textLower = text.toLowerCase();
-  
+  const foundClues: string[] = [];
+
   for (const clue of TARGET_CLUES) {
+    // Skip if already found
     if (alreadyFound.includes(clue.keyword)) continue;
-    
+
+    // Check all variants for this clue
     for (const variant of clue.variants) {
       if (textLower.includes(variant)) {
-        return clue.keyword;
+        foundClues.push(clue.keyword);
+        break; // Move to next clue (avoid duplicates)
       }
     }
   }
-  
-  return null;
+
+  return foundClues;
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -181,14 +185,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('[Chat API] Session found:', { sessionId, foundClues: session.foundClues });
 
-      const detectedClue = detectClue(userMessage, session.foundClues);
-      console.log('[Chat API] Clue detection:', { detectedClue, userMessage });
+      const detectedClues = detectClues(userMessage, session.foundClues);
+      console.log('[Chat API] Clue detection:', { detectedClues, userMessage });
 
       await storage.addMessage({
         sessionId,
         role: 'user',
         content: userMessage,
-        detectedClue: detectedClue || undefined,
+        detectedClue: detectedClues.length > 0 ? detectedClues.join(', ') : undefined,
       });
 
       // Use OpenAI Assistant API with the specified assistant ID
@@ -295,8 +299,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: assistantResponse,
       });
 
-      if (detectedClue) {
-        const updatedClues = [...session.foundClues, detectedClue];
+      // Update session with ALL detected clues
+      if (detectedClues.length > 0) {
+        const updatedClues = [...session.foundClues, ...detectedClues];
         await storage.updateSession(sessionId, {
           foundClues: updatedClues,
           score: updatedClues.length,
@@ -306,8 +311,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[Chat API] Sending response to client');
       res.json({
         response: assistantResponse,
-        detectedClue: detectedClue,
-        foundClues: detectedClue ? [...session.foundClues, detectedClue] : session.foundClues,
+        detectedClue: detectedClues.length > 0 ? detectedClues[0] : null, // For backward compatibility
+        foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
       });
     } catch (error) {
       console.error('[Chat API] Error in chat:', error);
