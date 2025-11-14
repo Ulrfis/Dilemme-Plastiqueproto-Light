@@ -46,6 +46,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     startRecording,
     stopRecording,
     playAudio,
+    stopAudio,
     checkMicrophonePermission,
     recoverFromError,
   } = useVoiceInteraction();
@@ -63,8 +64,24 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     }
   }, [audioState, fallbackMode, toast, recoverFromError]);
 
+  // Fonction pour interrompre Peter et permettre à l'utilisateur de parler
+  const handleInterruptPeter = () => {
+    console.log('[TutorialScreen] User wants to interrupt Peter');
+
+    // Arrêter immédiatement la lecture audio de Peter
+    stopAudio();
+
+    console.log('[TutorialScreen] Peter interrupted, user can now speak');
+  };
+
   const handleStartRecording = async () => {
     console.log('[TutorialScreen] handleStartRecording called');
+
+    // Si Peter est en train de parler, l'interrompre d'abord
+    if (audioState === 'playing') {
+      handleInterruptPeter();
+    }
+
     try {
       console.log('[TutorialScreen] Calling startRecording...');
       await startRecording();

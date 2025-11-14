@@ -8,6 +8,7 @@ interface UseVoiceInteractionResult {
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<string | null>;
   playAudio: (audioBlob: Blob) => Promise<void>;
+  stopAudio: () => void;
   checkMicrophonePermission: () => Promise<boolean>;
   reset: () => void;
   recoverFromError: () => void;
@@ -141,6 +142,23 @@ export function useVoiceInteraction(): UseVoiceInteractionResult {
     });
   }, []);
 
+  // Fonction pour arrêter immédiatement la lecture audio de Peter
+  const stopAudio = useCallback(() => {
+    console.log('[useVoiceInteraction] Stopping audio playback - User wants to speak');
+
+    if (audioElementRef.current) {
+      // Pause et reset l'audio
+      audioElementRef.current.pause();
+      audioElementRef.current.currentTime = 0;
+      audioElementRef.current = null;
+
+      console.log('[useVoiceInteraction] Audio stopped successfully');
+    }
+
+    // Passer immédiatement à idle pour permettre l'enregistrement
+    setAudioState('idle');
+  }, []);
+
   const reset = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
@@ -166,6 +184,7 @@ export function useVoiceInteraction(): UseVoiceInteractionResult {
     startRecording,
     stopRecording,
     playAudio,
+    stopAudio,
     checkMicrophonePermission,
     reset,
     recoverFromError,
