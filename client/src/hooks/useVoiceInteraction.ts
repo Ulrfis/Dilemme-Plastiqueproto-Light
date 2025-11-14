@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 export type AudioState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
 
 interface UseVoiceInteractionOptions {
   onAudioStart?: () => void;
+  onAudioStop?: () => void;  // Appelé quand l'audio est arrêté ou échoue
 }
 
 interface UseVoiceInteractionResult {
@@ -19,13 +20,27 @@ interface UseVoiceInteractionResult {
 }
 
 export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVoiceInteractionResult {
-  const { onAudioStart } = options || {};
+  const { onAudioStart, onAudioStop } = options || {};
   const [audioState, setAudioState] = useState<AudioState>('idle');
   const [transcription, setTranscription] = useState('');
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  
+  // Utiliser des refs pour stocker les callbacks et éviter les stale closures
+  // Les callbacks playAudio/stopAudio seront stables et invoqueront toujours la dernière version
+  const onAudioStartRef = useRef(onAudioStart);
+  const onAudioStopRef = useRef(onAudioStop);
+  
+  // Synchroniser les refs avec les dernières versions des callbacks
+  useEffect(() => {
+    onAudioStartRef.current = onAudioStart;
+  }, [onAudioStart]);
+  
+  useEffect(() => {
+    onAudioStopRef.current = onAudioStop;
+  }, [onAudioStop]);
 
   const checkMicrophonePermission = useCallback(async (): Promise<boolean> => {
     try {
@@ -136,15 +151,19 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       audio.onerror = (error) => {
         URL.revokeObjectURL(audioUrl);
         setAudioState('error');
+        // Notifier l'arrêt de l'audio en cas d'erreur
+        if (onAudioStopRef.current) {
+          onAudioStopRef.current();
+        }
         reject(error);
       };
 
       // Appeler onAudioStart quand l'audio commence VRAIMENT à jouer
-      // Cet événement se déclenche après que play() réussit
+      // Utilise la ref pour toujours appeler la dernière version du callback
       audio.onplaying = () => {
         console.log('[useVoiceInteraction] Audio started playing, calling onAudioStart');
-        if (onAudioStart) {
-          onAudioStart();
+        if (onAudioStartRef.current) {
+          onAudioStartRef.current();
         }
       };
 
@@ -154,7 +173,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         reject(error);
       });
     });
-  }, [onAudioStart]);
+  }, []); // Pas de dépendances - le callback reste stable
 
   // Fonction pour arrêter immédiatement la lecture audio de Peter
   const stopAudio = useCallback(() => {
@@ -171,6 +190,13 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
     // Passer immédiatement à idle pour permettre l'enregistrement
     setAudioState('idle');
+    
+    // CRITIQUE: Notifier l'arrêt de l'audio pour nettoyer les flags dans TutorialScreen
+    // Sans cela, isWaitingForAudioStart peut rester bloqué si l'audio est arrêté
+    // avant que onplaying ne se déclenche
+    if (onAudioStopRef.current) {
+      onAudioStopRef.current();
+    }
   }, []);
 
   const reset = useCallback(() => {

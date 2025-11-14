@@ -33,6 +33,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   // Utiliser une ref au lieu d'un state pour éviter les problèmes de stale closure
   // Le callback handleAudioStart sera stable et lira toujours la dernière valeur
   const pendingAssistantMessageRef = useRef<string | null>(null);
+  
+  // Flag pour bloquer les nouveaux messages tant que l'audio précédent n'a pas commencé
+  // Évite que pendingAssistantMessageRef soit écrasé par des messages rapides
+  const isWaitingForAudioStart = useRef(false);
 
   const { toast } = useToast();
 
@@ -52,7 +56,17 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       setMessages(prev => [...prev, { role: 'assistant', content: pendingAssistantMessageRef.current! }]);
       pendingAssistantMessageRef.current = null;
     }
+    // Débloquer l'envoi de nouveaux messages maintenant que l'audio a commencé
+    isWaitingForAudioStart.current = false;
   }, []); // Pas de dépendances - le callback ne change jamais
+
+  // Callback appelé quand l'audio est arrêté ou échoue
+  // Nettoie les flags pour éviter les deadlocks
+  const handleAudioStop = useCallback(() => {
+    console.log('[TutorialScreen] Audio stopped or failed, cleaning up');
+    pendingAssistantMessageRef.current = null;
+    isWaitingForAudioStart.current = false;
+  }, []);
 
   const {
     audioState,
@@ -63,7 +77,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     stopAudio,
     checkMicrophonePermission,
     recoverFromError,
-  } = useVoiceInteraction({ onAudioStart: handleAudioStart });
+  } = useVoiceInteraction({ 
+    onAudioStart: handleAudioStart,
+    onAudioStop: handleAudioStop 
+  });
 
   // Fonction helper pour appeler le TTS avec retry automatique
   const textToSpeechWithRetry = async (text: string, maxRetries = 2): Promise<Blob> => {
@@ -99,6 +116,11 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     
     // Nettoyer le message en attente pour éviter qu'il s'affiche plus tard
     pendingAssistantMessageRef.current = null;
+    
+    // CRITIQUE: Débloquer les nouveaux messages
+    // Si l'audio n'avait pas encore commencé, handleAudioStart ne sera jamais appelé
+    // et isWaitingForAudioStart resterait bloqué indéfiniment
+    isWaitingForAudioStart.current = false;
 
     console.log('[TutorialScreen] Peter interrupted, user can now speak');
   };
@@ -167,6 +189,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   };
 
   const processMessage = async (userMessage: string) => {
+    // Bloquer les nouveaux messages tant que l'audio précédent n'a pas commencé
+    // Évite d'écraser pendingAssistantMessageRef avec des messages rapides
+    if (isWaitingForAudioStart.current) {
+      console.log('[TutorialScreen] Blocking new message - still waiting for previous audio to start');
+      toast({
+        title: "Veuillez patienter",
+        description: "Laissez Peter finir de parler avant d'envoyer un nouveau message.",
+        variant: "default",
+      });
+      return;
+    }
+
     try {
       // Ajouter le message utilisateur
       setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
@@ -201,11 +235,17 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           // Stocker le message en attente dans la ref - il sera ajouté au tableau quand l'audio démarre
           // via le callback handleAudioStart, synchronisant parfaitement le typewriter avec la voix
           pendingAssistantMessageRef.current = result.response;
+          
+          // Bloquer les nouveaux messages jusqu'à ce que cet audio commence
+          isWaitingForAudioStart.current = true;
 
           await playAudio(audioBlob);
           console.log('[TutorialScreen] Audio playback completed');
         } catch (error) {
           console.error('TTS failed after all retries, showing text only:', error);
+          
+          // Débloquer les nouveaux messages en cas d'erreur
+          isWaitingForAudioStart.current = false;
           
           // Afficher un toast informatif (pas d'erreur destructive)
           toast({
@@ -226,6 +266,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       }
     } catch (error) {
       console.error('Error processing message:', error);
+      
+      // Débloquer les nouveaux messages en cas d'erreur générale
+      isWaitingForAudioStart.current = false;
+      pendingAssistantMessageRef.current = null;
 
       // Extract detailed error information
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
