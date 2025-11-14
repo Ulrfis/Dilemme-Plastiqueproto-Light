@@ -112,16 +112,29 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     } catch (error) {
       console.error('[TutorialScreen] Recording start error:', error);
       
-      // Vérifier si c'est une erreur de permission définitive
+      // Vérifier si c'est une erreur définitive qui nécessite le fallback texte
       const errorMessage = error instanceof Error ? error.message : '';
-      const isPermissionDenied = errorMessage.includes('denied') || errorMessage.includes('permission');
+      const errorName = error instanceof Error ? error.name : '';
       
-      if (isPermissionDenied) {
-        // Seulement basculer en fallbackMode si permissions refusées définitivement
+      // Détecter les erreurs définitives:
+      // - Permission refusée
+      // - Microphone non trouvé (NotFoundError)
+      // - Microphone non disponible (NotAllowedError, NotSupportedError)
+      const isPermanentError = 
+        errorMessage.includes('denied') || 
+        errorMessage.includes('permission') ||
+        errorMessage.includes('not found') ||
+        errorMessage.includes('NotFound') ||
+        errorName === 'NotFoundError' ||
+        errorName === 'NotAllowedError' ||
+        errorName === 'NotSupportedError';
+      
+      if (isPermanentError) {
+        // Basculer en fallbackMode pour les erreurs définitives
         setFallbackMode(true);
         toast({
           title: "Mode texte activé",
-          description: "Permissions microphone refusées. Utilisez le mode texte.",
+          description: "Microphone non disponible. Utilisez le mode texte.",
           variant: "default",
         });
       } else {
