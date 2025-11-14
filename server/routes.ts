@@ -224,79 +224,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Run the assistant
-      console.log('[Chat API] Running assistant...', { assistantId: ASSISTANT_ID, threadId });
-      const run = await openai.beta.threads.runs.create(threadId, {
+      // Run the assistant avec streaming pour meilleure réactivité
+      console.log('[Chat API] Running assistant with streaming...', { assistantId: ASSISTANT_ID, threadId });
+
+      // Créer le run avec streaming
+      const stream = await openai.beta.threads.runs.stream(threadId, {
         assistant_id: ASSISTANT_ID,
       });
-      console.log('[Chat API] Run started:', { runId: run.id, threadId, status: run.status });
 
-      // Poll for completion avec délai réduit pour meilleure réactivité
-      let runStatus = await openai.beta.threads.runs.retrieve(run.id, { thread_id: threadId });
-      let attempts = 0;
-      const maxAttempts = 100; // 100 attempts x 200ms = 20 seconds max
-      const pollDelay = 200; // 200ms au lieu de 1000ms pour 5x plus de réactivité
+      console.log('[Chat API] Stream created, waiting for response...');
 
-      console.log('[Chat API] Initial run status:', {
-        runId: run.id,
-        threadId,
-        status: runStatus.status,
-        assistantId: runStatus.assistant_id
-      });
+      let assistantResponse = "";
+      let runId = "";
 
-      while (runStatus.status !== 'completed' && attempts < maxAttempts) {
-        console.log(`[Chat API] Polling run status (attempt ${attempts + 1}/${maxAttempts}):`, {
-          runId: run.id,
-          threadId,
-          status: runStatus.status
-        });
-
-        if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
-          const errorDetails = {
-            status: runStatus.status,
-            runId: run.id,
-            threadId,
-            assistantId: ASSISTANT_ID,
-            lastError: runStatus.last_error
-          };
-          console.error('[Chat API] Assistant run failed:', errorDetails);
-          throw new Error(`Assistant run failed - Status: ${runStatus.status}, Run ID: ${run.id}, Thread ID: ${threadId}, Error: ${JSON.stringify(runStatus.last_error)}`);
+      // Écouter les événements du stream
+      for await (const event of stream) {
+        // Capturer le run ID
+        if (event.event === 'thread.run.created') {
+          runId = event.data.id;
+          console.log('[Chat API] Run created:', runId);
         }
 
-        await new Promise(resolve => setTimeout(resolve, pollDelay));
-        runStatus = await openai.beta.threads.runs.retrieve(run.id, { thread_id: threadId });
-        attempts++;
+        // Capturer les deltas de texte au fur et à mesure
+        if (event.event === 'thread.message.delta') {
+          const delta = event.data.delta;
+          if (delta.content && delta.content[0]?.type === 'text') {
+            const textDelta = delta.content[0].text?.value || '';
+            assistantResponse += textDelta;
+          }
+        }
+
+        // Vérifier la complétion
+        if (event.event === 'thread.run.completed') {
+          console.log('[Chat API] Run completed via stream:', {
+            runId,
+            threadId,
+            responseLength: assistantResponse.length
+          });
+        }
+
+        // Gérer les erreurs
+        if (event.event === 'thread.run.failed' ||
+            event.event === 'thread.run.cancelled' ||
+            event.event === 'thread.run.expired') {
+          const errorDetails = {
+            event: event.event,
+            runId,
+            threadId,
+            assistantId: ASSISTANT_ID,
+          };
+          console.error('[Chat API] Assistant run failed via stream:', errorDetails);
+          throw new Error(`Assistant run failed - Event: ${event.event}, Run ID: ${runId}, Thread ID: ${threadId}`);
+        }
       }
 
-      if (runStatus.status !== 'completed') {
-        const timeoutDetails = {
-          attempts,
-          maxAttempts,
-          finalStatus: runStatus.status,
-          runId: run.id,
-          threadId,
-          assistantId: ASSISTANT_ID
-        };
-        console.error('[Chat API] Assistant run timeout:', timeoutDetails);
-        throw new Error(`Assistant run timeout après ${attempts} tentatives - Status: ${runStatus.status}, Run ID: ${run.id}, Thread ID: ${threadId}`);
+      // Fallback si la réponse est vide
+      if (!assistantResponse) {
+        assistantResponse = "Je n'ai pas compris, peux-tu reformuler?";
       }
 
-      console.log('[Chat API] Run completed successfully:', {
-        runId: run.id,
-        threadId,
-        totalAttempts: attempts
+      console.log('[Chat API] Final assistant response:', {
+        responseLength: assistantResponse.length,
+        runId,
+        threadId
       });
-
-      // Get the assistant's response
-      const threadMessages = await openai.beta.threads.messages.list(threadId);
-      const assistantMessage = threadMessages.data.find(msg => msg.role === 'assistant');
-
-      let assistantResponse = "Je n'ai pas compris, peux-tu reformuler?";
-      if (assistantMessage && assistantMessage.content[0]?.type === 'text') {
-        assistantResponse = assistantMessage.content[0].text.value;
-      }
-
-      console.log('[Chat API] Assistant response received:', { responseLength: assistantResponse.length });
 
       await storage.addMessage({
         sessionId,
