@@ -178,7 +178,7 @@ npm install
 Créer un fichier `.env` à la racine :
 
 ```env
-# OpenAI API (Whisper + GPT-4o-mini)
+# OpenAI API (Whisper + Assistant API)
 OPENAI_API_KEY=sk-...
 
 # ElevenLabs API (Text-to-Speech)
@@ -187,6 +187,13 @@ ELEVENLABS_API_KEY=...
 # Port serveur (optionnel, défaut: 5000)
 PORT=5000
 ```
+
+**⚠️ Configuration Spécifique OpenAI:**
+- **Organisation**: `org-z0AK8zYLTeapGaiDZFQ5co2N`
+- **Assistant ID**: `asst_P9b5PxMd1k9HjBgbyXI1Cvm9`
+- **Voice ID (ElevenLabs)**: `CBP9p4KAWPqrMHTDtWPR` (Peter mai 2025 FR)
+
+Ces IDs sont configurés dans `server/routes.ts` et doivent correspondre à votre workspace OpenAI.
 
 ### Lancement
 

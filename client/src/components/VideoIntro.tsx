@@ -6,9 +6,9 @@ interface VideoIntroProps {
 }
 
 export default function VideoIntro({ onComplete }: VideoIntroProps) {
-  // URL de la vidéo Gumlet avec autoplay
+  // URL de la vidéo Gumlet avec autoplay et son activé
   const videoId = "65562242f2825d5b7aca4366";
-  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true`;
+  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true&muted=false`;
 
   return (
     <div className="fixed inset-0 bg-black z-50">
