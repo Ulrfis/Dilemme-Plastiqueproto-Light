@@ -215,36 +215,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Run the assistant
-      console.log('[Chat API] Running assistant...');
+      console.log('[Chat API] Running assistant...', { assistantId: ASSISTANT_ID, threadId: thread.id });
       const run = await openai.beta.threads.runs.create(thread.id, {
         assistant_id: ASSISTANT_ID,
       });
-      console.log('[Chat API] Run started:', run.id);
+      console.log('[Chat API] Run started:', { runId: run.id, threadId: thread.id, status: run.status });
 
       // Poll for completion
-      let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      let runStatus = await openai.beta.threads.runs.retrieve(run.id, { thread_id: thread.id });
       let attempts = 0;
       const maxAttempts = 30; // 30 seconds max wait
 
+      console.log('[Chat API] Initial run status:', { 
+        runId: run.id, 
+        threadId: thread.id, 
+        status: runStatus.status,
+        assistantId: runStatus.assistant_id 
+      });
+
       while (runStatus.status !== 'completed' && attempts < maxAttempts) {
-        console.log(`[Chat API] Polling run status (attempt ${attempts + 1}):`, runStatus.status);
+        console.log(`[Chat API] Polling run status (attempt ${attempts + 1}/${maxAttempts}):`, {
+          runId: run.id,
+          threadId: thread.id,
+          status: runStatus.status
+        });
 
         if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
-          console.error('[Chat API] Assistant run failed:', runStatus);
-          throw new Error(`Assistant run failed with status: ${runStatus.status}`);
+          const errorDetails = {
+            status: runStatus.status,
+            runId: run.id,
+            threadId: thread.id,
+            assistantId: ASSISTANT_ID,
+            lastError: runStatus.last_error
+          };
+          console.error('[Chat API] Assistant run failed:', errorDetails);
+          throw new Error(`Assistant run failed - Status: ${runStatus.status}, Run ID: ${run.id}, Thread ID: ${thread.id}, Error: ${JSON.stringify(runStatus.last_error)}`);
         }
 
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-        runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+        runStatus = await openai.beta.threads.runs.retrieve(run.id, { thread_id: thread.id });
         attempts++;
       }
 
       if (runStatus.status !== 'completed') {
-        console.error('[Chat API] Assistant run timeout after', attempts, 'attempts');
-        throw new Error('Assistant run timeout');
+        const timeoutDetails = {
+          attempts,
+          maxAttempts,
+          finalStatus: runStatus.status,
+          runId: run.id,
+          threadId: thread.id,
+          assistantId: ASSISTANT_ID
+        };
+        console.error('[Chat API] Assistant run timeout:', timeoutDetails);
+        throw new Error(`Assistant run timeout après ${attempts} tentatives - Status: ${runStatus.status}, Run ID: ${run.id}, Thread ID: ${thread.id}`);
       }
 
-      console.log('[Chat API] Run completed successfully');
+      console.log('[Chat API] Run completed successfully:', { 
+        runId: run.id, 
+        threadId: thread.id,
+        totalAttempts: attempts 
+      });
 
       // Get the assistant's response
       const threadMessages = await openai.beta.threads.messages.list(thread.id);
@@ -279,14 +309,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error('[Chat API] Error in chat:', error);
-      console.error('[Chat API] Error details:', {
+      
+      const errorDetails = {
         message: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
         name: error instanceof Error ? error.name : undefined,
-      });
+        sessionId: req.body.sessionId,
+        assistantId: 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9',
+      };
+      
+      console.error('[Chat API] Full error details:', errorDetails);
+      
+      // Return detailed error to frontend
       res.status(500).json({
-        error: 'Chat failed',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        error: 'Erreur lors de la conversation avec Peter',
+        details: error instanceof Error ? error.message : 'Unknown error',
+        technicalInfo: {
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+          sessionId: req.body.sessionId,
+          assistantId: 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9',
+          timestamp: new Date().toISOString()
+        }
       });
     }
   });

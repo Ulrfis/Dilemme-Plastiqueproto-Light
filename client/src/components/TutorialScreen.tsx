@@ -127,9 +127,25 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       }
     } catch (error) {
       console.error('Error processing message:', error);
+      
+      // Extract detailed error information
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorResponse = (error as any)?.response?.data;
+      
+      let detailedDescription = errorMessage;
+      if (errorResponse) {
+        detailedDescription = `${errorResponse.error || errorMessage}`;
+        if (errorResponse.details) {
+          detailedDescription += `\n\nDétails: ${errorResponse.details}`;
+        }
+        if (errorResponse.technicalInfo) {
+          detailedDescription += `\n\nInfo technique: ${errorResponse.technicalInfo.errorType} - ${errorResponse.technicalInfo.timestamp}`;
+        }
+      }
+      
       toast({
-        title: "Erreur",
-        description: "Impossible de traiter votre message. Réessayez.",
+        title: "Erreur de conversation avec Peter",
+        description: detailedDescription,
         variant: "destructive",
       });
     }
