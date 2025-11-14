@@ -10,6 +10,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  organization: 'org-z0AK8zYLTeapGaiDZFQ5co2N',
 });
 
 const TARGET_CLUES = [
@@ -109,8 +110,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/text-to-speech', async (req, res) => {
     try {
+      console.log('[TTS API] Request received:', { textLength: req.body.text?.length });
       const { text } = req.body;
-      
+
       if (!text) {
         return res.status(400).json({ error: 'No text provided' });
       }
@@ -118,10 +120,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
       const VOICE_ID = 'CBP9p4KAWPqrMHTDtWPR'; // Peter mai 2025 FR
 
+      console.log('[TTS API] Using voice:', VOICE_ID);
+
       if (!ELEVENLABS_API_KEY) {
+        console.error('[TTS API] ElevenLabs API key not configured');
         return res.status(500).json({ error: 'ElevenLabs API key not configured' });
       }
 
+      console.log('[TTS API] Calling ElevenLabs API...');
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
         method: 'POST',
         headers: {
@@ -140,20 +146,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (!response.ok) {
-        throw new Error(`ElevenLabs API error: ${response.status}`);
+        const errorText = await response.text();
+        console.error('[TTS API] ElevenLabs API error:', response.status, errorText);
+        throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
       }
 
+      console.log('[TTS API] Audio generated successfully');
       const audioBuffer = await response.arrayBuffer();
       res.set('Content-Type', 'audio/mpeg');
       res.send(Buffer.from(audioBuffer));
     } catch (error) {
-      console.error('Error generating speech:', error);
-      res.status(500).json({ error: 'Speech generation failed' });
+      console.error('[TTS API] Error generating speech:', error);
+      res.status(500).json({
+        error: 'Speech generation failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
   app.post('/api/chat', async (req, res) => {
     try {
+      console.log('[Chat API] Request received:', { sessionId: req.body.sessionId, messageLength: req.body.userMessage?.length });
       const { sessionId, userMessage } = req.body;
 
       if (!sessionId || !userMessage) {
@@ -165,7 +178,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: 'Session not found' });
       }
 
+      console.log('[Chat API] Session found:', { sessionId, foundClues: session.foundClues });
+
       const detectedClue = detectClue(userMessage, session.foundClues);
+      console.log('[Chat API] Clue detection:', { detectedClue, userMessage });
 
       await storage.addMessage({
         sessionId,
@@ -175,10 +191,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Use OpenAI Assistant API with the specified assistant ID
-      const ASSISTANT_ID = 'asst_vh6vk5M5izsuBYGDubIJOUwI';
+      const ASSISTANT_ID = 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9';
+      console.log('[Chat API] Using OpenAI Assistant:', ASSISTANT_ID);
 
       // Create a thread for this conversation
+      console.log('[Chat API] Creating thread...');
       const thread = await openai.beta.threads.create();
+      console.log('[Chat API] Thread created:', thread.id);
 
       // Get recent messages from storage to provide context
       const messages = await storage.getSessionMessages(sessionId);
@@ -189,15 +208,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const contextPrompt = `Indices déjà trouvés: ${session.foundClues.join(', ') || 'aucun'}`;
 
       // Add context message
+      console.log('[Chat API] Adding message to thread...');
       await openai.beta.threads.messages.create(thread.id, {
         role: 'user',
         content: `${contextPrompt}\n\nHistorique récent:\n${contextMessages.map(m => `${m.role}: ${m.content}`).join('\n')}\n\nMessage actuel: ${userMessage}`
       });
 
       // Run the assistant
+      console.log('[Chat API] Running assistant...');
       const run = await openai.beta.threads.runs.create(thread.id, {
         assistant_id: ASSISTANT_ID,
       });
+      console.log('[Chat API] Run started:', run.id);
 
       // Poll for completion
       let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
@@ -205,7 +227,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const maxAttempts = 30; // 30 seconds max wait
 
       while (runStatus.status !== 'completed' && attempts < maxAttempts) {
+        console.log(`[Chat API] Polling run status (attempt ${attempts + 1}):`, runStatus.status);
+
         if (runStatus.status === 'failed' || runStatus.status === 'cancelled' || runStatus.status === 'expired') {
+          console.error('[Chat API] Assistant run failed:', runStatus);
           throw new Error(`Assistant run failed with status: ${runStatus.status}`);
         }
 
@@ -215,8 +240,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (runStatus.status !== 'completed') {
+        console.error('[Chat API] Assistant run timeout after', attempts, 'attempts');
         throw new Error('Assistant run timeout');
       }
+
+      console.log('[Chat API] Run completed successfully');
 
       // Get the assistant's response
       const threadMessages = await openai.beta.threads.messages.list(thread.id);
@@ -226,6 +254,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (assistantMessage && assistantMessage.content[0]?.type === 'text') {
         assistantResponse = assistantMessage.content[0].text.value;
       }
+
+      console.log('[Chat API] Assistant response received:', { responseLength: assistantResponse.length });
 
       await storage.addMessage({
         sessionId,
@@ -241,14 +271,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      console.log('[Chat API] Sending response to client');
       res.json({
         response: assistantResponse,
         detectedClue: detectedClue,
         foundClues: detectedClue ? [...session.foundClues, detectedClue] : session.foundClues,
       });
     } catch (error) {
-      console.error('Error in chat:', error);
-      res.status(500).json({ error: 'Chat failed' });
+      console.error('[Chat API] Error in chat:', error);
+      console.error('[Chat API] Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        name: error instanceof Error ? error.name : undefined,
+      });
+      res.status(500).json({
+        error: 'Chat failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
