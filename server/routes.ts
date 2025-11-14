@@ -222,7 +222,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[Chat API] Run started:', run.id);
 
       // Poll for completion
-      let runStatus = await openai.beta.threads.runs.retrieve(run.id, thread.id);
+      let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
       let attempts = 0;
       const maxAttempts = 30; // 30 seconds max wait
 
@@ -235,7 +235,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-        runStatus = await openai.beta.threads.runs.retrieve(run.id, thread.id);
+        runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
         attempts++;
       }
 
