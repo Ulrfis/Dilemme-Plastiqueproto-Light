@@ -122,7 +122,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       const previousClues = foundClues;
       const detectedNewClues = result.foundClues.filter(clue => !previousClues.includes(clue));
 
+      console.log('[TutorialScreen] Clue detection:', {
+        previousClues,
+        resultFoundClues: result.foundClues,
+        detectedNewClues,
+      });
+
       if (detectedNewClues.length > 0) {
+        console.log('[TutorialScreen] New clues detected:', detectedNewClues);
         setFoundClues(result.foundClues);
         setNewClues(detectedNewClues);
         setShowSuccess(true);
@@ -184,10 +191,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   return (
     <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
       {/* Header fixe en haut avec compteur */}
-      <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-4 py-3 flex items-center justify-between">
+      <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between">
         <Badge
           variant="secondary"
-          className="text-base px-3 py-1.5 rounded-full"
+          className="text-sm sm:text-base px-2 sm:px-3 py-1 sm:py-1.5 rounded-full"
           data-testid="badge-clue-counter"
         >
           <span className="font-bold text-primary">{foundClues.length}</span>
@@ -198,23 +205,23 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           size="icon"
           variant="ghost"
           onClick={() => setShowHelp(!showHelp)}
-          className="w-10 h-10"
+          className="w-9 h-9 sm:w-10 sm:h-10"
           data-testid="button-help"
         >
-          <HelpCircle className="w-5 h-5" />
+          <HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" />
         </Button>
       </header>
 
       {showHelp && (
-        <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-4 py-3 animate-slide-up border-b border-card-border z-20">
-          <p className="text-sm">
+        <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-3 sm:px-4 py-2 sm:py-3 animate-slide-up border-b border-card-border z-20">
+          <p className="text-xs sm:text-sm">
             Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
           </p>
         </div>
       )}
 
       {/* Image zoomable - 100% en horizontal */}
-      <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '35vh', minHeight: '200px' }}>
+      <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '30vh', minHeight: '180px' }}>
         <ZoomableImage
           src={tutorialImage}
           alt="Image à analyser"
@@ -222,15 +229,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       </div>
 
       {/* Zone fixe pour les indices trouvés - toujours présente */}
-      <div className="px-4 py-2 bg-background border-b border-card-border flex-shrink-0 min-h-[60px] flex items-center">
+      <div className="px-3 sm:px-4 py-2 bg-background border-b border-card-border flex-shrink-0 min-h-[50px] sm:min-h-[60px] flex items-center">
         {foundClues.length > 0 ? (
           <div className="flex items-center justify-between gap-2 w-full">
-            <div className="flex flex-wrap gap-2 flex-1">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2 flex-1">
               {foundClues.map((clue, index) => (
                 <Badge
                   key={index}
                   variant="default"
-                  className="animate-scale-in text-xs"
+                  className="animate-scale-in text-xs sm:text-sm"
                   data-testid={`badge-clue-${index}`}
                 >
                   <CheckCircle2 className="w-3 h-3 mr-1" />
@@ -244,7 +251,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
                 onClick={handleFinish}
                 size="sm"
                 variant="outline"
-                className="rounded-xl flex-shrink-0"
+                className="rounded-xl flex-shrink-0 text-xs sm:text-sm px-2 sm:px-3"
                 data-testid="button-finish"
               >
                 Terminer
@@ -252,7 +259,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             )}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">Les indices apparaîtront ici...</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
         )}
       </div>
 

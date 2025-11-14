@@ -100,22 +100,37 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   }, [onComplete, videoEnded, videoStarted]);
 
   return (
-    <div className="fixed inset-0 bg-black z-50">
-      {/* Meta tags pour forcer l'orientation horizontale sur mobile */}
+    <div className="fixed inset-0 bg-black z-50 overflow-hidden">
+      {/* Styles pour mobile - Assurer 100vh réel et pas de scroll */}
       <style>{`
         @media screen and (max-width: 768px) {
           body {
-            transform: rotate(0deg);
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+          }
+          html {
+            overflow: hidden;
           }
         }
       `}</style>
 
-      {/* Player Gumlet en plein écran */}
+      {/* Player Gumlet en plein écran - avec styles inline pour mobile */}
       <iframe
         ref={iframeRef}
         src={embedUrl}
         title="Vidéo d'introduction"
         className="absolute inset-0 w-full h-full border-0"
+        style={{
+          width: '100%',
+          height: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          border: 'none',
+          display: 'block',
+        }}
         frameBorder="0"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
         allowFullScreen
@@ -124,12 +139,12 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
 
       {/* OVERLAY DE DÉMARRAGE - Apparaît au début pour demander l'interaction utilisateur */}
       {showPlayOverlay && (
-        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-20 flex items-center justify-center">
-          <div className="text-center space-y-6 px-6">
-            <div className="text-white space-y-3">
-              <Volume2 className="w-16 h-16 mx-auto animate-pulse text-primary" />
-              <h2 className="text-2xl sm:text-3xl font-bold">Vidéo d'introduction</h2>
-              <p className="text-base sm:text-lg text-white/80">
+        <div className="absolute inset-0 bg-black/90 backdrop-blur-sm z-20 flex items-center justify-center p-4 overflow-hidden">
+          <div className="text-center space-y-4 sm:space-y-6 max-w-md w-full">
+            <div className="text-white space-y-2 sm:space-y-3">
+              <Volume2 className="w-12 h-12 sm:w-16 sm:h-16 mx-auto animate-pulse text-primary" />
+              <h2 className="text-xl sm:text-2xl md:text-3xl font-bold px-4">Vidéo d'introduction</h2>
+              <p className="text-sm sm:text-base md:text-lg text-white/80 px-4">
                 Appuyez pour lancer la vidéo avec le son
               </p>
             </div>
@@ -137,15 +152,15 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
             <Button
               onClick={startVideoWithSound}
               size="lg"
-              className="h-20 px-8 rounded-2xl bg-primary hover:bg-primary/90 text-white text-xl font-bold hover:scale-105 transition-all duration-200 shadow-2xl"
+              className="h-16 sm:h-20 px-6 sm:px-8 rounded-2xl bg-primary hover:bg-primary/90 text-white text-lg sm:text-xl font-bold hover:scale-105 transition-all duration-200 shadow-2xl touch-manipulation w-full sm:w-auto"
               data-testid="button-start-video"
             >
-              <Play className="w-8 h-8 mr-3 fill-current" />
+              <Play className="w-6 h-6 sm:w-8 sm:h-8 mr-2 sm:mr-3 fill-current" />
               Lancer la vidéo
             </Button>
 
-            <p className="text-sm text-white/60 mt-4">
-              📱 Sur smartphone, pensez à mettre votre appareil en mode paysage
+            <p className="text-xs sm:text-sm text-white/60 px-4">
+              📱 Sur smartphone, mettez votre appareil en mode paysage
             </p>
           </div>
         </div>
@@ -162,11 +177,18 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
             }
           }}
           size="lg"
-          className="fixed top-1/2 right-4 sm:right-8 -translate-y-1/2 h-16 w-16 sm:w-auto sm:px-6 rounded-2xl bg-primary/90 backdrop-blur-md border-2 border-white/10 text-white hover:bg-primary hover:scale-105 transition-all duration-200 shadow-2xl z-10 flex items-center justify-center"
+          style={{
+            position: 'fixed',
+            top: '50%',
+            right: '1rem',
+            transform: 'translateY(-50%)',
+            zIndex: 30,
+          }}
+          className="h-14 w-14 sm:h-16 sm:w-auto sm:px-6 sm:right-8 rounded-2xl bg-primary/90 backdrop-blur-md border-2 border-white/10 text-white hover:bg-primary hover:scale-105 transition-all duration-200 shadow-2xl flex items-center justify-center"
           data-testid="button-skip"
         >
           <span className="hidden sm:inline text-lg font-medium mr-2">Continuer</span>
-          <ChevronRight className="w-6 h-6" />
+          <ChevronRight className="w-6 h-6 sm:w-6 sm:h-6" />
         </Button>
       )}
     </div>
