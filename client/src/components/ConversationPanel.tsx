@@ -186,22 +186,36 @@ export default function ConversationPanel({
                   {state === 'idle' && 'Appuyez sur le micro pour parler'}
                   {state === 'recording' && 'Enregistrement en cours...'}
                   {state === 'processing' && 'Traitement...'}
-                  {state === 'playing' && 'Peter vous répond...'}
+                  {state === 'playing' && (
+                    <span>
+                      Peter vous répond... <span className="text-orange-500 font-medium">Appuyez sur le micro pour l'interrompre</span>
+                    </span>
+                  )}
                   {state === 'error' && 'Erreur - Réessayez'}
                 </p>
               </div>
 
-              {state === 'idle' && (
+              {/* Bouton micro - TOUJOURS ACTIF, même pendant que Peter parle */}
+              {(state === 'idle' || state === 'playing') && (
                 <div className="relative flex-shrink-0">
                   <Button
                     onClick={onStartRecording}
                     size="icon"
-                    className="w-14 h-14 rounded-2xl"
+                    className={`w-14 h-14 rounded-2xl ${
+                      state === 'playing'
+                        ? 'bg-orange-500 hover:bg-orange-600'
+                        : ''
+                    }`}
                     data-testid="button-mic"
                   >
                     <Mic className="w-6 h-6" />
                   </Button>
-                  <div className="absolute inset-0 rounded-2xl border-2 border-primary/30 animate-pulse-ring pointer-events-none" />
+                  {state === 'idle' && (
+                    <div className="absolute inset-0 rounded-2xl border-2 border-primary/30 animate-pulse-ring pointer-events-none" />
+                  )}
+                  {state === 'playing' && (
+                    <div className="absolute inset-0 rounded-2xl border-2 border-orange-400 animate-pulse pointer-events-none" />
+                  )}
                 </div>
               )}
 
@@ -217,7 +231,7 @@ export default function ConversationPanel({
                 </Button>
               )}
 
-              {(state === 'processing' || state === 'playing') && (
+              {state === 'processing' && (
                 <div className="w-14 h-14 flex-shrink-0" />
               )}
             </>
