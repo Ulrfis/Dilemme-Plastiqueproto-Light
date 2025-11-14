@@ -3,12 +3,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
 import tutorialImage from "@assets/PlaceDesNations_Dilemme_1762432136623.png";
-import VoiceInteraction from "./VoiceInteraction";
+import ConversationPanel from "./ConversationPanel";
 import SuccessFeedback from "./SuccessFeedback";
 import ZoomableImage from "./ZoomableImage";
 import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
 import { sendChatMessage, textToSpeech } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+
+interface Message {
+  role: 'assistant' | 'user';
+  content: string;
+}
 
 interface TutorialScreenProps {
   sessionId: string;
@@ -22,9 +27,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [lastClue, setLastClue] = useState('');
   const [showHelp, setShowHelp] = useState(false);
   const [fallbackMode, setFallbackMode] = useState(false);
-  const [lastAssistantMessage, setLastAssistantMessage] = useState('');
-  
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [textInput, setTextInput] = useState('');
+
   const { toast } = useToast();
+
+  // Message de bienvenue initial
+  useEffect(() => {
+    setMessages([{
+      role: 'assistant',
+      content: `Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 4 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé.`
+    }]);
+  }, [userName]);
   
   const {
     audioState,
@@ -79,12 +93,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   const processMessage = async (userMessage: string) => {
     try {
+      // Ajouter le message utilisateur
+      setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+
       const result = await sendChatMessage(sessionId, userMessage);
-      
-      // Store assistant response to display it
-      setLastAssistantMessage(result.response);
-      setTimeout(() => setLastAssistantMessage(''), 8000);
-      
+
+      // Ajouter la réponse de l'assistant
+      setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
+
       if (result.detectedClue && !foundClues.includes(result.detectedClue)) {
         setFoundClues(result.foundClues);
         setLastClue(result.detectedClue);
@@ -117,33 +133,23 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   };
 
   return (
-    <div className="relative min-h-screen flex flex-col">
-      {/* Image plein écran zoomable en arrière-plan */}
-      <div className="absolute inset-0 z-0">
-        <ZoomableImage 
-          src={tutorialImage} 
-          alt="Image à analyser"
-        />
-        {/* Overlay sombre pour lisibilité */}
-        <div className="absolute inset-0 bg-black/30 pointer-events-none" />
-      </div>
-
+    <div className="min-h-screen flex flex-col bg-background">
       {/* Header avec compteur */}
-      <header className="relative z-10 bg-black/50 backdrop-blur-sm px-4 py-4 flex items-center justify-between">
-        <Badge 
-          variant="secondary" 
-          className="text-lg px-4 py-2 rounded-full bg-background/90"
+      <header className="bg-card border-b border-card-border px-4 py-3 flex items-center justify-between flex-shrink-0">
+        <Badge
+          variant="secondary"
+          className="text-base px-3 py-1.5 rounded-full"
           data-testid="badge-clue-counter"
         >
           <span className="font-bold text-primary">{foundClues.length}</span>
-          <span className="text-muted-foreground">/4</span>
+          <span className="text-muted-foreground">/4 indices</span>
         </Badge>
-        
+
         <Button
           size="icon"
           variant="ghost"
           onClick={() => setShowHelp(!showHelp)}
-          className="w-10 h-10 bg-background/90 hover:bg-background"
+          className="w-10 h-10"
           data-testid="button-help"
         >
           <HelpCircle className="w-5 h-5" />
@@ -151,35 +157,31 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       </header>
 
       {showHelp && (
-        <div className="relative z-10 bg-black/70 backdrop-blur px-4 py-4 animate-slide-up">
-          <p className="text-sm text-white">
+        <div className="bg-muted/50 backdrop-blur px-4 py-3 animate-slide-up border-b border-card-border">
+          <p className="text-sm">
             Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
           </p>
         </div>
       )}
 
-      {/* Contenu central - réponse de Peter et indices */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-end p-4 pb-72 space-y-4 pointer-events-none">
-        {/* Réponse de l'assistant */}
-        {lastAssistantMessage && (
-          <div className="w-full max-w-md bg-black/80 backdrop-blur-md rounded-2xl p-4 animate-slide-up pointer-events-auto">
-            <p className="text-sm font-medium text-white/70 mb-2">Peter dit:</p>
-            <p className="text-base text-white" data-testid="text-assistant-message">
-              {lastAssistantMessage}
-            </p>
-          </div>
-        )}
+      {/* Image zoomable - occupe environ 40% de l'écran en haut */}
+      <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '40vh', minHeight: '250px' }}>
+        <ZoomableImage
+          src={tutorialImage}
+          alt="Image à analyser"
+        />
+      </div>
 
-        {/* Indices trouvés */}
-        {foundClues.length > 0 && (
-          <div className="w-full max-w-md bg-black/70 backdrop-blur-md rounded-2xl p-4 space-y-2 pointer-events-auto">
-            <p className="text-sm font-medium text-white">Indices trouvés:</p>
-            <div className="flex flex-wrap gap-2">
+      {/* Indices trouvés - zone fixe entre image et conversation */}
+      {foundClues.length > 0 && (
+        <div className="px-4 py-3 bg-card border-y border-card-border flex-shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2 flex-1">
               {foundClues.map((clue, index) => (
-                <Badge 
-                  key={index} 
-                  variant="default" 
-                  className="animate-scale-in bg-primary/90"
+                <Badge
+                  key={index}
+                  variant="default"
+                  className="animate-scale-in text-xs"
                   data-testid={`badge-clue-${index}`}
                 >
                   <CheckCircle2 className="w-3 h-3 mr-1" />
@@ -187,31 +189,35 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
                 </Badge>
               ))}
             </div>
-            
+
             {foundClues.length >= 2 && (
               <Button
                 onClick={handleFinish}
+                size="sm"
                 variant="outline"
-                className="w-full rounded-xl mt-2 bg-background/90 hover:bg-background"
+                className="rounded-xl flex-shrink-0"
                 data-testid="button-finish"
               >
-                Terminer le niveau
+                Terminer
               </Button>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Contrôles vocaux superposés sur l'image */}
-      <div className="relative z-20">
-        <VoiceInteraction
+      {/* Zone de conversation - prend le reste de l'espace */}
+      <div className="flex-1 overflow-hidden">
+        <ConversationPanel
+          messages={messages}
+          userName={userName}
           onStartRecording={handleStartRecording}
           onStopRecording={handleStopRecording}
           onSendText={handleSendText}
-          onRecoverFromError={recoverFromError}
           state={audioState}
           transcription={transcription}
           fallbackMode={fallbackMode}
+          textInput={textInput}
+          onTextInputChange={setTextInput}
         />
       </div>
 
