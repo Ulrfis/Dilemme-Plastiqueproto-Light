@@ -29,16 +29,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [fallbackMode, setFallbackMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [textInput, setTextInput] = useState('');
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 4 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé.`);
 
   const { toast } = useToast();
-
-  // Message de bienvenue initial
-  useEffect(() => {
-    setMessages([{
-      role: 'assistant',
-      content: `Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 4 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé.`
-    }]);
-  }, [userName]);
 
   // MOBILE FIX: Ajouter un état local pour forcer le retour à idle en cas de blocage
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
@@ -66,6 +60,45 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       setIsAudioPlaying(false);
     },
   });
+
+  // Fonction pour déverrouiller l'audio et jouer le message de bienvenue
+  const handleUnlockAudio = async () => {
+    console.log('[TutorialScreen] Unlocking audio with user gesture');
+    
+    try {
+      // Générer le TTS pour le message de bienvenue
+      const audioBlob = await textToSpeechWithRetry(welcomeMessage);
+      console.log('[TutorialScreen] Welcome message TTS generated');
+      
+      // Jouer l'audio - ce geste utilisateur déverrouille l'audio pour toute la session
+      await playAudio(audioBlob);
+      console.log('[TutorialScreen] Welcome audio played successfully');
+      
+      // Ajouter le message de bienvenue à la conversation
+      setMessages([{
+        role: 'assistant',
+        content: welcomeMessage
+      }]);
+      
+      // Marquer que l'audio est déverrouillé
+      setAudioUnlocked(true);
+    } catch (error) {
+      console.error('[TutorialScreen] Failed to unlock audio:', error);
+      
+      // En cas d'erreur, afficher le message en mode texte
+      setMessages([{
+        role: 'assistant',
+        content: welcomeMessage
+      }]);
+      setAudioUnlocked(true);
+      
+      toast({
+        title: "Mode texte activé",
+        description: "Peter s'affiche en texte uniquement.",
+        variant: "default",
+      });
+    }
+  };
 
   // MOBILE FIX: Détecter automatiquement si MediaRecorder est supporté
   // et activer le fallback mode si nécessaire (Safari iOS ancien)
@@ -325,6 +358,35 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const handleFinish = () => {
     onComplete(foundClues.length, foundClues);
   };
+
+  // Afficher le bouton de déverrouillage audio si l'audio n'est pas encore déverrouillé
+  if (!audioUnlocked) {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-center bg-background px-4">
+        <div className="max-w-md w-full space-y-6 text-center">
+          <div className="space-y-3">
+            <h2 className="text-2xl font-bold">Prêt à commencer ?</h2>
+            <p className="text-muted-foreground">
+              Cliquez sur le bouton ci-dessous pour écouter Peter vous accueillir et commencer le tutoriel.
+            </p>
+          </div>
+          
+          <Button
+            onClick={handleUnlockAudio}
+            size="lg"
+            className="w-full max-w-sm rounded-2xl text-lg py-6"
+            data-testid="button-unlock-audio"
+          >
+            🎧 Écouter Peter
+          </Button>
+          
+          <p className="text-sm text-muted-foreground">
+            Pour une meilleure expérience, activez le son de votre appareil.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
