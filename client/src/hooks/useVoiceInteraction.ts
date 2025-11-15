@@ -94,38 +94,50 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const stopRecording = useCallback(async (): Promise<string | null> => {
     return new Promise((resolve) => {
       const mediaRecorder = mediaRecorderRef.current;
-      
+
       if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        console.log('[useVoiceInteraction] stopRecording: no active recording');
         resolve(null);
         return;
       }
 
+      console.log('[useVoiceInteraction] stopRecording: stopping recording...');
+
       mediaRecorder.onstop = async () => {
+        console.log('[useVoiceInteraction] Recording stopped, chunks:', audioChunksRef.current.length);
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        
-        mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        
+        console.log('[useVoiceInteraction] Audio blob created, size:', audioBlob.size);
+
+        // MOBILE FIX: S'assurer que toutes les tracks sont arrêtées pour libérer le micro
+        mediaRecorder.stream.getTracks().forEach(track => {
+          track.stop();
+          console.log('[useVoiceInteraction] Stopped track:', track.kind, track.label);
+        });
+
         setAudioState('processing');
 
         try {
           const formData = new FormData();
           formData.append('audio', audioBlob, 'recording.webm');
 
+          console.log('[useVoiceInteraction] Sending audio to speech-to-text API...');
           const response = await fetch('/api/speech-to-text', {
             method: 'POST',
             body: formData,
           });
 
           if (!response.ok) {
-            throw new Error('Transcription failed');
+            throw new Error(`Transcription failed with status ${response.status}`);
           }
 
           const data = await response.json();
+          console.log('[useVoiceInteraction] Transcription successful:', data.text);
           setTranscription(data.text);
+          setAudioState('idle'); // MOBILE FIX: Retourner à idle après succès
           resolve(data.text);
         } catch (error) {
-          console.error('Error transcribing audio:', error);
-          setAudioState('error');
+          console.error('[useVoiceInteraction] Error transcribing audio:', error);
+          setAudioState('idle'); // MOBILE FIX: Retourner à idle même en cas d'erreur
           resolve(null);
         }
       };
@@ -136,23 +148,47 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
   const playAudio = useCallback(async (audioBlob: Blob): Promise<void> => {
     return new Promise((resolve, reject) => {
+      console.log('[useVoiceInteraction] playAudio called, blob size:', audioBlob.size);
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       audioElementRef.current = audio;
 
       setAudioState('playing');
 
+      // MOBILE FIX: Timeout de sécurité pour détecter les blocages audio
+      const maxAudioDuration = 120000; // 2 minutes max
+      const safetyTimeoutId = setTimeout(() => {
+        console.error('[useVoiceInteraction] Audio playback timeout - forcing cleanup');
+        if (audioElementRef.current === audio) {
+          audio.pause();
+          audio.currentTime = 0;
+          URL.revokeObjectURL(audioUrl);
+          setAudioState('idle');
+          audioElementRef.current = null;
+          if (onAudioStopRef.current) {
+            onAudioStopRef.current();
+          }
+          resolve(); // Résoudre au lieu de rejeter pour ne pas bloquer
+        }
+      }, maxAudioDuration);
+
       audio.onended = () => {
+        console.log('[useVoiceInteraction] Audio ended normally');
+        clearTimeout(safetyTimeoutId);
         URL.revokeObjectURL(audioUrl);
         setAudioState('idle');
         audioElementRef.current = null;
+        if (onAudioStopRef.current) {
+          onAudioStopRef.current();
+        }
         resolve();
       };
 
       audio.onerror = (error) => {
         console.error('[useVoiceInteraction] Audio playback error:', error);
+        clearTimeout(safetyTimeoutId);
         URL.revokeObjectURL(audioUrl);
-        setAudioState('error');
+        setAudioState('idle'); // MOBILE FIX: Retourner à idle au lieu de error
         audioElementRef.current = null;
         // Notifier l'arrêt de l'audio en cas d'erreur
         if (onAudioStopRef.current) {
@@ -189,8 +225,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
       audio.play().catch((error) => {
         console.error('[useVoiceInteraction] Error playing audio:', error);
+        clearTimeout(safetyTimeoutId);
         URL.revokeObjectURL(audioUrl);
-        setAudioState('error');
+        setAudioState('idle'); // MOBILE FIX: Retourner à idle au lieu de error
         audioElementRef.current = null;
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         // Notifier l'arrêt en cas d'erreur de lecture
