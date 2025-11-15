@@ -210,10 +210,15 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       }
 
       const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
+      console.log('[useVoiceInteraction] Created blob URL:', audioUrl.substring(0, 50) + '...');
+
+      const audio = new Audio();
       audioElementRef.current = audio;
 
-      setAudioState('playing');
+      // MOBILE FIX: Configuration pour mobile Safari
+      audio.preload = 'auto';
+      audio.volume = 1.0;
+      console.log('[useVoiceInteraction] Audio element created and configured');
 
       // MOBILE FIX: Timeout de sécurité pour détecter les blocages audio
       const maxAudioDuration = 120000; // 2 minutes max
@@ -232,9 +237,26 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         }
       }, maxAudioDuration);
 
+      // MOBILE FIX: Timeout pour détecter si play() ne démarre jamais
+      let playStarted = false;
+      const playTimeoutId = setTimeout(() => {
+        if (!playStarted) {
+          console.error('[useVoiceInteraction] Audio play() did not start within 5s - forcing cleanup');
+          clearTimeout(safetyTimeoutId);
+          URL.revokeObjectURL(audioUrl);
+          setAudioState('idle');
+          audioElementRef.current = null;
+          if (onAudioStopRef.current) {
+            onAudioStopRef.current();
+          }
+          reject(new Error('Audio play timeout'));
+        }
+      }, 5000);
+
       audio.onended = () => {
         console.log('[useVoiceInteraction] Audio ended normally');
         clearTimeout(safetyTimeoutId);
+        clearTimeout(playTimeoutId);
         URL.revokeObjectURL(audioUrl);
         setAudioState('idle');
         audioElementRef.current = null;
@@ -245,30 +267,53 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       };
 
       audio.onerror = (error) => {
-        console.error('[useVoiceInteraction] Audio playback error:', error);
+        console.error('[useVoiceInteraction] Audio element error event:', error);
+        console.error('[useVoiceInteraction] Audio error details:', {
+          error: audio.error,
+          code: audio.error?.code,
+          message: audio.error?.message,
+        });
         clearTimeout(safetyTimeoutId);
+        clearTimeout(playTimeoutId);
         URL.revokeObjectURL(audioUrl);
-        setAudioState('idle'); // MOBILE FIX: Retourner à idle au lieu de error
+        setAudioState('idle');
         audioElementRef.current = null;
-        // Notifier l'arrêt de l'audio en cas d'erreur
         if (onAudioStopRef.current) {
           onAudioStopRef.current();
         }
-        reject(error);
+        reject(new Error(`Audio error: ${audio.error?.message || 'Unknown error'}`));
       };
 
       // Appeler onAudioStart quand l'audio commence VRAIMENT à jouer
-      // Utilise la ref pour toujours appeler la dernière version du callback
       audio.onplaying = () => {
-        console.log('[useVoiceInteraction] Audio started playing, calling onAudioStart');
+        console.log('[useVoiceInteraction] Audio PLAYING event - audio is actually playing now!');
+        playStarted = true;
+        clearTimeout(playTimeoutId);
         if (onAudioStartRef.current) {
           onAudioStartRef.current();
         }
       };
 
+      // MOBILE FIX: Détecter quand l'audio est chargé
+      audio.onloadeddata = () => {
+        console.log('[useVoiceInteraction] Audio data loaded successfully');
+      };
+
+      audio.oncanplay = () => {
+        console.log('[useVoiceInteraction] Audio can start playing (canplay event)');
+      };
+
       // MOBILE FIX: Gérer l'interruption audio (appel entrant, changement d'app, etc.)
       audio.onpause = () => {
         console.log('[useVoiceInteraction] Audio paused (possibly interrupted on mobile)');
+      };
+
+      audio.onwaiting = () => {
+        console.log('[useVoiceInteraction] Audio waiting for data (buffering)');
+      };
+
+      audio.onstalled = () => {
+        console.warn('[useVoiceInteraction] Audio stalled (network issue?)');
       };
 
       // MOBILE FIX: Tenter de reprendre la lecture si l'audio est suspendu
@@ -283,24 +328,81 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
       document.addEventListener('visibilitychange', handleVisibilityChange);
 
-      audio.play().catch((error) => {
-        console.error('[useVoiceInteraction] Error playing audio:', error);
-        clearTimeout(safetyTimeoutId);
-        URL.revokeObjectURL(audioUrl);
-        setAudioState('idle'); // MOBILE FIX: Retourner à idle au lieu de error
-        audioElementRef.current = null;
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        // Notifier l'arrêt en cas d'erreur de lecture
-        if (onAudioStopRef.current) {
-          onAudioStopRef.current();
-        }
-        reject(error);
-      });
-
       // Cleanup de l'event listener quand l'audio se termine
       audio.addEventListener('ended', () => {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       }, { once: true });
+
+      // MOBILE FIX: Définir la source APRÈS avoir configuré tous les event listeners
+      console.log('[useVoiceInteraction] Setting audio src and loading...');
+      audio.src = audioUrl;
+      audio.load(); // Force le chargement
+
+      // MOBILE FIX: Attendre que l'audio soit chargé avant de jouer
+      const attemptPlay = () => {
+        console.log('[useVoiceInteraction] Attempting to play audio...');
+        console.log('[useVoiceInteraction] Audio state before play:', {
+          readyState: audio.readyState,
+          paused: audio.paused,
+          ended: audio.ended,
+          duration: audio.duration,
+        });
+
+        setAudioState('playing');
+
+        const playPromise = audio.play();
+        console.log('[useVoiceInteraction] play() called, promise:', playPromise);
+
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log('[useVoiceInteraction] play() promise resolved successfully!');
+              console.log('[useVoiceInteraction] Audio state after play:', {
+                paused: audio.paused,
+                currentTime: audio.currentTime,
+                duration: audio.duration,
+              });
+            })
+            .catch((error) => {
+              console.error('[useVoiceInteraction] play() promise rejected:', error);
+              console.error('[useVoiceInteraction] Error name:', error.name);
+              console.error('[useVoiceInteraction] Error message:', error.message);
+              clearTimeout(safetyTimeoutId);
+              clearTimeout(playTimeoutId);
+              URL.revokeObjectURL(audioUrl);
+              setAudioState('idle');
+              audioElementRef.current = null;
+              document.removeEventListener('visibilitychange', handleVisibilityChange);
+              if (onAudioStopRef.current) {
+                onAudioStopRef.current();
+              }
+              reject(error);
+            });
+        } else {
+          console.warn('[useVoiceInteraction] play() did not return a promise (old browser?)');
+        }
+      };
+
+      // Si l'audio est déjà prêt, jouer immédiatement
+      if (audio.readyState >= 2) { // HAVE_CURRENT_DATA
+        console.log('[useVoiceInteraction] Audio already ready, playing immediately');
+        attemptPlay();
+      } else {
+        // Sinon, attendre l'événement canplay
+        console.log('[useVoiceInteraction] Audio not ready yet, waiting for canplay...');
+        audio.addEventListener('canplay', () => {
+          console.log('[useVoiceInteraction] canplay event received, now attempting play');
+          attemptPlay();
+        }, { once: true });
+
+        // Timeout si canplay ne se déclenche jamais
+        setTimeout(() => {
+          if (audio.readyState < 2) {
+            console.error('[useVoiceInteraction] Audio not ready after 3s, forcing play anyway');
+            attemptPlay();
+          }
+        }, 3000);
+      }
     });
   }, []); // Pas de dépendances - le callback reste stable
 
