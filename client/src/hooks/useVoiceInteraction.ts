@@ -184,6 +184,31 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const playAudio = useCallback(async (audioBlob: Blob): Promise<void> => {
     return new Promise((resolve, reject) => {
       console.log('[useVoiceInteraction] playAudio called, blob size:', audioBlob.size);
+
+      // MOBILE FIX: Vérifier que le Blob est valide et non vide
+      if (!audioBlob || audioBlob.size === 0) {
+        console.error('[useVoiceInteraction] Invalid or empty audio blob');
+        setAudioState('idle');
+        if (onAudioStopRef.current) {
+          onAudioStopRef.current();
+        }
+        reject(new Error('Invalid or empty audio blob'));
+        return;
+      }
+
+      // MOBILE FIX: Nettoyer complètement l'élément audio précédent avant d'en créer un nouveau
+      if (audioElementRef.current) {
+        console.log('[useVoiceInteraction] Cleaning up previous audio element');
+        try {
+          audioElementRef.current.pause();
+          audioElementRef.current.src = '';
+          audioElementRef.current.load();
+          audioElementRef.current = null;
+        } catch (error) {
+          console.warn('[useVoiceInteraction] Error cleaning up previous audio:', error);
+        }
+      }
+
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
       audioElementRef.current = audio;

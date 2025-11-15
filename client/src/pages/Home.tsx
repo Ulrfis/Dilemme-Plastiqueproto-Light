@@ -50,22 +50,16 @@ export default function Home() {
   };
 
   const handleReplay = async () => {
-    try {
-      const session = await createSession({
-        userName: userName,
-        foundClues: [],
-        score: 0,
-        audioMode: 'voice',
-        completed: 0,
-      });
-      
-      setSessionId(session.id);
-      setScore(0);
-      setFoundClues([]);
-      setCurrentScreen('tutorial');
-    } catch (error) {
-      console.error('Failed to create new session:', error);
-    }
+    console.log('[Home] Replay button clicked - resetting to title screen');
+
+    // Réinitialiser tous les états
+    setUserName('');
+    setSessionId('');
+    setScore(0);
+    setFoundClues([]);
+
+    // Retourner à l'écran de titre (début de l'expérience)
+    setCurrentScreen('title');
   };
 
   const handleNextLevel = () => {

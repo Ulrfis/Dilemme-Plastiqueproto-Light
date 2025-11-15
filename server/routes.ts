@@ -156,8 +156,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
       }
 
-      console.log('[TTS API] Audio generated successfully');
       const audioBuffer = await response.arrayBuffer();
+
+      // MOBILE FIX: Vérifier que l'audio n'est pas vide
+      if (audioBuffer.byteLength === 0) {
+        console.error('[TTS API] Received empty audio from ElevenLabs');
+        throw new Error('Received empty audio from ElevenLabs');
+      }
+
+      console.log('[TTS API] Audio generated successfully, size:', audioBuffer.byteLength, 'bytes');
       res.set('Content-Type', 'audio/mpeg');
       res.send(Buffer.from(audioBuffer));
     } catch (error) {

@@ -64,8 +64,19 @@ export async function textToSpeech(text: string): Promise<Blob> {
   });
 
   if (!response.ok) {
-    throw new Error('Failed to generate speech');
+    const errorText = await response.text();
+    console.error('[API] TTS error response:', errorText);
+    throw new Error(`Failed to generate speech: ${response.status}`);
   }
 
-  return response.blob();
+  const blob = await response.blob();
+
+  // MOBILE FIX: Vérifier que le blob est valide
+  if (!blob || blob.size === 0) {
+    console.error('[API] Received empty or invalid audio blob');
+    throw new Error('Received empty or invalid audio blob from server');
+  }
+
+  console.log('[API] TTS blob received successfully, size:', blob.size, 'type:', blob.type);
+  return blob;
 }
