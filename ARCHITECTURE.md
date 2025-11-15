@@ -3,7 +3,7 @@
 ## 🆕 Améliorations v1.1.0 - Robustesse Mobile
 
 ### Problèmes Résolus
-La version 1.1.0 apporte des **corrections critiques** pour garantir la fiabilité du flux audio sur mobile :
+La version 1.1.0 apporte des corrections critiques pour garantir la fiabilité du flux audio sur mobile.
 
 #### 1. Flux Audio Bloqué Après Première Interaction
 **Symptôme** : Peter ne parlait plus après la première conversation, particulièrement sur Safari iOS.
@@ -13,6 +13,7 @@ La version 1.1.0 apporte des **corrections critiques** pour garantir la fiabilit
 - Éléments `<audio>` non nettoyés entre les lectures
 - États bloqués sans mécanisme de récupération
 - Timeouts trop courts pour connexions mobiles lentes
+- Audio play() appelé sans attendre le chargement
 
 **Solutions Implémentées** :
 
@@ -37,7 +38,23 @@ if (audioElementRef.current) {
   audioElementRef.current = null;
 }
 
-// 4. Détection de blocage (client/src/components/TutorialScreen.tsx:323-330)
+// 4. Pré-chargement et attente readyState (client/src/hooks/useVoiceInteraction.ts:215-221)
+const audio = new Audio();
+audio.preload = 'auto';
+audio.volume = 1.0;
+audio.src = audioUrl;
+audio.load();
+
+// 5. Attente de l'événement canplay (client/src/hooks/useVoiceInteraction.ts:356-375)
+if (audio.readyState >= 2) {
+  attemptPlay();
+} else {
+  audio.addEventListener('canplay', () => {
+    attemptPlay();
+  }, { once: true });
+}
+
+// 6. Détection de blocage (client/src/components/TutorialScreen.tsx:323-330)
 const startTimeoutId = setTimeout(() => {
   if (audioState === 'playing' && !isAudioPlaying) {
     console.warn('Audio stuck - recovering');
@@ -46,7 +63,7 @@ const startTimeoutId = setTimeout(() => {
   }
 }, 5000);
 
-// 5. Timeouts améliorés (client/src/components/TutorialScreen.tsx:310)
+// 7. Timeouts améliorés (client/src/components/TutorialScreen.tsx:310)
 const safetyTimeout = estimatedDuration + 10000; // +10s au lieu de +5s
 ```
 
@@ -69,7 +86,7 @@ const handleReplay = async () => {
 ```
 
 ### Impact
-- **Fiabilité** : 100% des interactions audio fonctionnent maintenant sur mobile
+- **Fiabilité** : Flux audio fonctionne de manière cohérente sur mobile
 - **Robustesse** : Récupération automatique en cas de blocage
 - **UX** : Expérience utilisateur cohérente sur tous les appareils
 
@@ -145,10 +162,10 @@ const handleReplay = async () => {
 │  │  │     │  └─ Last 6 messages (sliding window)   │   │ │   │
 │  │  │     └─────────────────────────────────────────┘   │ │   │
 │  │  │                                                     │ │   │
-│  │  │  6. Call OpenAI GPT-4o-mini:                      │ │   │
+│  │  │  6. Call OpenAI Assistant API:                    │ │   │
+│  │  │     - Assistant ID: asst_P9b5PxMd1k9HjBgbyXI1Cvm9 │ │   │
 │  │  │     - Model: gpt-4o-mini                          │ │   │
-│  │  │     - max_tokens: 150                             │ │   │
-│  │  │     - temperature: 0.7                            │ │   │
+│  │  │     - Maintains thread for context               │ │   │
 │  │  │                                                     │ │   │
 │  │  │  7. Save assistant response to history            │ │   │
 │  │  │  8. Update session (found clues, score)           │ │   │
@@ -165,12 +182,14 @@ const handleReplay = async () => {
 │  │  ┌────────────────────────────────────────────────────┐ │   │
 │  │  │                                                     │ │   │
 │  │  │  1. Receive { text }                              │ │   │
-│  │  │  2. Call ElevenLabs API                           │ │   │
-│  │  │     - Voice ID: ErXwobaYiN019PkySvjV              │ │   │
+│  │  │  2. Validate text not empty                       │ │   │
+│  │  │  3. Call ElevenLabs API                           │ │   │
+│  │  │     - Voice ID: CBP9p4KAWPqrMHTDtWPR              │ │   │
 │  │  │     - Model: eleven_multilingual_v2               │ │   │
 │  │  │     - Stability: 0.5                              │ │   │
 │  │  │     - Similarity boost: 0.75                      │ │   │
-│  │  │  3. Return audio/mpeg stream                      │ │   │
+│  │  │  4. Validate audio not empty                      │ │   │
+│  │  │  5. Return audio/mpeg stream                      │ │   │
 │  │  │                                                     │ │   │
 │  │  └────────────────────────────────────────────────────┘ │   │
 │  └──────────────────────────────────────────────────────────┘   │
@@ -183,12 +202,19 @@ const handleReplay = async () => {
 │                         CLIENT (React/TypeScript)                │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │  Audio Playback                                          │   │
-│  │  - Create Audio element                                  │   │
-│  │  - Display Peter avatar with animation                   │   │
-│  │  - Play audio response                                   │   │
+│  │  1. Validate blob                                        │   │
+│  │  2. Cleanup previous audio element                       │   │
+│  │  3. Create new Audio element                             │   │
+│  │  4. Configure (preload, volume)                          │   │
+│  │  5. Set src and load()                                   │   │
+│  │  6. Wait for readyState or canplay event                 │   │
+│  │  7. Call play()                                           │   │
+│  │  8. Display Peter avatar with animation                  │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## 🔄 Flux de Données Détaillé
 
@@ -197,7 +223,6 @@ const handleReplay = async () => {
 **Fichier**: `server/routes.ts:88-108`
 
 ```typescript
-// L'audio arrive en format WebM
 POST /api/speech-to-text
 ├─ Input: FormData with audio.webm file
 ├─ Processing:
@@ -211,569 +236,200 @@ POST /api/speech-to-text
 ```
 
 **Technologies utilisées**:
-- **OpenAI Whisper**: Modèle de reconnaissance vocale state-of-the-art
-- **Multer**: Middleware pour gérer les fichiers multipart
-- **WebM**: Format audio léger pour le web
+- OpenAI Whisper : Reconnaissance vocale
+- Multer : Gestion fichiers multipart
+- WebM : Format audio pour le web
 
 ---
 
 ### 2️⃣ GESTION DE CONVERSATION (LLM)
 
-**Fichier**: `server/routes.ts:155-230`
+**Fichier**: `server/routes.ts:172-342`
 
 ```typescript
 POST /api/chat
 ├─ Input: { sessionId, userMessage }
 ├─ Processing:
-│  ├─ Load session state from storage
-│  ├─ Detect clues in user message (detectClue function)
+│  ├─ Load session state from MemStorage
+│  ├─ Detect clues in user message
 │  ├─ Save user message to conversation history
-│  ├─ Build context:
-│  │  ├─ System prompt (persona + rules + found clues)
-│  │  └─ Last 6 messages (sliding window for context)
-│  ├─ GPT-4o-mini API call
-│  │  ├─ model: 'gpt-4o-mini'
-│  │  ├─ max_tokens: 150
-│  │  └─ temperature: 0.7
+│  ├─ OpenAI Assistant API call
+│  │  ├─ First message: Create thread
+│  │  ├─ Subsequent: Reuse thread
+│  │  ├─ Assistant ID: asst_P9b5PxMd1k9HjBgbyXI1Cvm9
+│  │  └─ Model: gpt-4o-mini
 │  ├─ Save assistant response
 │  └─ Update session (clues, score)
 └─ Output: { response, detectedClue, foundClues }
 ```
 
-**Système de Mémoire Actuel**:
+**Système de Mémoire**:
+- MemStorage : Stockage en mémoire RAM (non persistant)
+- Thread OpenAI : Maintient contexte conversationnel
+- Sliding window : Derniers messages disponibles
 
-```javascript
-// Fichier: server/storage.ts
-class MemStorage {
-  // Stockage en mémoire RAM (non persistant)
-  private sessions: Map<string, TutorialSession>
-  private messages: Map<string, ConversationMessage>
-
-  // Historique de conversation par session
-  getSessionMessages(sessionId) {
-    // Retourne tous les messages de la session, triés par date
-  }
-}
-```
-
-**Contexte envoyé au LLM**:
-```javascript
-[
-  {
-    role: 'system',
-    content: `Tu es Peter, un assistant IA éducatif...
-              Indices déjà trouvés: ${foundClues.join(', ')}
-              Règles: ...`
-  },
-  ...last6Messages.map(msg => ({
-    role: msg.role,  // 'user' ou 'assistant'
-    content: msg.content
-  }))
-]
+**Détection des Indices**:
+```typescript
+const TARGET_CLUES = [
+  { keyword: "ADN", variants: ["adn", "acide désoxyribonucléique", "génétique", "double hélice"] },
+  { keyword: "bébé", variants: ["bébé", "bebe", "nourrisson", "enfant", "nouveau-né"] },
+  { keyword: "penseur de Rodin", variants: ["penseur", "rodin", "sculpture", "statue penseur"] },
+  { keyword: "plastique", variants: ["plastique", "pollution plastique", "déchets plastiques", "pollution"] }
+];
 ```
 
 ---
 
 ### 3️⃣ TEXT-TO-SPEECH (TTS)
 
-**Fichier**: `server/routes.ts:110-153`
+**Fichier**: `server/routes.ts:116-170`
 
 ```typescript
 POST /api/text-to-speech
 ├─ Input: { text: "Bravo! Vous avez trouvé l'ADN!" }
 ├─ Processing:
+│  ├─ Validate text not empty
 │  └─ ElevenLabs API call
-│     ├─ Voice ID: ErXwobaYiN019PkySvjV
+│     ├─ Voice ID: CBP9p4KAWPqrMHTDtWPR (Peter mai 2025 FR)
 │     ├─ Model: eleven_multilingual_v2
-│     ├─ Stability: 0.5 (variabilité de la voix)
-│     └─ Similarity boost: 0.75 (fidélité à la voix)
+│     ├─ Stability: 0.5
+│     └─ Similarity boost: 0.75
+├─ Validate: audio not empty
 └─ Output: audio/mpeg stream
 ```
 
 ---
 
-## 🎯 Fine-Tuning: Mémoire (RAG)
+## 🎯 Endpoints API
 
-### Option 1: RAG Simple (Recommandé pour MVP)
+### POST `/api/speech-to-text`
+Transcrit un fichier audio en texte.
 
-Implémentez un système de contexte enrichi sans base vectorielle:
+**Request:**
+```http
+POST /api/speech-to-text
+Content-Type: multipart/form-data
 
-```typescript
-// server/routes.ts - Modifier la fonction chat
-
-// 1. Créer une base de connaissances
-const KNOWLEDGE_BASE = {
-  "ADN": {
-    definition: "L'ADN est la molécule qui porte l'information génétique...",
-    hints: ["double hélice", "code génétique", "cellules"],
-    educational_facts: [
-      "L'ADN est présent dans chaque cellule de votre corps",
-      "Il détermine vos caractéristiques héréditaires"
-    ]
-  },
-  "plastique": {
-    definition: "Le plastique est un polymère synthétique...",
-    hints: ["pollution", "océans", "recyclage"],
-    educational_facts: [
-      "8 millions de tonnes de plastique finissent dans les océans chaque année",
-      "Le plastique met 450 ans à se décomposer"
-    ]
-  },
-  // ... autres indices
-};
-
-// 2. Modifier le system prompt pour inclure le contexte
-const systemPrompt = `Tu es Peter, un assistant IA éducatif...
-
-Indices déjà trouvés: ${session.foundClues.join(', ')}
-
-CONTEXTE ÉDUCATIF:
-${session.foundClues.map(clue =>
-  `- ${clue}: ${KNOWLEDGE_BASE[clue].definition}`
-).join('\n')}
-
-CONNAISSANCES DISPONIBLES:
-${Object.entries(KNOWLEDGE_BASE)
-  .filter(([key]) => !session.foundClues.includes(key))
-  .map(([key, value]) => `- ${key}: ${value.hints.join(', ')}`)
-  .join('\n')}
-
-Règles:
-- Réponds en 1-2 phrases courtes et encourageantes
-- Utilise les connaissances ci-dessus pour enrichir tes réponses
-- Si l'utilisateur pose une question, utilise les faits éducatifs pertinents
-- Guide avec des questions ouvertes
-`;
+audio: <file.webm>
 ```
 
-### Option 2: RAG Avancé avec Vector Database
-
-Pour une solution plus scalable:
-
-```bash
-npm install @pinecone-database/pinecone openai
-```
-
-**Implémentation**:
-
-```typescript
-// server/rag.ts (nouveau fichier)
-import { Pinecone } from '@pinecone-database/pinecone';
-import OpenAI from 'openai';
-
-const pinecone = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-export class RAGSystem {
-  private index;
-
-  constructor() {
-    this.index = pinecone.Index('dilemme-plastique');
-  }
-
-  // 1. Créer des embeddings pour la base de connaissances
-  async indexKnowledge(documents: Array<{id: string, text: string, metadata: any}>) {
-    for (const doc of documents) {
-      const embedding = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
-        input: doc.text,
-      });
-
-      await this.index.upsert([{
-        id: doc.id,
-        values: embedding.data[0].embedding,
-        metadata: doc.metadata,
-      }]);
-    }
-  }
-
-  // 2. Rechercher le contexte pertinent
-  async searchRelevantContext(query: string, topK: number = 3) {
-    const queryEmbedding = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: query,
-    });
-
-    const results = await this.index.query({
-      vector: queryEmbedding.data[0].embedding,
-      topK,
-      includeMetadata: true,
-    });
-
-    return results.matches.map(match => match.metadata.text);
-  }
-
-  // 3. Enrichir le contexte de la conversation
-  async enrichContext(userMessage: string, foundClues: string[]) {
-    const relevantContext = await this.searchRelevantContext(userMessage);
-
-    return {
-      relevantFacts: relevantContext,
-      clueHints: foundClues.map(clue =>
-        `Vous avez déjà découvert: ${clue}`
-      )
-    };
-  }
+**Response:**
+```json
+{
+  "text": "Je vois une double hélice dans l'image"
 }
-
-// Utilisation dans routes.ts
-const ragSystem = new RAGSystem();
-
-app.post('/api/chat', async (req, res) => {
-  // ... code existant ...
-
-  // Enrichir avec RAG
-  const enrichedContext = await ragSystem.enrichContext(userMessage, session.foundClues);
-
-  const systemPrompt = `Tu es Peter, un assistant IA éducatif...
-
-  CONTEXTE PERTINENT:
-  ${enrichedContext.relevantFacts.join('\n')}
-
-  INDICES TROUVÉS:
-  ${enrichedContext.clueHints.join('\n')}
-
-  Règles: ...`;
-
-  // ... suite du code ...
-});
 ```
 
-### Option 3: Fine-Tuning du Modèle OpenAI
+### POST `/api/chat`
+Envoie un message à l'assistant IA et reçoit une réponse.
 
-Pour un comportement très spécifique à votre cas d'usage:
-
-```typescript
-// Préparer des données d'entraînement (JSONL format)
-const trainingData = [
-  {
-    messages: [
-      { role: "system", content: "Tu es Peter, assistant éducatif..." },
-      { role: "user", content: "Je vois quelque chose qui ressemble à une hélice" },
-      { role: "assistant", content: "Intéressant! Une double hélice peut-être? Qu'est-ce que cela pourrait représenter dans le contexte scientifique?" }
-    ]
-  },
-  // ... minimum 10 exemples, idéalement 50-100
-];
-
-// Script pour fine-tuner (à exécuter hors de l'app)
-async function fineTuneModel() {
-  const openai = new OpenAI();
-
-  // 1. Upload training file
-  const file = await openai.files.create({
-    file: fs.createReadStream("training_data.jsonl"),
-    purpose: "fine-tune",
-  });
-
-  // 2. Create fine-tuning job
-  const fineTune = await openai.fineTuning.jobs.create({
-    training_file: file.id,
-    model: "gpt-4o-mini-2024-07-18",
-  });
-
-  console.log("Fine-tuning job created:", fineTune.id);
+**Request:**
+```json
+{
+  "sessionId": "uuid-v4",
+  "userMessage": "Je vois une double hélice"
 }
-
-// Puis dans routes.ts, utiliser le modèle fine-tuné:
-const completion = await openai.chat.completions.create({
-  model: 'ft:gpt-4o-mini-2024-07-18:your-org:custom-model:id',
-  messages: chatMessages,
-  // ...
-});
 ```
+
+**Response:**
+```json
+{
+  "response": "Bravo! Une double hélice, c'est très bien vu!",
+  "detectedClue": "ADN",
+  "foundClues": ["ADN"]
+}
+```
+
+### POST `/api/text-to-speech`
+Génère un fichier audio à partir de texte.
+
+**Request:**
+```json
+{
+  "text": "Bravo! Tu as trouvé l'ADN!"
+}
+```
+
+**Response:**
+```
+Content-Type: audio/mpeg
+<binary audio data>
+```
+
+### POST `/api/sessions`
+Crée une nouvelle session utilisateur.
+
+**Request:**
+```json
+{
+  "userName": "Sophie",
+  "audioMode": "voice"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid-v4",
+  "userName": "Sophie",
+  "foundClues": [],
+  "score": 0,
+  "audioMode": "voice",
+  "completed": 0,
+  "createdAt": "2025-11-15T10:30:00Z"
+}
+```
+
+### GET `/api/sessions/:id`
+Récupère une session existante.
+
+### PATCH `/api/sessions/:id`
+Met à jour une session (score, indices trouvés, etc.).
 
 ---
 
-## 🎤 Customisation de la Voix (TTS)
-
-### Option 1: Voix Custom avec ElevenLabs (Déjà utilisé)
-
-**1. Créer une voix custom via ElevenLabs Dashboard**:
-
-```bash
-# 1. Aller sur https://elevenlabs.io/voice-lab
-# 2. Cliquer sur "Instant Voice Cloning" ou "Professional Voice Cloning"
-```
-
-**Voice Cloning Options**:
-
-**A. Instant Voice Cloning** (Rapide, 1 minute d'audio):
-```
-- Upload 1-5 fichiers audio de la voix cible
-- Durée totale: 1-5 minutes
-- Qualité: Bonne pour la plupart des cas
-- Coût: ~$1-5 par voix
-```
-
-**B. Professional Voice Cloning** (Haute qualité, 30 minutes d'audio):
-```
-- Upload 30+ minutes d'audio de haute qualité
-- Meilleure fidélité et naturalité
-- Coût: ~$330 par voix
-```
-
-**2. Utiliser la voix dans le code**:
-
-```typescript
-// server/routes.ts:119
-app.post('/api/text-to-speech', async (req, res) => {
-  const { text } = req.body;
-
-  // Modifier le VOICE_ID avec votre voix custom
-  const VOICE_ID = 'YOUR_CUSTOM_VOICE_ID'; // Obtenu après création
-
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
-    method: 'POST',
-    headers: {
-      'Accept': 'audio/mpeg',
-      'Content-Type': 'application/json',
-      'xi-api-key': process.env.ELEVENLABS_API_KEY
-    },
-    body: JSON.stringify({
-      text,
-      model_id: 'eleven_multilingual_v2', // Support français
-      voice_settings: {
-        stability: 0.5,           // 0-1: Consistance de la voix
-        similarity_boost: 0.75,   // 0-1: Fidélité à la voix originale
-        style: 0.5,               // 0-1: Exagération du style (v2 model)
-        use_speaker_boost: true   // Améliore la clarté
-      }
-    })
-  });
-
-  const audioBuffer = await response.arrayBuffer();
-  res.set('Content-Type', 'audio/mpeg');
-  res.send(Buffer.from(audioBuffer));
-});
-```
-
-**3. Paramètres de fine-tuning de la voix**:
-
-```typescript
-const VOICE_PRESETS = {
-  energetic: {
-    stability: 0.3,          // Plus de variation
-    similarity_boost: 0.8,
-    style: 0.7,              // Plus d'émotion
-  },
-  calm: {
-    stability: 0.7,          // Plus stable
-    similarity_boost: 0.6,
-    style: 0.3,              // Moins d'émotion
-  },
-  educational: {
-    stability: 0.5,          // Équilibré
-    similarity_boost: 0.75,
-    style: 0.5,
-    speaking_rate: 1.0,      // Vitesse normale
-  },
-  child_friendly: {
-    stability: 0.4,
-    similarity_boost: 0.7,
-    style: 0.6,              // Plus expressif
-  }
-};
-
-// Utiliser selon le contexte
-const voiceSettings = VOICE_PRESETS.educational;
-```
-
-### Option 2: OpenAI TTS (Alternative)
-
-```typescript
-app.post('/api/text-to-speech', async (req, res) => {
-  const { text } = req.body;
-
-  const mp3 = await openai.audio.speech.create({
-    model: "tts-1-hd",  // ou "tts-1" (plus rapide, moins cher)
-    voice: "nova",      // alloy, echo, fable, onyx, nova, shimmer
-    input: text,
-    speed: 1.0,         // 0.25 à 4.0
-  });
-
-  const buffer = Buffer.from(await mp3.arrayBuffer());
-  res.set('Content-Type', 'audio/mpeg');
-  res.send(buffer);
-});
-```
-
-**Voix disponibles OpenAI**:
-- `alloy` - Neutre, polyvalente
-- `echo` - Masculine, claire
-- `fable` - Masculine britannique
-- `onyx` - Masculine profonde
-- `nova` - Féminine énergique ⭐ (recommandé pour Peter)
-- `shimmer` - Féminine douce
-
-### Option 3: Coqui TTS (Open Source, Self-Hosted)
-
-```bash
-npm install @coqui/tts
-```
-
-```typescript
-import { TTS } from '@coqui/tts';
-
-const tts = new TTS();
-
-app.post('/api/text-to-speech', async (req, res) => {
-  const { text } = req.body;
-
-  // Charger un modèle pré-entraîné
-  const audioBuffer = await tts.synthesize({
-    text,
-    model: 'tts_models/fr/css10/vits', // Modèle français
-    speakerId: 0,
-  });
-
-  res.set('Content-Type', 'audio/wav');
-  res.send(audioBuffer);
-});
-```
-
----
-
-## 🔧 Variables d'Environnement Requises
+## 🔧 Variables d'Environnement
 
 ```bash
 # .env
-OPENAI_API_KEY=sk-...                    # Pour STT (Whisper) et LLM (GPT)
-ELEVENLABS_API_KEY=...                   # Pour TTS
-PINECONE_API_KEY=...                     # (Optionnel) Pour RAG avancé
+OPENAI_API_KEY=sk-...          # Pour STT (Whisper) et LLM (Assistant API)
+ELEVENLABS_API_KEY=...         # Pour TTS
 ```
 
----
+**Configuration OpenAI:**
+- Organisation : `org-z0AK8zYLTeapGaiDZFQ5co2N`
+- Assistant ID : `asst_P9b5PxMd1k9HjBgbyXI1Cvm9`
 
-## 📊 Comparaison des Solutions
-
-### Mémoire (RAG)
-
-| Solution | Complexité | Coût | Performance | Use Case |
-|----------|-----------|------|-------------|----------|
-| **RAG Simple** | ⭐ | Gratuit | Bon pour <100 docs | MVP, petite base |
-| **Pinecone RAG** | ⭐⭐⭐ | ~$70/mois | Excellent | Production, scaling |
-| **Fine-tuning** | ⭐⭐⭐⭐ | ~$8 + $0.012/1K tokens | Très spécifique | Comportement unique |
-
-### Voix (TTS)
-
-| Solution | Qualité | Latence | Coût/1K chars | Customisation |
-|----------|---------|---------|---------------|---------------|
-| **ElevenLabs** | ⭐⭐⭐⭐⭐ | ~1-2s | $0.30 | Voice cloning ⭐ |
-| **OpenAI TTS** | ⭐⭐⭐⭐ | ~0.5-1s | $0.015 | 6 voix fixes |
-| **Coqui TTS** | ⭐⭐⭐ | <0.5s | Gratuit | Open source |
+**Configuration ElevenLabs:**
+- Voice ID : `CBP9p4KAWPqrMHTDtWPR` (Peter mai 2025 FR)
+- Model : `eleven_multilingual_v2`
 
 ---
 
-## 🚀 Recommandations d'Implémentation
+## 📝 Fichiers Principaux
 
-### Pour la Mémoire (Peter):
-1. **Court terme (1 semaine)**: Implémenter RAG Simple avec KNOWLEDGE_BASE
-2. **Moyen terme (1 mois)**: Migrer vers Pinecone + embeddings si >100 documents
-3. **Long terme**: Fine-tuner GPT-4o-mini avec vos propres exemples de conversations
-
-### Pour la Voix:
-1. **Immédiat**: Tester les 6 voix OpenAI pour trouver celle qui convient
-2. **Court terme**: Créer une voix custom ElevenLabs avec Instant Voice Cloning
-3. **Moyen terme**: Professional Voice Cloning si budget le permet
-
----
-
-## 📝 Fichiers à Modifier
-
-| Fonctionnalité | Fichier | Ligne |
-|----------------|---------|-------|
-| STT Config | `server/routes.ts` | 88-108 |
-| LLM Prompt | `server/routes.ts` | 179-188 |
-| LLM Model | `server/routes.ts` | 198-203 |
-| TTS Config | `server/routes.ts` | 110-153 |
-| TTS Validation | `server/routes.ts` | 161-165 |
-| Voice ID | `server/routes.ts` | 119 |
-| Voice Settings | `server/routes.ts` | 135-138 |
-| Storage | `server/storage.ts` | 17-82 |
-| Messages Window | `server/routes.ts` | 192 |
-| Audio Playback | `client/src/hooks/useVoiceInteraction.ts` | 184-280 |
-| Audio Cleanup | `client/src/hooks/useVoiceInteraction.ts` | 199-210 |
-| Blob Validation | `client/src/lib/api.ts` | 74-78 |
-| Audio Timeouts | `client/src/components/TutorialScreen.tsx` | 310, 323-330 |
-| Replay Button | `client/src/pages/Home.tsx` | 52-63 |
+| Fonctionnalité | Fichier | Description |
+|----------------|---------|-------------|
+| STT Config | `server/routes.ts:88-108` | Configuration Whisper |
+| LLM Chat | `server/routes.ts:172-342` | OpenAI Assistant API |
+| TTS Config | `server/routes.ts:116-170` | Configuration ElevenLabs |
+| TTS Validation | `server/routes.ts:161-165` | Validation audio côté serveur |
+| Storage | `server/storage.ts:17-82` | MemStorage (sessions, messages) |
+| Audio Playback | `client/src/hooks/useVoiceInteraction.ts:184-407` | Lecture audio avec pré-chargement |
+| Audio Cleanup | `client/src/hooks/useVoiceInteraction.ts:199-210` | Nettoyage Audio element |
+| Blob Validation | `client/src/lib/api.ts:74-78` | Validation blob côté client |
+| Audio Timeouts | `client/src/components/TutorialScreen.tsx:310, 323-330` | Timeouts de sécurité |
+| Replay Button | `client/src/pages/Home.tsx:52-63` | Bouton rejouer le tutoriel |
 
 ---
 
-## 💡 Conseils de Fine-Tuning
-
-### Pour améliorer Peter (LLM):
-
-```typescript
-// 1. Augmenter la fenêtre de contexte
-...messages.slice(-10)  // Au lieu de -6
-
-// 2. Ajouter de la personnalité
-const systemPrompt = `Tu es Peter, un assistant IA éducatif avec ces traits:
-- Enthousiaste et encourageant
-- Utilise des métaphores scientifiques
-- Pose des questions socratiques
-- S'adapte au niveau de l'utilisateur
-- Utilise parfois des emojis (🧬 pour ADN, 🌍 pour plastique)
-
-Ton style de réponse:
-- Format: [Réaction émotionnelle] + [Question/Information] + [Encouragement]
-- Exemple: "Wow, excellente observation! 🎉 Une double hélice... cela te fait penser à quoi en biologie? Continue d'explorer!"
-`;
-
-// 3. Ajuster la température selon le contexte
-const temperature = session.foundClues.length === 0 ? 0.9 : 0.6;
-// Plus créatif au début, plus précis quand on avance
-```
-
-### Pour améliorer la voix:
-
-```typescript
-// Adapter les paramètres selon le contexte
-const getVoiceSettings = (message: string) => {
-  if (message.includes('Bravo') || message.includes('Excellent')) {
-    return { stability: 0.3, similarity_boost: 0.8, style: 0.8 }; // Enthousiaste
-  }
-  if (message.includes('?')) {
-    return { stability: 0.5, similarity_boost: 0.75, style: 0.6 }; // Questionnement
-  }
-  return { stability: 0.5, similarity_boost: 0.75, style: 0.5 }; // Normal
-};
-```
-
----
-
-## 🔍 Debugging & Monitoring
-
-```typescript
-// Ajouter des logs détaillés
-app.post('/api/chat', async (req, res) => {
-  const startTime = Date.now();
-
-  console.log('[CHAT] User message:', userMessage);
-  console.log('[CHAT] Found clues:', session.foundClues);
-
-  const completion = await openai.chat.completions.create({...});
-
-  console.log('[CHAT] LLM response:', assistantResponse);
-  console.log('[CHAT] Processing time:', Date.now() - startTime, 'ms');
-  console.log('[CHAT] Tokens used:', completion.usage);
-
-  // ...
-});
-```
-
----
-
-## 📚 Ressources Utiles
+## 📚 Ressources
 
 ### Documentation du Projet
 - [README.md](./README.md) - Documentation principale
-- [CHANGELOG.md](./CHANGELOG.md) - Historique complet des modifications
+- [CHANGELOG.md](./CHANGELOG.md) - Historique des modifications
 
-### APIs & Services
-- [OpenAI Whisper Docs](https://platform.openai.com/docs/guides/speech-to-text)
-- [OpenAI GPT Fine-tuning](https://platform.openai.com/docs/guides/fine-tuning)
-- [OpenAI TTS Docs](https://platform.openai.com/docs/guides/text-to-speech)
-- [ElevenLabs Voice Lab](https://elevenlabs.io/voice-lab)
-- [Pinecone RAG Guide](https://docs.pinecone.io/guides/data/understanding-hybrid-search)
+### APIs
+- [OpenAI Whisper](https://platform.openai.com/docs/guides/speech-to-text)
+- [OpenAI Assistant API](https://platform.openai.com/docs/assistants/overview)
+- [ElevenLabs TTS](https://elevenlabs.io/docs)
