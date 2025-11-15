@@ -15,6 +15,7 @@ interface UseVoiceInteractionResult {
   playAudio: (audioBlob: Blob) => Promise<void>;
   stopAudio: () => void;
   checkMicrophonePermission: () => Promise<boolean>;
+  checkMediaRecorderSupport: () => boolean;
   reset: () => void;
   recoverFromError: () => void;
 }
@@ -53,11 +54,34 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     }
   }, []);
 
+  // Vérifier si MediaRecorder est supporté (pas sur Safari iOS ancien)
+  const checkMediaRecorderSupport = useCallback((): boolean => {
+    const isSupported = typeof MediaRecorder !== 'undefined' &&
+                       typeof navigator.mediaDevices !== 'undefined' &&
+                       typeof navigator.mediaDevices.getUserMedia === 'function';
+
+    console.log('[useVoiceInteraction] MediaRecorder support check:', isSupported);
+
+    // Vérifier aussi si le navigateur supporte les types MIME nécessaires
+    if (isSupported && MediaRecorder.isTypeSupported) {
+      const webmSupported = MediaRecorder.isTypeSupported('audio/webm');
+      const oggSupported = MediaRecorder.isTypeSupported('audio/ogg');
+      const mp4Supported = MediaRecorder.isTypeSupported('audio/mp4');
+
+      console.log('[useVoiceInteraction] MIME type support:', { webmSupported, oggSupported, mp4Supported });
+
+      // Au moins un format doit être supporté
+      return webmSupported || oggSupported || mp4Supported;
+    }
+
+    return isSupported;
+  }, []);
+
   const startRecording = useCallback(async () => {
     console.log('[useVoiceInteraction] startRecording called');
     try {
       console.log('[useVoiceInteraction] Requesting microphone access...');
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -67,11 +91,22 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       console.log('[useVoiceInteraction] Microphone access granted, stream:', stream);
 
       audioChunksRef.current = [];
-      
+
+      // Déterminer le meilleur format MIME supporté
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported && !MediaRecorder.isTypeSupported('audio/webm')) {
+        if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          mimeType = 'audio/ogg';
+        }
+      }
+      console.log('[useVoiceInteraction] Using MIME type:', mimeType);
+
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm',
+        mimeType: mimeType,
       });
-      console.log('[useVoiceInteraction] MediaRecorder created');
+      console.log('[useVoiceInteraction] MediaRecorder created with type:', mimeType);
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -318,6 +353,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     playAudio,
     stopAudio,
     checkMicrophonePermission,
+    checkMediaRecorderSupport,
     reset,
     recoverFromError,
   };
