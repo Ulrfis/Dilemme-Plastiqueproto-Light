@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ChevronRight, Volume2, VolumeX } from "lucide-react";
+import { ChevronRight, Volume2, VolumeX, Play } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
 import { useMedia } from "@/contexts/MediaContext";
 
@@ -11,19 +11,17 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   const { audioUnlocked } = useMedia();
   const videoId = "6916ff7ddf9720847e0868f0";
 
-  // Si l'audio est déverrouillé, démarrer avec le son
-  // Sinon, démarrer en muted pour assurer l'autoplay
-  const shouldStartWithSound = audioUnlocked;
+  console.log('[VideoIntro] Component mounted - audioUnlocked:', audioUnlocked);
 
-  console.log('[VideoIntro] Component mounted - audioUnlocked:', audioUnlocked, 'shouldStartWithSound:', shouldStartWithSound);
-
-  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true&muted=${!shouldStartWithSound}&loop=false`;
+  // CHANGEMENT: Pas d'autoplay - l'utilisateur doit cliquer sur play
+  // La vidéo démarre toujours avec le son activé (comme YouTube)
+  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=false&preload=true&muted=false&loop=false`;
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [videoEnded, setVideoEnded] = useState(false);
-  const [isMuted, setIsMuted] = useState(!shouldStartWithSound);
-  const [showUnmutePrompt, setShowUnmutePrompt] = useState(!shouldStartWithSound);
+  const [isMuted, setIsMuted] = useState(false); // Son activé par défaut
+  const [isPlaying, setIsPlaying] = useState(false); // État de lecture
   const [iframeLoaded, setIframeLoaded] = useState(false);
 
   // Tenter le plein écran en mode paysage au chargement
@@ -56,27 +54,29 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     return () => clearTimeout(timer);
   }, []);
 
-  // Activer automatiquement le son dès que l'iframe est chargé
-  // MAIS seulement si l'audio était déjà déverrouillé (sinon ça ne marchera pas)
-  useEffect(() => {
-    if (iframeLoaded && iframeRef.current && isMuted && shouldStartWithSound) {
-      console.log('[VideoIntro] Attempting to unmute automatically (audio was unlocked)');
-      // Petit délai pour s'assurer que le player Gumlet est prêt
-      const unmuteTimer = setTimeout(() => {
-        if (iframeRef.current) {
-          iframeRef.current.contentWindow?.postMessage(
-            { method: 'unmute' },
-            '*'
-          );
-          setIsMuted(false);
-          setShowUnmutePrompt(false);
-          console.log('[VideoIntro] Unmute command sent');
-        }
-      }, 500);
+  // Fonction pour démarrer la lecture de la vidéo (appelée par le bouton Play)
+  const playVideo = () => {
+    if (iframeRef.current?.contentWindow) {
+      console.log('[VideoIntro] User clicked Play - starting video with sound');
 
-      return () => clearTimeout(unmuteTimer);
+      // Envoyer plusieurs formats de commande play
+      iframeRef.current.contentWindow.postMessage({ method: 'play' }, '*');
+      iframeRef.current.contentWindow.postMessage({ event: 'command', func: 'play' }, '*');
+      iframeRef.current.contentWindow.postMessage('play', '*');
+
+      // S'assurer que le son est activé
+      setTimeout(() => {
+        if (iframeRef.current?.contentWindow) {
+          iframeRef.current.contentWindow.postMessage({ method: 'unmute' }, '*');
+          iframeRef.current.contentWindow.postMessage({ event: 'command', func: 'unmute' }, '*');
+        }
+      }, 100);
+
+      setIsPlaying(true);
+      setIsMuted(false);
+      console.log('[VideoIntro] Play and unmute commands sent');
     }
-  }, [iframeLoaded, isMuted, shouldStartWithSound]);
+  };
 
   // Fonction pour activer/désactiver le son avec retry pour fiabilité
   const toggleMute = () => {
@@ -121,6 +121,19 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
       if (event.data && (event.data.event === 'ready' || event.data.type === 'ready')) {
         console.log('[VideoIntro] Player is ready');
         setIframeLoaded(true);
+      }
+
+      // Détecter quand la vidéo commence à jouer
+      if (event.data && (event.data.event === 'play' || event.data.event === 'playing' ||
+                        event.data.type === 'play' || event.data.type === 'playing')) {
+        console.log('[VideoIntro] Video started playing');
+        setIsPlaying(true);
+      }
+
+      // Détecter quand la vidéo est en pause
+      if (event.data && (event.data.event === 'pause' || event.data.type === 'pause')) {
+        console.log('[VideoIntro] Video paused');
+        setIsPlaying(false);
       }
 
       // Gumlet peut envoyer différents formats d'événements pour la fin
@@ -217,23 +230,19 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         data-testid="video-intro"
       />
 
-      {/* Bouton UNMUTE prominent au centre - Disparaît après activation - PLUS GROS */}
-      {showUnmutePrompt && isMuted && (
+      {/* Bouton PLAY prominent au centre - Disparaît quand la vidéo joue */}
+      {!isPlaying && iframeLoaded && (
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-4">
           <Button
-            onClick={toggleMute}
+            onClick={playVideo}
             size="lg"
             className="h-28 w-28 sm:h-32 sm:w-32 rounded-full bg-primary hover:bg-primary/90 hover:scale-110 transition-all duration-200 shadow-2xl border-4 border-white/20"
-            data-testid="button-unmute"
+            data-testid="button-play"
           >
-            <Volume2 className="w-14 h-14 sm:w-16 sm:h-16" />
+            <Play className="w-14 h-14 sm:w-16 sm:h-16" />
           </Button>
           <div className="bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full text-white text-base sm:text-lg font-medium animate-pulse">
-            {shouldStartWithSound ? (
-              <>🔊 Activez le son pour une meilleure expérience</>
-            ) : (
-              <>🔊 Touchez pour activer le son</>
-            )}
+            ▶️ Cliquez pour lancer la vidéo (avec son)
           </div>
         </div>
       )}

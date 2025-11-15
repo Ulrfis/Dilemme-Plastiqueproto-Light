@@ -246,53 +246,55 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       console.log('[TutorialScreen] Adding assistant message immediately');
       setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
 
-      // Puis tenter de jouer l'audio si on n'est pas en fallback mode
-      if (!fallbackMode) {
-        try {
-          console.log('[TutorialScreen] Generating TTS for response with retry...');
-          const audioBlob = await textToSpeechWithRetry(result.response);
-          console.log('[TutorialScreen] TTS generated successfully');
+      // IMPORTANT: Peter doit TOUJOURS parler (TTS), même si l'utilisateur est en mode texte (fallbackMode)
+      // Le fallbackMode affecte seulement l'INPUT utilisateur (texte vs voix), pas l'OUTPUT de Peter
+      try {
+        console.log('[TutorialScreen] Generating TTS for response with retry...');
+        const audioBlob = await textToSpeechWithRetry(result.response);
+        console.log('[TutorialScreen] TTS generated successfully');
 
-          console.log('[TutorialScreen] About to call playAudio...');
+        console.log('[TutorialScreen] About to call playAudio...');
 
-          // MOBILE FIX: Timeout de sécurité pour forcer le retour à idle si l'audio ne se termine pas
-          // Estimer la durée de l'audio (environ 150 mots par minute de parole)
-          const estimatedDuration = Math.max(10000, (result.response.length / 5) * 60 / 150 * 1000);
-          const safetyTimeout = estimatedDuration + 5000; // Ajouter 5 secondes de marge
+        // MOBILE FIX: Timeout de sécurité pour forcer le retour à idle si l'audio ne se termine pas
+        // Estimer la durée de l'audio (environ 150 mots par minute de parole)
+        const estimatedDuration = Math.max(10000, (result.response.length / 5) * 60 / 150 * 1000);
+        const safetyTimeout = estimatedDuration + 5000; // Ajouter 5 secondes de marge
 
-          console.log(`[TutorialScreen] Setting safety timeout: ${safetyTimeout}ms`);
-          const timeoutId = setTimeout(() => {
-            console.warn('[TutorialScreen] Safety timeout triggered - forcing audio to stop');
-            stopAudio();
-            // Forcer le retour à idle si le hook ne le fait pas
-            if (audioState !== 'idle') {
-              recoverFromError();
-            }
-          }, safetyTimeout);
-
-          try {
-            await playAudio(audioBlob);
-            console.log('[TutorialScreen] Audio playback completed successfully');
-          } finally {
-            // Toujours nettoyer le timeout, que l'audio réussisse ou échoue
-            clearTimeout(timeoutId);
+        console.log(`[TutorialScreen] Setting safety timeout: ${safetyTimeout}ms`);
+        const timeoutId = setTimeout(() => {
+          console.warn('[TutorialScreen] Safety timeout triggered - forcing audio to stop');
+          stopAudio();
+          // Forcer le retour à idle si le hook ne le fait pas
+          if (audioState !== 'idle') {
+            recoverFromError();
           }
-        } catch (error) {
-          console.error('[TutorialScreen] TTS or playback failed:', error);
+        }, safetyTimeout);
 
-          // CRITIQUE: S'assurer que l'état revient à idle pour permettre de continuer
-          console.log('[TutorialScreen] Forcing state back to idle after audio error');
-          recoverFromError();
+        try {
+          await playAudio(audioBlob);
+          console.log('[TutorialScreen] Audio playback completed successfully');
+        } finally {
+          // Toujours nettoyer le timeout, que l'audio réussisse ou échoue
+          clearTimeout(timeoutId);
+        }
+      } catch (error) {
+        console.error('[TutorialScreen] TTS or playback failed:', error);
 
-          // Afficher un toast informatif (pas d'erreur destructive)
+        // CRITIQUE: S'assurer que l'état revient à idle pour permettre de continuer
+        console.log('[TutorialScreen] Forcing state back to idle after audio error');
+        recoverFromError();
+
+        // Afficher un toast informatif seulement si on n'est PAS déjà en fallbackMode
+        // (pour éviter de spammer l'utilisateur avec des toasts sur mobile)
+        if (!fallbackMode) {
           toast({
             title: "Voix temporairement indisponible",
-            description: "La réponse de Peter s'affiche en texte. Le mode vocal reste actif.",
+            description: "La réponse de Peter s'affiche en texte uniquement.",
             variant: "default",
           });
-
-          // NE PAS activer fallbackMode - garder le mode vocal pour les prochains échanges
         }
+
+        // NE PAS activer fallbackMode - le mode texte est seulement pour l'INPUT
       }
     } catch (error) {
       console.error('Error processing message:', error);
@@ -420,8 +422,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
       {/* DESKTOP LAYOUT - two columns side by side (lg and above) */}
       <div className="hidden lg:flex h-full">
-        {/* LEFT COLUMN - Conversation scrollable (narrow column ~25%) */}
-        <div className="w-80 flex flex-col border-r border-card-border flex-shrink-0">
+        {/* LEFT COLUMN - Conversation scrollable (wider column ~35%) */}
+        <div className="w-[35%] flex flex-col border-r border-card-border flex-shrink-0">
           <ConversationPanel
             messages={messages}
             userName={userName}
@@ -436,7 +438,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           />
         </div>
 
-        {/* RIGHT COLUMN - Image maximized with info bar on top (~75% width) */}
+        {/* RIGHT COLUMN - Image maximized with info bar on top (~65% width) */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Info bar above image - contains clue counter, found clues, and help */}
           <div className="flex-shrink-0 bg-card border-b border-card-border px-6 py-3 flex items-center justify-between gap-4">
@@ -508,7 +510,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           )}
 
           {/* Image section - maximized to fill remaining space */}
-          <div className="flex-1 relative bg-muted overflow-hidden">
+          <div className="flex-1 relative bg-white overflow-hidden">
             <ZoomableImage
               src={tutorialImage}
               alt="Image à analyser"
