@@ -260,93 +260,195 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
-      {/* Header fixe en haut avec compteur */}
-      <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between">
-        <Badge
-          variant="secondary"
-          className="text-sm sm:text-base px-2 sm:px-3 py-1 sm:py-1.5 rounded-full"
-          data-testid="badge-clue-counter"
-        >
-          <span className="font-bold text-primary">{foundClues.length}</span>
-          <span className="text-muted-foreground">/4 indices</span>
-        </Badge>
+      {/* MOBILE LAYOUT - vertical stacking (default, shown on screens < lg) */}
+      <div className="flex flex-col h-full lg:hidden">
+        {/* Header fixe en haut avec compteur */}
+        <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between">
+          <Badge
+            variant="secondary"
+            className="text-sm sm:text-base px-2 sm:px-3 py-1 sm:py-1.5 rounded-full"
+            data-testid="badge-clue-counter"
+          >
+            <span className="font-bold text-primary">{foundClues.length}</span>
+            <span className="text-muted-foreground">/4 indices</span>
+          </Badge>
 
-        <Button
-          size="icon"
-          variant="ghost"
-          onClick={() => setShowHelp(!showHelp)}
-          className="w-9 h-9 sm:w-10 sm:h-10"
-          data-testid="button-help"
-        >
-          <HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" />
-        </Button>
-      </header>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setShowHelp(!showHelp)}
+            className="w-9 h-9 sm:w-10 sm:h-10"
+            data-testid="button-help"
+          >
+            <HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" />
+          </Button>
+        </header>
 
-      {showHelp && (
-        <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-3 sm:px-4 py-2 sm:py-3 animate-slide-up border-b border-card-border z-20">
-          <p className="text-xs sm:text-sm">
-            Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
-          </p>
+        {showHelp && (
+          <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-3 sm:px-4 py-2 sm:py-3 animate-slide-up border-b border-card-border z-20">
+            <p className="text-xs sm:text-sm">
+              Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
+            </p>
+          </div>
+        )}
+
+        {/* Image zoomable - 100% en horizontal */}
+        <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '30vh', minHeight: '180px' }}>
+          <ZoomableImage
+            src={tutorialImage}
+            alt="Image à analyser"
+          />
         </div>
-      )}
 
-      {/* Image zoomable - 100% en horizontal */}
-      <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '30vh', minHeight: '180px' }}>
-        <ZoomableImage
-          src={tutorialImage}
-          alt="Image à analyser"
-        />
+        {/* Zone fixe pour les indices trouvés - toujours présente */}
+        <div className="px-3 sm:px-4 py-2 bg-background border-b border-card-border flex-shrink-0 min-h-[50px] sm:min-h-[60px] flex items-center">
+          {foundClues.length > 0 ? (
+            <div className="flex items-center justify-between gap-2 w-full">
+              <div className="flex flex-wrap gap-1.5 sm:gap-2 flex-1">
+                {foundClues.map((clue, index) => (
+                  <Badge
+                    key={index}
+                    variant="default"
+                    className="animate-scale-in text-xs sm:text-sm"
+                    data-testid={`badge-clue-${index}`}
+                  >
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    {clue}
+                  </Badge>
+                ))}
+              </div>
+
+              {foundClues.length >= 2 && (
+                <Button
+                  onClick={handleFinish}
+                  size="sm"
+                  variant="outline"
+                  className="rounded-xl flex-shrink-0 text-xs sm:text-sm px-2 sm:px-3"
+                  data-testid="button-finish"
+                >
+                  Terminer
+                </Button>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs sm:text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
+          )}
+        </div>
+
+        {/* Zone de conversation - seule partie scrollable */}
+        <div className="flex-1 overflow-hidden">
+          <ConversationPanel
+            messages={messages}
+            userName={userName}
+            onStartRecording={handleStartRecording}
+            onStopRecording={handleStopRecording}
+            onSendText={handleSendText}
+            state={audioState}
+            transcription={transcription}
+            fallbackMode={fallbackMode}
+            textInput={textInput}
+            onTextInputChange={setTextInput}
+          />
+        </div>
       </div>
 
-      {/* Zone fixe pour les indices trouvés - toujours présente */}
-      <div className="px-3 sm:px-4 py-2 bg-background border-b border-card-border flex-shrink-0 min-h-[50px] sm:min-h-[60px] flex items-center">
-        {foundClues.length > 0 ? (
-          <div className="flex items-center justify-between gap-2 w-full">
-            <div className="flex flex-wrap gap-1.5 sm:gap-2 flex-1">
-              {foundClues.map((clue, index) => (
-                <Badge
-                  key={index}
-                  variant="default"
-                  className="animate-scale-in text-xs sm:text-sm"
-                  data-testid={`badge-clue-${index}`}
-                >
-                  <CheckCircle2 className="w-3 h-3 mr-1" />
-                  {clue}
-                </Badge>
-              ))}
+      {/* DESKTOP LAYOUT - two columns side by side (lg and above) */}
+      <div className="hidden lg:flex h-full">
+        {/* LEFT COLUMN - Conversation (33% width) */}
+        <div className="w-1/3 flex flex-col border-r border-card-border">
+          <ConversationPanel
+            messages={messages}
+            userName={userName}
+            onStartRecording={handleStartRecording}
+            onStopRecording={handleStopRecording}
+            onSendText={handleSendText}
+            state={audioState}
+            transcription={transcription}
+            fallbackMode={fallbackMode}
+            textInput={textInput}
+            onTextInputChange={setTextInput}
+          />
+        </div>
+
+        {/* RIGHT COLUMN - Image with header bar (67% width) */}
+        <div className="flex-1 flex flex-col">
+          {/* Header bar above image - contains clue counter, clue tags, and help button */}
+          <div className="flex-shrink-0 bg-card border-b border-card-border px-4 py-3 flex items-center justify-between gap-4">
+            {/* Left section: Clue counter and tags */}
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              {/* Clue counter badge */}
+              <Badge
+                variant="secondary"
+                className="text-base px-3 py-1.5 rounded-full flex-shrink-0"
+                data-testid="badge-clue-counter"
+              >
+                <span className="font-bold text-primary">{foundClues.length}</span>
+                <span className="text-muted-foreground">/4 indices</span>
+              </Badge>
+
+              {/* Clue tags */}
+              {foundClues.length > 0 ? (
+                <div className="flex flex-wrap gap-2 flex-1 min-w-0">
+                  {foundClues.map((clue, index) => (
+                    <Badge
+                      key={index}
+                      variant="default"
+                      className="animate-scale-in text-sm"
+                      data-testid={`badge-clue-${index}`}
+                    >
+                      <CheckCircle2 className="w-3 h-3 mr-1" />
+                      {clue}
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
+              )}
             </div>
 
-            {foundClues.length >= 2 && (
-              <Button
-                onClick={handleFinish}
-                size="sm"
-                variant="outline"
-                className="rounded-xl flex-shrink-0 text-xs sm:text-sm px-2 sm:px-3"
-                data-testid="button-finish"
-              >
-                Terminer
-              </Button>
-            )}
-          </div>
-        ) : (
-          <p className="text-xs sm:text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
-        )}
-      </div>
+            {/* Right section: Help button and Finish button */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {foundClues.length >= 2 && (
+                <Button
+                  onClick={handleFinish}
+                  size="sm"
+                  variant="outline"
+                  className="rounded-xl"
+                  data-testid="button-finish"
+                >
+                  Terminer
+                </Button>
+              )}
 
-      {/* Zone de conversation - seule partie scrollable */}
-      <div className="flex-1 overflow-hidden">
-        <ConversationPanel
-          messages={messages}
-          userName={userName}
-          onStartRecording={handleStartRecording}
-          onStopRecording={handleStopRecording}
-          onSendText={handleSendText}
-          state={audioState}
-          transcription={transcription}
-          fallbackMode={fallbackMode}
-          textInput={textInput}
-          onTextInputChange={setTextInput}
-        />
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setShowHelp(!showHelp)}
+                className="w-10 h-10"
+                data-testid="button-help"
+              >
+                <HelpCircle className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Help section (expandable) */}
+          {showHelp && (
+            <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-4 py-3 animate-slide-up border-b border-card-border">
+              <p className="text-sm">
+                Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
+              </p>
+            </div>
+          )}
+
+          {/* Image section - takes remaining space */}
+          <div className="flex-1 relative bg-muted">
+            <ZoomableImage
+              src={tutorialImage}
+              alt="Image à analyser"
+            />
+          </div>
+        </div>
       </div>
 
       {showSuccess && <SuccessFeedback clueNames={newClues} />}
