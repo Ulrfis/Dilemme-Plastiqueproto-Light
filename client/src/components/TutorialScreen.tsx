@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
@@ -29,14 +29,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [fallbackMode, setFallbackMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [textInput, setTextInput] = useState('');
-  
-  // Utiliser une ref au lieu d'un state pour éviter les problèmes de stale closure
-  // Le callback handleAudioStart sera stable et lira toujours la dernière valeur
-  const pendingAssistantMessageRef = useRef<string | null>(null);
-
-  // Flag pour éviter la duplication: si handleAudioStop a déjà affiché le message,
-  // on ne le réaffiche pas dans le catch block
-  const messageAlreadyDisplayedByStop = useRef(false);
 
   const { toast } = useToast();
 
@@ -47,39 +39,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       content: `Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 4 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé.`
     }]);
   }, [userName]);
-  
-  // Callback appelé quand l'audio commence VRAIMENT à jouer (via audio.onplaying)
-  // Utilise une ref pour éviter les stale closures - le callback reste stable
-  const handleAudioStart = useCallback(() => {
-    console.log('[TutorialScreen] handleAudioStart called');
-    console.log('[TutorialScreen] pendingAssistantMessageRef.current:', pendingAssistantMessageRef.current);
-
-    if (pendingAssistantMessageRef.current) {
-      console.log('[TutorialScreen] Audio started playing, adding assistant message for typewriter sync');
-      setMessages(prev => {
-        const newMessage = { role: 'assistant' as const, content: pendingAssistantMessageRef.current! };
-        return [...prev, newMessage];
-      });
-      pendingAssistantMessageRef.current = null;
-    } else {
-      console.warn('[TutorialScreen] handleAudioStart called but pendingAssistantMessageRef is null/empty!');
-    }
-  }, []); // Pas de dépendances - le callback ne change jamais
-
-  // Callback appelé quand l'audio est arrêté ou échoue
-  // Affiche le message si l'audio n'a pas pu démarrer
-  const handleAudioStop = useCallback(() => {
-    console.log('[TutorialScreen] Audio stopped or failed, cleaning up');
-
-    // Si on a un message en attente mais que l'audio a échoué, l'afficher quand même
-    if (pendingAssistantMessageRef.current) {
-      console.log('[TutorialScreen] Audio failed but we have pending message, adding it anyway');
-      setMessages(prev => [...prev, { role: 'assistant', content: pendingAssistantMessageRef.current! }]);
-      pendingAssistantMessageRef.current = null;
-      // Marquer que le message a été affiché pour éviter la duplication dans le catch block
-      messageAlreadyDisplayedByStop.current = true;
-    }
-  }, []);
 
   const {
     audioState,
@@ -90,10 +49,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     stopAudio,
     checkMicrophonePermission,
     recoverFromError,
-  } = useVoiceInteraction({ 
-    onAudioStart: handleAudioStart,
-    onAudioStop: handleAudioStop 
-  });
+  } = useVoiceInteraction();
 
   // Fonction helper pour appeler le TTS avec retry automatique
   const textToSpeechWithRetry = async (text: string, maxRetries = 2): Promise<Blob> => {
@@ -213,9 +169,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       return;
     }
 
-    // Réinitialiser le flag de duplication pour ce nouveau message
-    messageAlreadyDisplayedByStop.current = false;
-
     try {
       // Ajouter le message utilisateur
       setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
@@ -247,18 +200,17 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         setTimeout(() => setShowSuccess(false), 3000);
       }
 
-      // Toujours jouer le TTS si on n'est pas en fallback mode
+      // CHANGEMENT : Afficher le message IMMEDIATEMENT, sans attendre l'audio
+      // Cela garantit que le texte s'affiche toujours, même si l'audio échoue
+      console.log('[TutorialScreen] Adding assistant message immediately');
+      setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
+
+      // Puis tenter de jouer l'audio si on n'est pas en fallback mode
       if (!fallbackMode) {
         try {
           console.log('[TutorialScreen] Generating TTS for response with retry...');
           const audioBlob = await textToSpeechWithRetry(result.response);
           console.log('[TutorialScreen] TTS generated successfully');
-
-          // Stocker le message en attente dans la ref - il sera ajouté au tableau quand l'audio démarre
-          // via le callback handleAudioStart, synchronisant parfaitement le typewriter avec la voix
-          console.log('[TutorialScreen] STORING in pendingAssistantMessageRef:', result.response.substring(0, 50) + '...');
-          pendingAssistantMessageRef.current = result.response;
-          console.log('[TutorialScreen] STORED. pendingAssistantMessageRef.current:', pendingAssistantMessageRef.current?.substring(0, 50) + '...');
 
           console.log('[TutorialScreen] About to call playAudio...');
           await playAudio(audioBlob);
@@ -266,37 +218,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         } catch (error) {
           console.error('TTS or playback failed:', error);
 
-          // Vérifier si handleAudioStop a déjà affiché le message (en cas d'erreur playback)
-          // Pour éviter la duplication
-          if (!messageAlreadyDisplayedByStop.current) {
-            console.log('[TutorialScreen] Displaying message in catch block (TTS failed before playback)');
-
-            // Afficher un toast informatif (pas d'erreur destructive)
-            toast({
-              title: "Voix temporairement indisponible",
-              description: "La réponse de Peter s'affiche en texte. Le mode vocal reste actif.",
-              variant: "default",
-            });
-
-            // Afficher le message immédiatement en mode texte pour cette réponse seulement
-            setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
-          } else {
-            console.log('[TutorialScreen] Message already displayed by handleAudioStop, skipping duplicate');
-          }
-
-          pendingAssistantMessageRef.current = null;
+          // Afficher un toast informatif (pas d'erreur destructive)
+          toast({
+            title: "Voix temporairement indisponible",
+            description: "La réponse de Peter s'affiche en texte. Le mode vocal reste actif.",
+            variant: "default",
+          });
 
           // NE PAS activer fallbackMode - garder le mode vocal pour les prochains échanges
         }
-      } else {
-        // En mode texte, afficher le message immédiatement
-        setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
       }
     } catch (error) {
       console.error('Error processing message:', error);
-
-      // Nettoyer en cas d'erreur générale
-      pendingAssistantMessageRef.current = null;
 
       // Extract detailed error information
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
