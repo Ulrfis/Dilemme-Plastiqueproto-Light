@@ -51,6 +51,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     playAudio,
     stopAudio,
     checkMicrophonePermission,
+    checkMediaRecorderSupport,
     recoverFromError,
     reset,
   } = useVoiceInteraction({
@@ -65,6 +66,26 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       setIsAudioPlaying(false);
     },
   });
+
+  // MOBILE FIX: Détecter automatiquement si MediaRecorder est supporté
+  // et activer le fallback mode si nécessaire (Safari iOS ancien)
+  useEffect(() => {
+    console.log('[TutorialScreen] Checking MediaRecorder support...');
+    const isSupported = checkMediaRecorderSupport();
+
+    if (!isSupported) {
+      console.warn('[TutorialScreen] MediaRecorder NOT supported - activating text fallback mode');
+      setFallbackMode(true);
+      toast({
+        title: "Mode texte activé",
+        description: "Votre navigateur ne supporte pas l'enregistrement vocal. Utilisez le mode texte pour discuter avec Peter.",
+        variant: "default",
+        duration: 5000,
+      });
+    } else {
+      console.log('[TutorialScreen] MediaRecorder is supported - voice mode available');
+    }
+  }, [checkMediaRecorderSupport, toast]);
 
   // Fonction helper pour appeler le TTS avec retry automatique
   const textToSpeechWithRetry = async (text: string, maxRetries = 2): Promise<Blob> => {
@@ -116,37 +137,42 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       console.log('[TutorialScreen] startRecording completed successfully');
     } catch (error) {
       console.error('[TutorialScreen] Recording start error:', error);
-      
+
       // Vérifier si c'est une erreur définitive qui nécessite le fallback texte
       const errorMessage = error instanceof Error ? error.message : '';
       const errorName = error instanceof Error ? error.name : '';
-      
+
+      console.log('[TutorialScreen] Error details:', { errorName, errorMessage });
+
       // Détecter les erreurs définitives:
       // - Permission refusée
       // - Microphone non trouvé (NotFoundError)
       // - Microphone non disponible (NotAllowedError, NotSupportedError)
-      const isPermanentError = 
-        errorMessage.includes('denied') || 
+      const isPermanentError =
+        errorMessage.includes('denied') ||
         errorMessage.includes('permission') ||
         errorMessage.includes('not found') ||
         errorMessage.includes('NotFound') ||
         errorName === 'NotFoundError' ||
         errorName === 'NotAllowedError' ||
         errorName === 'NotSupportedError';
-      
+
       if (isPermanentError) {
         // Basculer en fallbackMode pour les erreurs définitives
+        console.log('[TutorialScreen] Permanent error detected - switching to text mode');
         setFallbackMode(true);
         toast({
           title: "Mode texte activé",
-          description: "Microphone non disponible. Utilisez le mode texte.",
+          description: "Microphone non disponible ou permission refusée. Utilisez le mode texte pour discuter avec Peter.",
           variant: "default",
+          duration: 6000,
         });
       } else {
         // Erreur temporaire, afficher un message mais garder le mode vocal
+        console.log('[TutorialScreen] Temporary error - suggesting retry');
         toast({
           title: "Erreur temporaire",
-          description: "Veuillez réessayer d'appuyer sur le microphone.",
+          description: "Problème d'enregistrement. Veuillez réessayer d'appuyer sur le microphone.",
           variant: "default",
         });
         recoverFromError();

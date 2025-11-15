@@ -78,16 +78,37 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     }
   }, [iframeLoaded, isMuted, shouldStartWithSound]);
 
-  // Fonction pour activer/désactiver le son
+  // Fonction pour activer/désactiver le son avec retry pour fiabilité
   const toggleMute = () => {
     if (iframeRef.current) {
-      // Envoyer un message au player Gumlet pour changer le mute
-      iframeRef.current.contentWindow?.postMessage(
-        { method: isMuted ? 'unmute' : 'mute' },
-        '*'
-      );
-      setIsMuted(!isMuted);
+      const newMutedState = !isMuted;
+      const command = isMuted ? 'unmute' : 'mute';
+
+      console.log(`[VideoIntro] Toggling sound: ${command}`);
+
+      // Envoyer plusieurs formats de commandes pour maximiser la compatibilité
+      const sendCommand = () => {
+        if (iframeRef.current?.contentWindow) {
+          // Format 1: { method: 'unmute' }
+          iframeRef.current.contentWindow.postMessage({ method: command }, '*');
+          // Format 2: { event: 'command', func: 'unmute' }
+          iframeRef.current.contentWindow.postMessage({ event: 'command', func: command }, '*');
+          // Format 3: Direct command
+          iframeRef.current.contentWindow.postMessage(command, '*');
+        }
+      };
+
+      // Envoyer immédiatement
+      sendCommand();
+
+      // Retry après 100ms et 300ms pour s'assurer que ça passe
+      setTimeout(sendCommand, 100);
+      setTimeout(sendCommand, 300);
+
+      setIsMuted(newMutedState);
       setShowUnmutePrompt(false);
+
+      console.log(`[VideoIntro] Sound ${command} command sent, new state: muted=${newMutedState}`);
     }
   };
 
@@ -135,11 +156,13 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
 
     window.addEventListener('message', handleMessage);
 
-    // Timer automatique de sécurité - passe à l'écran suivant après 60 secondes
-    const videoDuration = 60000;
+    // Timer automatique de sécurité - passe à l'écran suivant après 90 secondes
+    // (durée augmentée pour laisser la vidéo se terminer naturellement)
+    const videoDuration = 90000;
     const autoSkipTimer = setTimeout(() => {
-      console.log('[VideoIntro] Auto-skip triggered by timer after 60s');
+      console.log('[VideoIntro] Auto-skip triggered by timer after 90s - video should have ended');
       if (!videoEnded) {
+        console.log('[VideoIntro] Forcing video completion and advancing to next screen');
         setVideoEnded(true);
         onComplete();
       }
@@ -232,9 +255,9 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         </Button>
       </div>
 
-      {/* Indication pour pivoter en mode paysage - EN BAS pour ne pas couvrir le visage */}
-      <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 z-20 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full text-white text-xs sm:text-sm">
-        📱 Mode paysage recommandé
+      {/* Indication pour pivoter en mode paysage - EN BAS de l'écran */}
+      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full text-white text-sm sm:text-base font-semibold shadow-lg border-2 border-white/20">
+        📱 Mode paysage fortement recommandé
       </div>
 
       {/* Bouton skip sur le CÔTÉ DROIT - Toujours visible */}
