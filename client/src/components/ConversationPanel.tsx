@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Mic, Square, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import peterImage from "@assets/generated_images/Peter_AI_mascot_character_ddfcb150.png";
+import peterImage from "@assets/Peter Avatar_1763217836125.jpg";
 import type { AudioState } from "@/hooks/useVoiceInteraction";
 
 interface Message {
