@@ -295,31 +295,49 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       try {
         console.log('[TutorialScreen] Generating TTS for response with retry...');
         const audioBlob = await textToSpeechWithRetry(result.response);
-        console.log('[TutorialScreen] TTS generated successfully');
+        console.log('[TutorialScreen] TTS generated successfully, blob size:', audioBlob.size);
+
+        // MOBILE FIX: Vérifier que le blob est valide avant de le jouer
+        if (audioBlob.size === 0) {
+          throw new Error('Received empty audio blob from TTS');
+        }
 
         console.log('[TutorialScreen] About to call playAudio...');
 
         // MOBILE FIX: Timeout de sécurité pour forcer le retour à idle si l'audio ne se termine pas
         // Estimer la durée de l'audio (environ 150 mots par minute de parole)
         const estimatedDuration = Math.max(10000, (result.response.length / 5) * 60 / 150 * 1000);
-        const safetyTimeout = estimatedDuration + 5000; // Ajouter 5 secondes de marge
+        const safetyTimeout = estimatedDuration + 10000; // Ajouter 10 secondes de marge pour mobile
 
-        console.log(`[TutorialScreen] Setting safety timeout: ${safetyTimeout}ms`);
+        console.log(`[TutorialScreen] Setting safety timeout: ${safetyTimeout}ms for estimated duration: ${estimatedDuration}ms`);
         const timeoutId = setTimeout(() => {
           console.warn('[TutorialScreen] Safety timeout triggered - forcing audio to stop');
           stopAudio();
           // Forcer le retour à idle si le hook ne le fait pas
           if (audioState !== 'idle') {
+            console.warn('[TutorialScreen] Force recovering from error state');
             recoverFromError();
           }
         }, safetyTimeout);
 
+        // MOBILE FIX: Détecter si l'audio ne démarre pas dans les 5 secondes
+        const startTimeoutId = setTimeout(() => {
+          if (audioState === 'playing' && !isAudioPlaying) {
+            console.warn('[TutorialScreen] Audio stuck in playing state but not actually playing - recovering');
+            stopAudio();
+            recoverFromError();
+          }
+        }, 5000);
+
         try {
+          console.log('[TutorialScreen] Starting audio playback...');
           await playAudio(audioBlob);
           console.log('[TutorialScreen] Audio playback completed successfully');
         } finally {
-          // Toujours nettoyer le timeout, que l'audio réussisse ou échoue
+          // Toujours nettoyer les timeouts, que l'audio réussisse ou échoue
           clearTimeout(timeoutId);
+          clearTimeout(startTimeoutId);
+          console.log('[TutorialScreen] Cleaned up safety timeouts');
         }
       } catch (error) {
         console.error('[TutorialScreen] TTS or playback failed:', error);
