@@ -354,8 +354,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
       {/* DESKTOP LAYOUT - two columns side by side (lg and above) */}
       <div className="hidden lg:flex h-full">
-        {/* LEFT COLUMN - Conversation (33% width) */}
-        <div className="w-1/3 flex flex-col border-r border-card-border">
+        {/* LEFT COLUMN - Conversation scrollable (narrow column ~25%) */}
+        <div className="w-80 flex flex-col border-r border-card-border flex-shrink-0">
           <ConversationPanel
             messages={messages}
             userName={userName}
@@ -370,10 +370,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           />
         </div>
 
-        {/* RIGHT COLUMN - Image with header bar (67% width) */}
-        <div className="flex-1 flex flex-col">
-          {/* Header bar above image - contains clue counter, clue tags, and help button */}
-          <div className="flex-shrink-0 bg-card border-b border-card-border px-4 py-3 flex items-center justify-between gap-4">
+        {/* RIGHT COLUMN - Image maximized with info bar on top (~75% width) */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Info bar above image - contains clue counter, found clues, and help */}
+          <div className="flex-shrink-0 bg-card border-b border-card-border px-6 py-3 flex items-center justify-between gap-4">
             {/* Left section: Clue counter and tags */}
             <div className="flex items-center gap-3 flex-1 min-w-0">
               {/* Clue counter badge */}
@@ -441,8 +441,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             </div>
           )}
 
-          {/* Image section - takes remaining space */}
-          <div className="flex-1 relative bg-muted">
+          {/* Image section - maximized to fill remaining space */}
+          <div className="flex-1 relative bg-muted overflow-hidden">
             <ZoomableImage
               src={tutorialImage}
               alt="Image à analyser"
