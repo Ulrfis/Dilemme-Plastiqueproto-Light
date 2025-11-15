@@ -145,12 +145,15 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
         setAudioState('idle');
+        audioElementRef.current = null;
         resolve();
       };
 
       audio.onerror = (error) => {
+        console.error('[useVoiceInteraction] Audio playback error:', error);
         URL.revokeObjectURL(audioUrl);
         setAudioState('error');
+        audioElementRef.current = null;
         // Notifier l'arrêt de l'audio en cas d'erreur
         if (onAudioStopRef.current) {
           onAudioStopRef.current();
@@ -167,11 +170,40 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         }
       };
 
+      // MOBILE FIX: Gérer l'interruption audio (appel entrant, changement d'app, etc.)
+      audio.onpause = () => {
+        console.log('[useVoiceInteraction] Audio paused (possibly interrupted on mobile)');
+      };
+
+      // MOBILE FIX: Tenter de reprendre la lecture si l'audio est suspendu
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible' && audio.paused && audioElementRef.current === audio) {
+          console.log('[useVoiceInteraction] Page visible again, attempting to resume audio');
+          audio.play().catch(err => {
+            console.warn('[useVoiceInteraction] Could not resume audio:', err);
+          });
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
       audio.play().catch((error) => {
-        console.error('Error playing audio:', error);
+        console.error('[useVoiceInteraction] Error playing audio:', error);
+        URL.revokeObjectURL(audioUrl);
         setAudioState('error');
+        audioElementRef.current = null;
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        // Notifier l'arrêt en cas d'erreur de lecture
+        if (onAudioStopRef.current) {
+          onAudioStopRef.current();
+        }
         reject(error);
       });
+
+      // Cleanup de l'event listener quand l'audio se termine
+      audio.addEventListener('ended', () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }, { once: true });
     });
   }, []); // Pas de dépendances - le callback reste stable
 
@@ -200,14 +232,37 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   }, []);
 
   const reset = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+    console.log('[useVoiceInteraction] Resetting voice interaction state');
+
+    // MOBILE FIX: Properly cleanup MediaRecorder and stream
+    if (mediaRecorderRef.current) {
+      try {
+        if (mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        }
+        // Always stop all tracks to release microphone on mobile
+        mediaRecorderRef.current.stream.getTracks().forEach(track => {
+          track.stop();
+          console.log('[useVoiceInteraction] Stopped track:', track.kind);
+        });
+        mediaRecorderRef.current = null;
+      } catch (error) {
+        console.warn('[useVoiceInteraction] Error during MediaRecorder cleanup:', error);
+      }
     }
+
+    // MOBILE FIX: Properly cleanup audio element
     if (audioElementRef.current) {
-      audioElementRef.current.pause();
-      audioElementRef.current = null;
+      try {
+        audioElementRef.current.pause();
+        audioElementRef.current.src = '';
+        audioElementRef.current.load(); // Force cleanup
+        audioElementRef.current = null;
+      } catch (error) {
+        console.warn('[useVoiceInteraction] Error during audio cleanup:', error);
+      }
     }
+
     setAudioState('idle');
     setTranscription('');
     audioChunksRef.current = [];
