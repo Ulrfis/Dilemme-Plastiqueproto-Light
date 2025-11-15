@@ -194,18 +194,18 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         data-testid="video-intro"
       />
 
-      {/* Bouton UNMUTE prominent au centre - Disparaît après activation */}
+      {/* Bouton UNMUTE prominent au centre - Disparaît après activation - PLUS GROS */}
       {showUnmutePrompt && isMuted && (
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3">
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-4">
           <Button
             onClick={toggleMute}
             size="lg"
-            className="h-20 w-20 sm:h-24 sm:w-24 rounded-full bg-primary hover:bg-primary/90 hover:scale-110 transition-all duration-200 shadow-2xl border-4 border-white/20"
+            className="h-28 w-28 sm:h-32 sm:w-32 rounded-full bg-primary hover:bg-primary/90 hover:scale-110 transition-all duration-200 shadow-2xl border-4 border-white/20"
             data-testid="button-unmute"
           >
-            <Volume2 className="w-10 h-10 sm:w-12 sm:h-12" />
+            <Volume2 className="w-14 h-14 sm:w-16 sm:h-16" />
           </Button>
-          <div className="bg-black/80 backdrop-blur-sm px-4 py-2 rounded-full text-white text-sm sm:text-base animate-pulse">
+          <div className="bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full text-white text-base sm:text-lg font-medium animate-pulse">
             {shouldStartWithSound ? (
               <>🔊 Activez le son pour une meilleure expérience</>
             ) : (
@@ -232,8 +232,8 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         </Button>
       </div>
 
-      {/* Indication pour pivoter en mode paysage */}
-      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full text-white text-xs sm:text-sm">
+      {/* Indication pour pivoter en mode paysage - EN BAS pour ne pas couvrir le visage */}
+      <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 z-20 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full text-white text-xs sm:text-sm">
         📱 Mode paysage recommandé
       </div>
 

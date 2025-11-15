@@ -40,6 +40,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     }]);
   }, [userName]);
 
+  // MOBILE FIX: Ajouter un état local pour forcer le retour à idle en cas de blocage
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+
   const {
     audioState,
     transcription,
@@ -49,7 +52,19 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     stopAudio,
     checkMicrophonePermission,
     recoverFromError,
-  } = useVoiceInteraction();
+    reset,
+  } = useVoiceInteraction({
+    // Notifier quand l'audio commence pour tracking
+    onAudioStart: () => {
+      console.log('[TutorialScreen] Audio playback started');
+      setIsAudioPlaying(true);
+    },
+    // Notifier quand l'audio s'arrête pour cleanup
+    onAudioStop: () => {
+      console.log('[TutorialScreen] Audio playback stopped');
+      setIsAudioPlaying(false);
+    },
+  });
 
   // Fonction helper pour appeler le TTS avec retry automatique
   const textToSpeechWithRetry = async (text: string, maxRetries = 2): Promise<Blob> => {
@@ -213,10 +228,35 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           console.log('[TutorialScreen] TTS generated successfully');
 
           console.log('[TutorialScreen] About to call playAudio...');
-          await playAudio(audioBlob);
-          console.log('[TutorialScreen] Audio playback completed');
+
+          // MOBILE FIX: Timeout de sécurité pour forcer le retour à idle si l'audio ne se termine pas
+          // Estimer la durée de l'audio (environ 150 mots par minute de parole)
+          const estimatedDuration = Math.max(10000, (result.response.length / 5) * 60 / 150 * 1000);
+          const safetyTimeout = estimatedDuration + 5000; // Ajouter 5 secondes de marge
+
+          console.log(`[TutorialScreen] Setting safety timeout: ${safetyTimeout}ms`);
+          const timeoutId = setTimeout(() => {
+            console.warn('[TutorialScreen] Safety timeout triggered - forcing audio to stop');
+            stopAudio();
+            // Forcer le retour à idle si le hook ne le fait pas
+            if (audioState !== 'idle') {
+              recoverFromError();
+            }
+          }, safetyTimeout);
+
+          try {
+            await playAudio(audioBlob);
+            console.log('[TutorialScreen] Audio playback completed successfully');
+          } finally {
+            // Toujours nettoyer le timeout, que l'audio réussisse ou échoue
+            clearTimeout(timeoutId);
+          }
         } catch (error) {
-          console.error('TTS or playback failed:', error);
+          console.error('[TutorialScreen] TTS or playback failed:', error);
+
+          // CRITIQUE: S'assurer que l'état revient à idle pour permettre de continuer
+          console.log('[TutorialScreen] Forcing state back to idle after audio error');
+          recoverFromError();
 
           // Afficher un toast informatif (pas d'erreur destructive)
           toast({
