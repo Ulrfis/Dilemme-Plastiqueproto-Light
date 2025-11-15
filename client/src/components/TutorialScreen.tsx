@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
@@ -32,6 +32,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 4 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé.`);
 
+  // Ref pour s'assurer que le message de bienvenue ne joue qu'une seule fois
+  const hasPlayedWelcome = useRef(false);
+
   const { toast } = useToast();
 
   // MOBILE FIX: Ajouter un état local pour forcer le retour à idle en cas de blocage
@@ -61,43 +64,19 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     },
   });
 
-  // Fonction pour déverrouiller l'audio et jouer le message de bienvenue
-  const handleUnlockAudio = async () => {
-    console.log('[TutorialScreen] Unlocking audio with user gesture');
-    
-    try {
-      // Générer le TTS pour le message de bienvenue
-      const audioBlob = await textToSpeechWithRetry(welcomeMessage);
-      console.log('[TutorialScreen] Welcome message TTS generated');
-      
-      // Jouer l'audio - ce geste utilisateur déverrouille l'audio pour toute la session
-      await playAudio(audioBlob);
-      console.log('[TutorialScreen] Welcome audio played successfully');
-      
-      // Ajouter le message de bienvenue à la conversation
-      setMessages([{
-        role: 'assistant',
-        content: welcomeMessage
-      }]);
-      
-      // Marquer que l'audio est déverrouillé
-      setAudioUnlocked(true);
-    } catch (error) {
-      console.error('[TutorialScreen] Failed to unlock audio:', error);
-      
-      // En cas d'erreur, afficher le message en mode texte
-      setMessages([{
-        role: 'assistant',
-        content: welcomeMessage
-      }]);
-      setAudioUnlocked(true);
-      
-      toast({
-        title: "Mode texte activé",
-        description: "Peter s'affiche en texte uniquement.",
-        variant: "default",
-      });
-    }
+  // Fonction pour déverrouiller l'audio et passer à l'écran conversationnel
+  // L'audio de bienvenue sera joué automatiquement par le useEffect une fois sur l'écran conversationnel
+  const handleUnlockAudio = () => {
+    console.log('[TutorialScreen] Unlocking audio - transitioning to conversation screen');
+
+    // Ajouter le message de bienvenue à la conversation
+    setMessages([{
+      role: 'assistant',
+      content: welcomeMessage
+    }]);
+
+    // Marquer que l'audio est déverrouillé pour passer à l'écran conversationnel
+    setAudioUnlocked(true);
   };
 
   // MOBILE FIX: Détecter automatiquement si MediaRecorder est supporté
@@ -119,6 +98,38 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       console.log('[TutorialScreen] MediaRecorder is supported - voice mode available');
     }
   }, [checkMediaRecorderSupport, toast]);
+
+  // Jouer le message de bienvenue automatiquement une seule fois quand on arrive sur l'écran conversationnel
+  useEffect(() => {
+    // Ne jouer que si l'audio est déverrouillé et qu'on n'a pas encore joué le message de bienvenue
+    if (audioUnlocked && !hasPlayedWelcome.current) {
+      console.log('[TutorialScreen] Playing welcome message automatically');
+      hasPlayedWelcome.current = true;
+
+      const playWelcomeMessage = async () => {
+        try {
+          // Générer le TTS pour le message de bienvenue
+          const audioBlob = await textToSpeechWithRetry(welcomeMessage);
+          console.log('[TutorialScreen] Welcome message TTS generated');
+
+          // Jouer l'audio
+          await playAudio(audioBlob);
+          console.log('[TutorialScreen] Welcome audio played successfully');
+        } catch (error) {
+          console.error('[TutorialScreen] Failed to play welcome audio:', error);
+
+          // En cas d'erreur, le message est déjà affiché en texte, donc rien de plus à faire
+          toast({
+            title: "Mode texte activé",
+            description: "Peter s'affiche en texte uniquement.",
+            variant: "default",
+          });
+        }
+      };
+
+      playWelcomeMessage();
+    }
+  }, [audioUnlocked, welcomeMessage, playAudio, toast]);
 
   // Fonction helper pour appeler le TTS avec retry automatique
   const textToSpeechWithRetry = async (text: string, maxRetries = 2): Promise<Blob> => {
