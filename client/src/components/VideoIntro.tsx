@@ -106,7 +106,6 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
       setTimeout(sendCommand, 300);
 
       setIsMuted(newMutedState);
-      setShowUnmutePrompt(false);
 
       console.log(`[VideoIntro] Sound ${command} command sent, new state: muted=${newMutedState}`);
     }
@@ -230,22 +229,6 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         data-testid="video-intro"
       />
 
-      {/* Bouton PLAY prominent au centre - Disparaît quand la vidéo joue */}
-      {!isPlaying && iframeLoaded && (
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-4">
-          <Button
-            onClick={playVideo}
-            size="lg"
-            className="h-28 w-28 sm:h-32 sm:w-32 rounded-full bg-primary hover:bg-primary/90 hover:scale-110 transition-all duration-200 shadow-2xl border-4 border-white/20"
-            data-testid="button-play"
-          >
-            <Play className="w-14 h-14 sm:w-16 sm:h-16" />
-          </Button>
-          <div className="bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full text-white text-base sm:text-lg font-medium animate-pulse">
-            ▶️ Cliquez pour lancer la vidéo (avec son)
-          </div>
-        </div>
-      )}
 
       {/* Indicateur de son en haut à gauche */}
       <div className="absolute top-4 left-4 z-20">
