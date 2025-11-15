@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import logoImage from "@assets/PlaceDesNations_Dilemme_1762433446634.png";
+import logoImage from "@assets/PlaceDesNations_Dilemme_1762432136623.png";
 
 interface TitleScreenProps {
   onStart: () => void;

@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Volume2, VolumeX } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
 
 interface VideoIntroProps {
@@ -8,11 +8,13 @@ interface VideoIntroProps {
 
 export default function VideoIntro({ onComplete }: VideoIntroProps) {
   const videoId = "6916ff7ddf9720847e0868f0";
-  // Démarrer immédiatement en autoplay avec le son
-  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true&muted=false&loop=false`;
+  // Démarrer en autoplay MUTED (obligatoire pour que l'autoplay fonctionne sur navigateurs modernes)
+  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true&muted=true&loop=false`;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [videoEnded, setVideoEnded] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
+  const [showUnmutePrompt, setShowUnmutePrompt] = useState(true);
 
   // Tenter le plein écran en mode paysage au chargement
   useEffect(() => {
@@ -43,6 +45,19 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     
     return () => clearTimeout(timer);
   }, []);
+
+  // Fonction pour activer/désactiver le son
+  const toggleMute = () => {
+    if (iframeRef.current) {
+      // Envoyer un message au player Gumlet pour changer le mute
+      iframeRef.current.contentWindow?.postMessage(
+        { method: isMuted ? 'unmute' : 'mute' },
+        '*'
+      );
+      setIsMuted(!isMuted);
+      setShowUnmutePrompt(false);
+    }
+  };
 
   useEffect(() => {
     // Écouter les événements de la vidéo via postMessage
@@ -127,9 +142,43 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         data-testid="video-intro"
       />
 
-      {/* Indication pour pivoter en mode paysage - s'affiche brièvement puis disparaît */}
-      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full text-white text-sm sm:text-base animate-pulse">
-        📱 Pivotez en mode paysage pour une meilleure expérience
+      {/* Bouton UNMUTE prominent au centre - Disparaît après activation */}
+      {showUnmutePrompt && isMuted && (
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-3">
+          <Button
+            onClick={toggleMute}
+            size="lg"
+            className="h-20 w-20 sm:h-24 sm:w-24 rounded-full bg-primary hover:bg-primary/90 hover:scale-110 transition-all duration-200 shadow-2xl border-4 border-white/20"
+            data-testid="button-unmute"
+          >
+            <Volume2 className="w-10 h-10 sm:w-12 sm:h-12" />
+          </Button>
+          <div className="bg-black/80 backdrop-blur-sm px-4 py-2 rounded-full text-white text-sm sm:text-base animate-pulse">
+            🔊 Touchez pour activer le son
+          </div>
+        </div>
+      )}
+
+      {/* Indicateur de son en haut à gauche */}
+      <div className="absolute top-4 left-4 z-20">
+        <Button
+          onClick={toggleMute}
+          size="icon"
+          variant="secondary"
+          className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-black/50 backdrop-blur-sm hover:bg-black/70 transition-all"
+          data-testid="button-toggle-sound"
+        >
+          {isMuted ? (
+            <VolumeX className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+          ) : (
+            <Volume2 className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+          )}
+        </Button>
+      </div>
+
+      {/* Indication pour pivoter en mode paysage */}
+      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full text-white text-xs sm:text-sm">
+        📱 Mode paysage recommandé
       </div>
 
       {/* Bouton skip sur le CÔTÉ DROIT - Toujours visible */}
