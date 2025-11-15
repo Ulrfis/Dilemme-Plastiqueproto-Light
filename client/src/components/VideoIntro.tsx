@@ -15,6 +15,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   const [videoEnded, setVideoEnded] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [showUnmutePrompt, setShowUnmutePrompt] = useState(true);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
 
   // Tenter le plein écran en mode paysage au chargement
   useEffect(() => {
@@ -46,6 +47,27 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     return () => clearTimeout(timer);
   }, []);
 
+  // Activer automatiquement le son dès que l'iframe est chargé
+  useEffect(() => {
+    if (iframeLoaded && iframeRef.current && isMuted) {
+      console.log('[VideoIntro] Attempting to unmute automatically');
+      // Petit délai pour s'assurer que le player Gumlet est prêt
+      const unmuteTimer = setTimeout(() => {
+        if (iframeRef.current) {
+          iframeRef.current.contentWindow?.postMessage(
+            { method: 'unmute' },
+            '*'
+          );
+          setIsMuted(false);
+          setShowUnmutePrompt(false);
+          console.log('[VideoIntro] Unmute command sent');
+        }
+      }, 500);
+
+      return () => clearTimeout(unmuteTimer);
+    }
+  }, [iframeLoaded, isMuted]);
+
   // Fonction pour activer/désactiver le son
   const toggleMute = () => {
     if (iframeRef.current) {
@@ -64,20 +86,35 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     const handleMessage = (event: MessageEvent) => {
       console.log('[VideoIntro] PostMessage received:', event.data);
 
-      // Gumlet peut envoyer différents formats d'événements
+      // Détecter quand le player est prêt
+      if (event.data && (event.data.event === 'ready' || event.data.type === 'ready')) {
+        console.log('[VideoIntro] Player is ready');
+        setIframeLoaded(true);
+      }
+
+      // Gumlet peut envoyer différents formats d'événements pour la fin
       if (event.data) {
-        // Format 1: { event: 'ended' }
+        // Format 1: { event: 'ended' } ou { event: 'end' }
         if (event.data.event === 'ended' || event.data.event === 'end') {
-          console.log('[VideoIntro] Video ended via postMessage');
+          console.log('[VideoIntro] Video ended via postMessage (event)');
           if (!videoEnded) {
             setVideoEnded(true);
             onComplete();
           }
         }
 
-        // Format 2: { type: 'ended' }
+        // Format 2: { type: 'ended' } ou { type: 'end' }
         if (event.data.type === 'ended' || event.data.type === 'end') {
           console.log('[VideoIntro] Video ended via postMessage (type)');
+          if (!videoEnded) {
+            setVideoEnded(true);
+            onComplete();
+          }
+        }
+
+        // Format 3: Vérifier d'autres variantes possibles
+        if (event.data.method === 'ended' || event.data.method === 'end') {
+          console.log('[VideoIntro] Video ended via postMessage (method)');
           if (!videoEnded) {
             setVideoEnded(true);
             onComplete();
@@ -88,10 +125,10 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
 
     window.addEventListener('message', handleMessage);
 
-    // Timer automatique de sécurité - passe à l'écran suivant après 65 secondes
-    const videoDuration = 65000;
+    // Timer automatique de sécurité - passe à l'écran suivant après 60 secondes
+    const videoDuration = 60000;
     const autoSkipTimer = setTimeout(() => {
-      console.log('[VideoIntro] Auto-skip triggered by timer');
+      console.log('[VideoIntro] Auto-skip triggered by timer after 60s');
       if (!videoEnded) {
         setVideoEnded(true);
         onComplete();
@@ -139,6 +176,11 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         frameBorder="0"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
         allowFullScreen
+        onLoad={() => {
+          console.log('[VideoIntro] Iframe loaded');
+          // Fallback si le postMessage "ready" n'arrive pas
+          setTimeout(() => setIframeLoaded(true), 1000);
+        }}
         data-testid="video-intro"
       />
 

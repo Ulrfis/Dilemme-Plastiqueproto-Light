@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import peterImage from "@assets/generated_images/Peter_AI_mascot_character_ddfcb150.png";
 import type { AudioState } from "@/hooks/useVoiceInteraction";
-import { useTypewriter } from "@/hooks/useTypewriter";
 
 interface Message {
   role: 'assistant' | 'user';
@@ -39,24 +38,12 @@ export default function ConversationPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Récupérer le dernier message de l'assistant pour l'effet typewriter
-  const lastAssistantMessage = messages.length > 0 && messages[messages.length - 1].role === 'assistant'
-    ? messages[messages.length - 1]
-    : null;
-
-  // Effet typewriter pour le dernier message de Peter pendant qu'il parle
-  const { displayedText: typedText } = useTypewriter({
-    text: lastAssistantMessage?.content || '',
-    speed: 25,
-    enabled: state === 'playing',
-  });
-
   // Auto-scroll pour garder les deux derniers échanges visibles
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, typedText]);
+  }, [messages]);
 
   const handleSendText = () => {
     if (textInput.trim()) {
@@ -73,15 +60,6 @@ export default function ConversationPanel({
         className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 sm:py-4 space-y-3 sm:space-y-4"
       >
         {messages.map((message, index) => {
-          // Déterminer si c'est le dernier message de l'assistant
-          const isLastAssistantMessage =
-            message.role === 'assistant' &&
-            index === messages.length - 1 &&
-            state === 'playing';
-
-          // Utiliser le texte tapé pour le dernier message si en train de jouer
-          const displayContent = isLastAssistantMessage ? typedText : message.content;
-
           return (
             <div
               key={index}
@@ -96,8 +74,7 @@ export default function ConversationPanel({
                   />
                   <div className="bg-card/90 backdrop-blur-sm rounded-2xl rounded-tl-none px-3 sm:px-4 py-2 sm:py-3 shadow-lg">
                     <p className="text-xs sm:text-sm text-left">
-                      {displayContent}
-                      {isLastAssistantMessage && <span className="animate-pulse">▌</span>}
+                      {message.content}
                     </p>
                   </div>
                 </div>
