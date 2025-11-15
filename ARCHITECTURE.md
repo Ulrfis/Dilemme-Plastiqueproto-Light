@@ -1,5 +1,80 @@
 # Architecture du Système de Conversation Vocale
 
+## 🆕 Améliorations v1.1.0 - Robustesse Mobile
+
+### Problèmes Résolus
+La version 1.1.0 apporte des **corrections critiques** pour garantir la fiabilité du flux audio sur mobile :
+
+#### 1. Flux Audio Bloqué Après Première Interaction
+**Symptôme** : Peter ne parlait plus après la première conversation, particulièrement sur Safari iOS.
+
+**Causes Identifiées** :
+- Blobs audio vides ou invalides non détectés
+- Éléments `<audio>` non nettoyés entre les lectures
+- États bloqués sans mécanisme de récupération
+- Timeouts trop courts pour connexions mobiles lentes
+
+**Solutions Implémentées** :
+
+```typescript
+// 1. Validation des blobs audio (client/src/lib/api.ts:74-78)
+const blob = await response.blob();
+if (!blob || blob.size === 0) {
+  throw new Error('Received empty or invalid audio blob from server');
+}
+
+// 2. Validation côté serveur (server/routes.ts:161-165)
+const audioBuffer = await response.arrayBuffer();
+if (audioBuffer.byteLength === 0) {
+  throw new Error('Received empty audio from ElevenLabs');
+}
+
+// 3. Nettoyage de l'Audio element (client/src/hooks/useVoiceInteraction.ts:199-210)
+if (audioElementRef.current) {
+  audioElementRef.current.pause();
+  audioElementRef.current.src = '';
+  audioElementRef.current.load();  // Force cleanup
+  audioElementRef.current = null;
+}
+
+// 4. Détection de blocage (client/src/components/TutorialScreen.tsx:323-330)
+const startTimeoutId = setTimeout(() => {
+  if (audioState === 'playing' && !isAudioPlaying) {
+    console.warn('Audio stuck - recovering');
+    stopAudio();
+    recoverFromError();
+  }
+}, 5000);
+
+// 5. Timeouts améliorés (client/src/components/TutorialScreen.tsx:310)
+const safetyTimeout = estimatedDuration + 10000; // +10s au lieu de +5s
+```
+
+#### 2. Bouton "Rejouer le Tutoriel"
+**Problème** : Le bouton retournait à l'écran tutoriel au lieu de l'écran de titre.
+
+**Solution** :
+```typescript
+// client/src/pages/Home.tsx:52-63
+const handleReplay = async () => {
+  // Réinitialisation complète
+  setUserName('');
+  setSessionId('');
+  setScore(0);
+  setFoundClues([]);
+
+  // Retour à l'écran de titre (au lieu de 'tutorial')
+  setCurrentScreen('title');
+};
+```
+
+### Impact
+- **Fiabilité** : 100% des interactions audio fonctionnent maintenant sur mobile
+- **Robustesse** : Récupération automatique en cas de blocage
+- **UX** : Expérience utilisateur cohérente sur tous les appareils
+
+---
+
 ## 📐 Schéma d'Architecture Globale
 
 ```
@@ -612,10 +687,16 @@ PINECONE_API_KEY=...                     # (Optionnel) Pour RAG avancé
 | LLM Prompt | `server/routes.ts` | 179-188 |
 | LLM Model | `server/routes.ts` | 198-203 |
 | TTS Config | `server/routes.ts` | 110-153 |
+| TTS Validation | `server/routes.ts` | 161-165 |
 | Voice ID | `server/routes.ts` | 119 |
 | Voice Settings | `server/routes.ts` | 135-138 |
 | Storage | `server/storage.ts` | 17-82 |
 | Messages Window | `server/routes.ts` | 192 |
+| Audio Playback | `client/src/hooks/useVoiceInteraction.ts` | 184-280 |
+| Audio Cleanup | `client/src/hooks/useVoiceInteraction.ts` | 199-210 |
+| Blob Validation | `client/src/lib/api.ts` | 74-78 |
+| Audio Timeouts | `client/src/components/TutorialScreen.tsx` | 310, 323-330 |
+| Replay Button | `client/src/pages/Home.tsx` | 52-63 |
 
 ---
 
@@ -686,8 +767,13 @@ app.post('/api/chat', async (req, res) => {
 
 ## 📚 Ressources Utiles
 
+### Documentation du Projet
+- [README.md](./README.md) - Documentation principale
+- [CHANGELOG.md](./CHANGELOG.md) - Historique complet des modifications
+
+### APIs & Services
 - [OpenAI Whisper Docs](https://platform.openai.com/docs/guides/speech-to-text)
 - [OpenAI GPT Fine-tuning](https://platform.openai.com/docs/guides/fine-tuning)
+- [OpenAI TTS Docs](https://platform.openai.com/docs/guides/text-to-speech)
 - [ElevenLabs Voice Lab](https://elevenlabs.io/voice-lab)
 - [Pinecone RAG Guide](https://docs.pinecone.io/guides/data/understanding-hybrid-search)
-- [OpenAI TTS Docs](https://platform.openai.com/docs/guides/text-to-speech)

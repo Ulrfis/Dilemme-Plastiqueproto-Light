@@ -2,9 +2,27 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
+![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
+
+---
+
+## 🆕 Dernières Améliorations (v1.1.0)
+
+### ✅ Flux Audio Mobile Robuste
+La version 1.1.0 apporte des **corrections critiques** pour le flux audio mobile :
+- **Problème résolu** : Peter parle maintenant de manière fiable après chaque interaction utilisateur
+- **Détection de blocages** : Système automatique qui détecte et récupère les états audio bloqués
+- **Validation robuste** : Vérification des données audio à chaque étape (client et serveur)
+- **Timeouts améliorés** : Marges de sécurité augmentées pour les connexions mobiles lentes
+
+### 🔄 Bouton "Rejouer" Amélioré
+- Le bouton "Rejouer le tutoriel" retourne maintenant correctement à l'écran de titre initial
+- Réinitialisation complète de tous les états pour une nouvelle session propre
+
+📋 **Voir le [CHANGELOG.md](./CHANGELOG.md) pour l'historique complet des modifications**
 
 ---
 
@@ -270,6 +288,7 @@ Dilemme-Plastiqueproto-Light/
 │       └── ...
 │
 ├── ARCHITECTURE.md                  # Documentation architecture détaillée
+├── CHANGELOG.md                     # Historique des modifications
 ├── README.md                        # Ce fichier
 ├── package.json                     # Dépendances & scripts
 ├── tsconfig.json                    # Config TypeScript
@@ -500,7 +519,7 @@ Met à jour une session (score, indices trouvés, etc.).
 
 ---
 
-## 🚧 Limitations Connues (V1)
+## 🚧 Limitations Connues (V1.1)
 
 - **Stockage temporaire** : Sessions perdues au redémarrage serveur
 - **Pas de comptes utilisateurs** : Pas d'historique persistant
@@ -508,6 +527,10 @@ Met à jour une session (score, indices trouvés, etc.).
 - **1 seul niveau** : Tutoriel uniquement (pas de progression multi-niveaux)
 - **Pas de RAG étendu** : Base de connaissances limitée aux 4 indices
 - **Latence réseau** : Dépend de la connexion (STT + LLM + TTS ≈ 2-4s)
+
+### ✅ Problèmes Résolus dans v1.1.0
+- ~~**Flux audio mobile instable**~~ : CORRIGÉ - Peter parle maintenant fiablement après chaque interaction
+- ~~**Bouton Rejouer incorrect**~~ : CORRIGÉ - Retourne maintenant correctement à l'écran de titre
 
 ---
 
@@ -576,6 +599,7 @@ Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
 ## 📞 Contact & Support
 
 - **Documentation complète** : [ARCHITECTURE.md](./ARCHITECTURE.md)
+- **Historique des changements** : [CHANGELOG.md](./CHANGELOG.md)
 - **Product Requirements** : [attached_assets/Prototype-Dilemme-Light_PRD_1762430698665.md](./attached_assets/Prototype-Dilemme-Light_PRD_1762430698665.md)
 - **Issues** : [GitHub Issues](https://github.com/Ulrfis/Dilemme-Plastiqueproto-Light/issues)
 
