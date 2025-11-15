@@ -5,6 +5,7 @@ import WelcomeSetup from "@/components/WelcomeSetup";
 import TutorialScreen from "@/components/TutorialScreen";
 import ScoreScreen from "@/components/ScoreScreen";
 import { createSession } from "@/lib/api";
+import { MediaProvider } from "@/contexts/MediaContext";
 
 type Screen = 'title' | 'video' | 'welcome' | 'tutorial' | 'score';
 
@@ -72,15 +73,15 @@ export default function Home() {
   };
 
   return (
-    <>
+    <MediaProvider>
       {currentScreen === 'title' && <TitleScreen onStart={handleStart} />}
       {currentScreen === 'video' && <VideoIntro onComplete={handleVideoComplete} />}
       {currentScreen === 'welcome' && <WelcomeSetup onStart={handleWelcomeComplete} />}
       {currentScreen === 'tutorial' && sessionId && (
-        <TutorialScreen 
+        <TutorialScreen
           sessionId={sessionId}
-          userName={userName} 
-          onComplete={handleTutorialComplete} 
+          userName={userName}
+          onComplete={handleTutorialComplete}
         />
       )}
       {currentScreen === 'score' && (
@@ -93,6 +94,6 @@ export default function Home() {
           onNextLevel={handleNextLevel}
         />
       )}
-    </>
+    </MediaProvider>
   );
 }

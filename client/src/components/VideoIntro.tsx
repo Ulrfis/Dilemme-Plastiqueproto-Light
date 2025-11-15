@@ -1,20 +1,29 @@
 import { Button } from "@/components/ui/button";
 import { ChevronRight, Volume2, VolumeX } from "lucide-react";
 import { useRef, useEffect, useState } from "react";
+import { useMedia } from "@/contexts/MediaContext";
 
 interface VideoIntroProps {
   onComplete: () => void;
 }
 
 export default function VideoIntro({ onComplete }: VideoIntroProps) {
+  const { audioUnlocked } = useMedia();
   const videoId = "6916ff7ddf9720847e0868f0";
-  // Démarrer en autoplay MUTED (obligatoire pour que l'autoplay fonctionne sur navigateurs modernes)
-  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true&muted=true&loop=false`;
+
+  // Si l'audio est déverrouillé, démarrer avec le son
+  // Sinon, démarrer en muted pour assurer l'autoplay
+  const shouldStartWithSound = audioUnlocked;
+
+  console.log('[VideoIntro] Component mounted - audioUnlocked:', audioUnlocked, 'shouldStartWithSound:', shouldStartWithSound);
+
+  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=true&preload=true&muted=${!shouldStartWithSound}&loop=false`;
+
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [videoEnded, setVideoEnded] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
-  const [showUnmutePrompt, setShowUnmutePrompt] = useState(true);
+  const [isMuted, setIsMuted] = useState(!shouldStartWithSound);
+  const [showUnmutePrompt, setShowUnmutePrompt] = useState(!shouldStartWithSound);
   const [iframeLoaded, setIframeLoaded] = useState(false);
 
   // Tenter le plein écran en mode paysage au chargement
@@ -48,9 +57,10 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   }, []);
 
   // Activer automatiquement le son dès que l'iframe est chargé
+  // MAIS seulement si l'audio était déjà déverrouillé (sinon ça ne marchera pas)
   useEffect(() => {
-    if (iframeLoaded && iframeRef.current && isMuted) {
-      console.log('[VideoIntro] Attempting to unmute automatically');
+    if (iframeLoaded && iframeRef.current && isMuted && shouldStartWithSound) {
+      console.log('[VideoIntro] Attempting to unmute automatically (audio was unlocked)');
       // Petit délai pour s'assurer que le player Gumlet est prêt
       const unmuteTimer = setTimeout(() => {
         if (iframeRef.current) {
@@ -66,7 +76,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
 
       return () => clearTimeout(unmuteTimer);
     }
-  }, [iframeLoaded, isMuted]);
+  }, [iframeLoaded, isMuted, shouldStartWithSound]);
 
   // Fonction pour activer/désactiver le son
   const toggleMute = () => {
@@ -196,7 +206,11 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
             <Volume2 className="w-10 h-10 sm:w-12 sm:h-12" />
           </Button>
           <div className="bg-black/80 backdrop-blur-sm px-4 py-2 rounded-full text-white text-sm sm:text-base animate-pulse">
-            🔊 Touchez pour activer le son
+            {shouldStartWithSound ? (
+              <>🔊 Activez le son pour une meilleure expérience</>
+            ) : (
+              <>🔊 Touchez pour activer le son</>
+            )}
           </div>
         </div>
       )}
