@@ -30,6 +30,8 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const audioExplicitlyStoppedRef = useRef(false);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const keepAliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const currentAudioUrlRef = useRef<string | null>(null);
   
   // Utiliser des refs pour stocker les callbacks et éviter les stale closures
   // Les callbacks playAudio/stopAudio seront stables et invoqueront toujours la dernière version
@@ -44,6 +46,33 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   useEffect(() => {
     onAudioStopRef.current = onAudioStop;
   }, [onAudioStop]);
+
+  // MOBILE FIX: Cleanup keepalive et audio context au démontage du composant
+  useEffect(() => {
+    return () => {
+      console.log('[useVoiceInteraction] Component unmounting - cleaning up');
+
+      // Arrêter le keepalive
+      if (keepAliveIntervalRef.current) {
+        clearInterval(keepAliveIntervalRef.current);
+        keepAliveIntervalRef.current = null;
+      }
+
+      // Nettoyer l'URL blob
+      if (currentAudioUrlRef.current) {
+        URL.revokeObjectURL(currentAudioUrlRef.current);
+        currentAudioUrlRef.current = null;
+      }
+
+      // Fermer l'audio context
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(err => {
+          console.warn('[useVoiceInteraction] Error closing AudioContext:', err);
+        });
+        audioContextRef.current = null;
+      }
+    };
+  }, []);
 
   // MOBILE FIX: Créer et activer l'AudioContext pour débloquer l'audio sur mobile
   const unlockAudioContext = useCallback(() => {
@@ -74,6 +103,45 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       console.log('[useVoiceInteraction] Silent audio played to unlock audio context');
     } catch (error) {
       console.warn('[useVoiceInteraction] Could not unlock audio context:', error);
+    }
+  }, []);
+
+  // MOBILE FIX: Créer l'élément audio permanent dès le début
+  const initializeAudioElement = useCallback(() => {
+    if (!audioElementRef.current) {
+      console.log('[useVoiceInteraction] Creating permanent audio element');
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.volume = 1.0;
+
+      // CRITIQUE: Sur mobile, on doit créer l'élément lors d'une interaction utilisateur
+      // et le réutiliser ensuite pour éviter les restrictions d'autoplay
+      audioElementRef.current = audio;
+      console.log('[useVoiceInteraction] Permanent audio element created');
+    }
+    return audioElementRef.current;
+  }, []);
+
+  // MOBILE FIX: Keepalive pour maintenir le contexte audio actif
+  const startAudioKeepAlive = useCallback(() => {
+    // Arrêter le keepalive existant s'il y en a un
+    if (keepAliveIntervalRef.current) {
+      clearInterval(keepAliveIntervalRef.current);
+    }
+
+    console.log('[useVoiceInteraction] Starting audio keepalive');
+
+    // Jouer un son silencieux toutes les 2 secondes pour maintenir le contexte actif
+    keepAliveIntervalRef.current = setInterval(() => {
+      unlockAudioContext();
+    }, 2000);
+  }, [unlockAudioContext]);
+
+  const stopAudioKeepAlive = useCallback(() => {
+    if (keepAliveIntervalRef.current) {
+      console.log('[useVoiceInteraction] Stopping audio keepalive');
+      clearInterval(keepAliveIntervalRef.current);
+      keepAliveIntervalRef.current = null;
     }
   }, []);
 
@@ -113,6 +181,13 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
   const startRecording = useCallback(async () => {
     console.log('[useVoiceInteraction] startRecording called');
+
+    // MOBILE FIX: Initialiser l'audio element lors de la première interaction utilisateur
+    initializeAudioElement();
+
+    // MOBILE FIX: Débloquer et activer le contexte audio immédiatement
+    unlockAudioContext();
+
     try {
       console.log('[useVoiceInteraction] Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -158,7 +233,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       setAudioState('error');
       throw error;
     }
-  }, []);
+  }, [initializeAudioElement, unlockAudioContext]);
 
   const stopRecording = useCallback(async (): Promise<string | null> => {
     return new Promise((resolve) => {
@@ -183,9 +258,10 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
           console.log('[useVoiceInteraction] Stopped track:', track.kind, track.label);
         });
 
-        // MOBILE FIX: Débloquer immédiatement l'audio context pour maintenir le contexte actif
-        // Ceci est crucial pour que l'audio de Peter puisse jouer après le traitement
+        // MOBILE FIX: CRITIQUE - Débloquer et maintenir le contexte audio actif pendant le traitement
+        // Démarrer le keepalive pour empêcher le navigateur de suspendre l'audio
         unlockAudioContext();
+        startAudioKeepAlive();
 
         setAudioState('processing');
 
@@ -217,7 +293,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
       mediaRecorder.stop();
     });
-  }, []);
+  }, [unlockAudioContext, startAudioKeepAlive]);
 
   const playAudio = useCallback(async (audioBlob: Blob): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -233,6 +309,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       // MOBILE FIX: Vérifier que le Blob est valide et non vide
       if (!audioBlob || audioBlob.size === 0) {
         console.error('[useVoiceInteraction] Invalid or empty audio blob');
+        stopAudioKeepAlive();
         setAudioState('idle');
         if (onAudioStopRef.current) {
           onAudioStopRef.current();
@@ -241,29 +318,28 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         return;
       }
 
-      // MOBILE FIX: Nettoyer complètement l'élément audio précédent avant d'en créer un nouveau
-      if (audioElementRef.current) {
-        console.log('[useVoiceInteraction] Cleaning up previous audio element');
-        try {
-          audioElementRef.current.pause();
-          audioElementRef.current.src = '';
-          audioElementRef.current.load();
-          audioElementRef.current = null;
-        } catch (error) {
-          console.warn('[useVoiceInteraction] Error cleaning up previous audio:', error);
-        }
+      // MOBILE FIX: CRITIQUE - Réutiliser l'élément audio permanent créé lors de la première interaction
+      // Au lieu de créer un nouveau Audio(), ce qui casserait le lien avec l'interaction utilisateur
+      const audio = initializeAudioElement();
+      console.log('[useVoiceInteraction] Using permanent audio element (not creating new one)');
+
+      // Nettoyer l'ancienne URL blob si elle existe
+      if (currentAudioUrlRef.current) {
+        console.log('[useVoiceInteraction] Revoking previous audio URL');
+        URL.revokeObjectURL(currentAudioUrlRef.current);
+        currentAudioUrlRef.current = null;
+      }
+
+      // Si l'audio joue déjà, l'arrêter
+      if (!audio.paused) {
+        console.log('[useVoiceInteraction] Stopping previous audio playback');
+        audio.pause();
+        audio.currentTime = 0;
       }
 
       const audioUrl = URL.createObjectURL(audioBlob);
-      console.log('[useVoiceInteraction] Created blob URL:', audioUrl.substring(0, 50) + '...');
-
-      const audio = new Audio();
-      audioElementRef.current = audio;
-
-      // MOBILE FIX: Configuration pour mobile Safari
-      audio.preload = 'auto';
-      audio.volume = 1.0;
-      console.log('[useVoiceInteraction] Audio element created and configured');
+      currentAudioUrlRef.current = audioUrl;
+      console.log('[useVoiceInteraction] Created new blob URL:', audioUrl.substring(0, 50) + '...');
 
       // MOBILE FIX: Timeout de sécurité pour détecter les blocages audio
       const maxAudioDuration = 120000; // 2 minutes max
@@ -272,9 +348,12 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         if (audioElementRef.current === audio) {
           audio.pause();
           audio.currentTime = 0;
-          URL.revokeObjectURL(audioUrl);
+          if (currentAudioUrlRef.current) {
+            URL.revokeObjectURL(currentAudioUrlRef.current);
+            currentAudioUrlRef.current = null;
+          }
+          stopAudioKeepAlive();
           setAudioState('idle');
-          audioElementRef.current = null;
           if (onAudioStopRef.current) {
             onAudioStopRef.current();
           }
@@ -286,25 +365,32 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       let playStarted = false;
       const playTimeoutId = setTimeout(() => {
         if (!playStarted) {
-          console.error('[useVoiceInteraction] Audio play() did not start within 5s - forcing cleanup');
+          console.error('[useVoiceInteraction] Audio play() did not start within 10s - forcing cleanup');
           clearTimeout(safetyTimeoutId);
-          URL.revokeObjectURL(audioUrl);
+          if (currentAudioUrlRef.current) {
+            URL.revokeObjectURL(currentAudioUrlRef.current);
+            currentAudioUrlRef.current = null;
+          }
+          stopAudioKeepAlive();
           setAudioState('idle');
-          audioElementRef.current = null;
           if (onAudioStopRef.current) {
             onAudioStopRef.current();
           }
-          reject(new Error('Audio play timeout'));
+          reject(new Error('Audio play timeout - mobile autoplay may be blocked'));
         }
-      }, 5000);
+      }, 10000); // Augmenter à 10s pour mobile
 
       audio.onended = () => {
         console.log('[useVoiceInteraction] Audio ended normally');
         clearTimeout(safetyTimeoutId);
         clearTimeout(playTimeoutId);
-        URL.revokeObjectURL(audioUrl);
+        if (currentAudioUrlRef.current) {
+          URL.revokeObjectURL(currentAudioUrlRef.current);
+          currentAudioUrlRef.current = null;
+        }
+        stopAudioKeepAlive();
         setAudioState('idle');
-        audioElementRef.current = null;
+        // Ne PAS mettre audioElementRef.current = null - on garde l'élément permanent
         if (onAudioStopRef.current) {
           onAudioStopRef.current();
         }
@@ -320,9 +406,13 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         });
         clearTimeout(safetyTimeoutId);
         clearTimeout(playTimeoutId);
-        URL.revokeObjectURL(audioUrl);
+        if (currentAudioUrlRef.current) {
+          URL.revokeObjectURL(currentAudioUrlRef.current);
+          currentAudioUrlRef.current = null;
+        }
+        stopAudioKeepAlive();
         setAudioState('idle');
-        audioElementRef.current = null;
+        // Ne PAS mettre audioElementRef.current = null - on garde l'élément permanent
         if (onAudioStopRef.current) {
           onAudioStopRef.current();
         }
@@ -334,6 +424,8 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         console.log('[useVoiceInteraction] Audio PLAYING event - audio is actually playing now!');
         playStarted = true;
         clearTimeout(playTimeoutId);
+        // MOBILE FIX: Arrêter le keepalive une fois que l'audio joue vraiment
+        stopAudioKeepAlive();
         if (onAudioStartRef.current) {
           onAudioStartRef.current();
         }
@@ -444,9 +536,13 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
               console.error('[useVoiceInteraction] Error message:', error.message);
               clearTimeout(safetyTimeoutId);
               clearTimeout(playTimeoutId);
-              URL.revokeObjectURL(audioUrl);
+              if (currentAudioUrlRef.current) {
+                URL.revokeObjectURL(currentAudioUrlRef.current);
+                currentAudioUrlRef.current = null;
+              }
+              stopAudioKeepAlive();
               setAudioState('idle');
-              audioElementRef.current = null;
+              // Ne PAS mettre audioElementRef.current = null - on garde l'élément permanent
               document.removeEventListener('visibilitychange', handleVisibilityChange);
               if (onAudioStopRef.current) {
                 onAudioStopRef.current();
@@ -479,7 +575,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         }, 3000);
       }
     });
-  }, [unlockAudioContext]); // Dépendance nécessaire pour unlockAudioContext
+  }, [unlockAudioContext, initializeAudioElement, stopAudioKeepAlive]); // Dépendances nécessaires
 
   // Fonction pour arrêter immédiatement la lecture audio de Peter
   const stopAudio = useCallback(() => {
@@ -488,28 +584,40 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     // Marquer que l'audio a été explicitement arrêté (pour empêcher la reprise automatique)
     audioExplicitlyStoppedRef.current = true;
 
+    // Arrêter le keepalive
+    stopAudioKeepAlive();
+
     if (audioElementRef.current) {
       // Pause et reset l'audio
       audioElementRef.current.pause();
       audioElementRef.current.currentTime = 0;
-      audioElementRef.current = null;
+      // Ne PAS faire audioElementRef.current = null - on garde l'élément permanent
 
       console.log('[useVoiceInteraction] Audio stopped successfully');
     }
 
+    // Nettoyer l'URL blob si elle existe
+    if (currentAudioUrlRef.current) {
+      URL.revokeObjectURL(currentAudioUrlRef.current);
+      currentAudioUrlRef.current = null;
+    }
+
     // Passer immédiatement à idle pour permettre l'enregistrement
     setAudioState('idle');
-    
+
     // CRITIQUE: Notifier l'arrêt de l'audio pour nettoyer les flags dans TutorialScreen
     // Sans cela, isWaitingForAudioStart peut rester bloqué si l'audio est arrêté
     // avant que onplaying ne se déclenche
     if (onAudioStopRef.current) {
       onAudioStopRef.current();
     }
-  }, []);
+  }, [stopAudioKeepAlive]);
 
   const reset = useCallback(() => {
     console.log('[useVoiceInteraction] Resetting voice interaction state');
+
+    // Arrêter le keepalive
+    stopAudioKeepAlive();
 
     // MOBILE FIX: Properly cleanup MediaRecorder and stream
     if (mediaRecorderRef.current) {
@@ -528,13 +636,21 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       }
     }
 
-    // MOBILE FIX: Properly cleanup audio element
+    // Nettoyer l'URL blob si elle existe
+    if (currentAudioUrlRef.current) {
+      URL.revokeObjectURL(currentAudioUrlRef.current);
+      currentAudioUrlRef.current = null;
+    }
+
+    // MOBILE FIX: Reset l'audio element permanent sans le détruire
     if (audioElementRef.current) {
       try {
         audioElementRef.current.pause();
         audioElementRef.current.src = '';
+        audioElementRef.current.currentTime = 0;
         audioElementRef.current.load(); // Force cleanup
-        audioElementRef.current = null;
+        // Ne PAS faire audioElementRef.current = null - on garde l'élément permanent
+        console.log('[useVoiceInteraction] Audio element reset (but kept permanent)');
       } catch (error) {
         console.warn('[useVoiceInteraction] Error during audio cleanup:', error);
       }
@@ -543,7 +659,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     setAudioState('idle');
     setTranscription('');
     audioChunksRef.current = [];
-  }, []);
+  }, [stopAudioKeepAlive]);
 
   const recoverFromError = useCallback(() => {
     reset();
