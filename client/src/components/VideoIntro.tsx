@@ -23,6 +23,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   const [isMuted, setIsMuted] = useState(false); // Son activé par défaut
   const [isPlaying, setIsPlaying] = useState(false); // État de lecture
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false); // État plein écran
 
   // Tenter le plein écran en mode paysage au chargement
   useEffect(() => {
@@ -52,6 +53,24 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     const timer = setTimeout(attemptFullscreenLandscape, 100);
     
     return () => clearTimeout(timer);
+  }, []);
+
+  // Tracker le changement d'état plein écran
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isCurrentlyFullscreen = !!document.fullscreenElement;
+      console.log('[VideoIntro] Fullscreen state changed:', isCurrentlyFullscreen);
+      setIsFullscreen(isCurrentlyFullscreen);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    
+    // Vérifier l'état initial
+    setIsFullscreen(!!document.fullscreenElement);
+    
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
   }, []);
 
   // Fonction pour démarrer la lecture de la vidéo (appelée par le bouton Play)
@@ -247,10 +266,12 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         </Button>
       </div>
 
-      {/* Indication pour pivoter en mode paysage - EN BAS de l'écran */}
-      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full text-white text-sm sm:text-base font-semibold shadow-lg border-2 border-white/20">
-        📱 Mode paysage fortement recommandé
-      </div>
+      {/* Indication pour pivoter en mode paysage - EN BAS de l'écran - Masquée en plein écran */}
+      {!isFullscreen && (
+        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full text-white text-sm sm:text-base font-semibold shadow-lg border-2 border-white/20">
+          📱 Mode paysage fortement recommandé
+        </div>
+      )}
 
       {/* Bouton skip sur le CÔTÉ DROIT - Toujours visible */}
       <Button
