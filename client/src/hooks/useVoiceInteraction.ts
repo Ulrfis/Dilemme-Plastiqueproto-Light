@@ -28,6 +28,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const audioExplicitlyStoppedRef = useRef(false);
   
   // Utiliser des refs pour stocker les callbacks et éviter les stale closures
   // Les callbacks playAudio/stopAudio seront stables et invoqueront toujours la dernière version
@@ -306,6 +307,31 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       // MOBILE FIX: Gérer l'interruption audio (appel entrant, changement d'app, etc.)
       audio.onpause = () => {
         console.log('[useVoiceInteraction] Audio paused (possibly interrupted on mobile)');
+        
+        // Si on n'a pas explicitement arrêté l'audio et qu'il n'est pas fini, essayer de reprendre
+        if (!audioExplicitlyStoppedRef.current && !audio.ended && audioElementRef.current === audio) {
+          console.log('[useVoiceInteraction] Audio was paused unexpectedly, attempting to resume...');
+          
+          // Attendre un peu avant de reprendre (le navigateur peut avoir besoin de temps)
+          setTimeout(() => {
+            if (audio.paused && audioElementRef.current === audio && !audioExplicitlyStoppedRef.current) {
+              console.log('[useVoiceInteraction] Resuming audio playback...');
+              audio.play().catch(err => {
+                console.warn('[useVoiceInteraction] Could not resume audio:', err);
+                // Si la reprise échoue, il faut nettoyer
+                clearTimeout(safetyTimeoutId);
+                clearTimeout(playTimeoutId);
+                URL.revokeObjectURL(audioUrl);
+                setAudioState('idle');
+                audioElementRef.current = null;
+                if (onAudioStopRef.current) {
+                  onAudioStopRef.current();
+                }
+                resolve();
+              });
+            }
+          }, 100);
+        }
       };
 
       audio.onwaiting = () => {
@@ -318,7 +344,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
       // MOBILE FIX: Tenter de reprendre la lecture si l'audio est suspendu
       const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible' && audio.paused && audioElementRef.current === audio) {
+        if (document.visibilityState === 'visible' && audio.paused && audioElementRef.current === audio && !wasExplicitlyStopped) {
           console.log('[useVoiceInteraction] Page visible again, attempting to resume audio');
           audio.play().catch(err => {
             console.warn('[useVoiceInteraction] Could not resume audio:', err);
@@ -409,6 +435,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   // Fonction pour arrêter immédiatement la lecture audio de Peter
   const stopAudio = useCallback(() => {
     console.log('[useVoiceInteraction] Stopping audio playback - User wants to speak');
+
+    // Marquer que l'audio a été explicitement arrêté (pour empêcher la reprise automatique)
+    audioExplicitlyStoppedRef.current = true;
 
     if (audioElementRef.current) {
       // Pause et reset l'audio

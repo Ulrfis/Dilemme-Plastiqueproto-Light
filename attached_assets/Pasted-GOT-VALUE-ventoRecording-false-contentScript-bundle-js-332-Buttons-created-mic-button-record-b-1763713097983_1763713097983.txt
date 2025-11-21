@@ -1,0 +1,127 @@
+GOT VALUE ventoRecording: false
+contentScript.bundle.js:332 Buttons created: {mic: button, record: button, camera: button, screen: button}
+contentScript.bundle.js:332 recording state false
+contentScript.bundle.js:332 Uncaught ReferenceError: newControlBar is not defined
+    at contentScript.bundle.js:332:101316
+    at contentScript.bundle.js:332:102527
+    at contentScript.bundle.js:332:102531
+(anonymous) @ contentScript.bundle.js:332
+(anonymous) @ contentScript.bundle.js:332
+(anonymous) @ contentScript.bundle.js:332
+content.js:405 eurekaaext loaded
+contentScript.bundle.js:332 message {action: 'initializeUI'}
+contentScript.bundle.js:332 message {action: 'initializeUI'}
+contentScript.bundle.js:332 [DEBUG] Initializing UI elements...
+contentScript.bundle.js:332 message {action: 'ping'}
+contentScript.bundle.js:332 message {action: 'ping'}
+contentScript.bundle.js:332 [DEBUG] No recording in progress.
+index-DpO9ULtm.js:153 [TitleScreen] Start button clicked - unlocking audio...
+index-DpO9ULtm.js:153 [MediaManager] Attempting to unlock audio...
+index-DpO9ULtm.js:153 [MediaManager] Audio unlocked successfully
+index-DpO9ULtm.js:153 [TitleScreen] Audio unlocked successfully, proceeding to video
+index-DpO9ULtm.js:153 [VideoIntro] Component mounted - audioUnlocked: true
+index-DpO9ULtm.js:33 Allow attribute will take precedence over 'allowfullscreen'.
+Xa @ index-DpO9ULtm.js:33
+zy @ index-DpO9ULtm.js:40
+wm @ index-DpO9ULtm.js:40
+ym @ index-DpO9ULtm.js:40
+Wy @ index-DpO9ULtm.js:40
+as @ index-DpO9ULtm.js:40
+cd @ index-DpO9ULtm.js:40
+On @ index-DpO9ULtm.js:38
+(anonymous) @ index-DpO9ULtm.js:40
+index-DpO9ULtm.js:153 [VideoIntro] Fullscreen activated
+index-DpO9ULtm.js:153 [VideoIntro] Could not lock orientation: NotSupportedError: screen.orientation.lock() is not available on this device.
+245-16240d854173229c.js:11  POST https://o4505942694756352.ingest.us.sentry.io/api/4507683861168128/envelope/?sentry_version=7&sentry_key=ed213cc10c12059fcb0be2c641ae99d0&sentry_client=sentry.javascript.nextjs%2F10.23.0 net::ERR_BLOCKED_BY_CLIENT
+a @ 245-16240d854173229c.js:11
+(anonymous) @ 245-16240d854173229c.js:11
+add @ 245-16240d854173229c.js:11
+send @ 245-16240d854173229c.js:11
+sendEnvelope @ 245-16240d854173229c.js:10
+sendSession @ 245-16240d854173229c.js:10
+captureSession @ 245-16240d854173229c.js:10
+h @ 245-16240d854173229c.js:10
+_ @ 245-16240d854173229c.js:10
+setupOnce @ 245-16240d854173229c.js:18
+_ @ 245-16240d854173229c.js:10
+(anonymous) @ 245-16240d854173229c.js:10
+(anonymous) @ 245-16240d854173229c.js:10
+_setupIntegrations @ 245-16240d854173229c.js:10
+init @ 245-16240d854173229c.js:10
+(anonymous) @ 245-16240d854173229c.js:18
+(anonymous) @ 245-16240d854173229c.js:18
+ty @ 245-16240d854173229c.js:18
+4748 @ main-app-343d605b0f68f112.js:1
+r @ webpack-49c112d168e793ed.js:1
+s @ main-app-343d605b0f68f112.js:1
+(anonymous) @ main-app-343d605b0f68f112.js:1
+r.O @ webpack-49c112d168e793ed.js:1
+t @ webpack-49c112d168e793ed.js:1
+(anonymous) @ 245-16240d854173229c.js:1
+index-DpO9ULtm.js:153 [VideoIntro] PostMessage received: {target: 'metamask-inpage', data: {…}}
+index-DpO9ULtm.js:165 [VideoIntro] Iframe loaded
+index-DpO9ULtm.js:153 [VideoIntro] PostMessage received: {"context":"player.js","version":"2.0","event":"ready","value":{"src":"https://play.gumlet.io/embed/6916ff7ddf9720847e0868f0?autoplay=false&preload=true&muted=false&loop=false","events":["ready","play","pause","ended","timeupdate","progress","seeked","error","fullscreenChange","pipChange","playbackRateChange","audioChange","qualityChange","volumeChange"],"methods":["play","pause","getPaused","mute","unmute","getMuted","setVolume","getVolume","getDuration","setCurrentTime","getCurrentTime","setLoop","getLoop","setPlaybackRate","getPlaybackRate","removeEventListener","addEventListener"]}}
+index-DpO9ULtm.js:153 [VideoIntro] Component mounted - audioUnlocked: true
+index-DpO9ULtm.js:165 [VideoIntro] Skip button clicked
+index-DpO9ULtm.js:165 [WelcomeSetup] Name changed: r
+index-DpO9ULtm.js:165 [WelcomeSetup] Name changed: rr
+index-DpO9ULtm.js:165 [WelcomeSetup] Click event triggered
+index-DpO9ULtm.js:165 [WelcomeSetup] handleStart called with name: rr
+index-DpO9ULtm.js:165 [WelcomeSetup] Starting tutorial with name: rr
+index-DpO9ULtm.js:196 [TutorialScreen] Checking MediaRecorder support...
+index-DpO9ULtm.js:196 [useVoiceInteraction] MediaRecorder support check: true
+index-DpO9ULtm.js:196 [useVoiceInteraction] MIME type support: {webmSupported: true, oggSupported: false, mp4Supported: true}
+index-DpO9ULtm.js:196 [TutorialScreen] MediaRecorder is supported - voice mode available
+index-DpO9ULtm.js:196 [TutorialScreen] Unlocking audio - transitioning to conversation screen
+index-DpO9ULtm.js:196 [TutorialScreen] Playing welcome message automatically
+index-DpO9ULtm.js:196 [TutorialScreen] TTS attempt 1/3
+index-DpO9ULtm.js:196 [API] TTS blob received successfully, size: 191470 type: audio/mpeg
+index-DpO9ULtm.js:196 [TutorialScreen] TTS successful
+index-DpO9ULtm.js:196 [TutorialScreen] Welcome message TTS generated
+index-DpO9ULtm.js:196 [useVoiceInteraction] playAudio called, blob size: 191470
+index-DpO9ULtm.js:196 [useVoiceInteraction] Audio started playing, calling onAudioStart
+index-DpO9ULtm.js:196 [TutorialScreen] Audio playback started
+index-DpO9ULtm.js:196 [useVoiceInteraction] Audio paused (possibly interrupted on mobile)
+index-DpO9ULtm.js:196 [useVoiceInteraction] Audio ended normally
+index-DpO9ULtm.js:196 [TutorialScreen] Audio playback stopped
+index-DpO9ULtm.js:196 [TutorialScreen] Welcome audio played successfully
+index-DpO9ULtm.js:196 [TutorialScreen] handleStartRecording called
+index-DpO9ULtm.js:196 [TutorialScreen] Calling startRecording...
+index-DpO9ULtm.js:196 [useVoiceInteraction] startRecording called
+index-DpO9ULtm.js:196 [useVoiceInteraction] Requesting microphone access...
+index-DpO9ULtm.js:196 [useVoiceInteraction] Microphone access granted, stream: MediaStream {id: '1adec5c1-a5f0-49f3-b5ad-140648124fe2', active: true, onaddtrack: null, onremovetrack: null, onactive: null, …}
+index-DpO9ULtm.js:196 [useVoiceInteraction] Using MIME type: audio/webm
+index-DpO9ULtm.js:196 [useVoiceInteraction] MediaRecorder created with type: audio/webm
+index-DpO9ULtm.js:196 [useVoiceInteraction] Recording started successfully
+index-DpO9ULtm.js:196 [TutorialScreen] startRecording completed successfully
+index-DpO9ULtm.js:196 [useVoiceInteraction] stopRecording: stopping recording...
+index-DpO9ULtm.js:196 [useVoiceInteraction] Audio chunk received: 54810 bytes
+index-DpO9ULtm.js:196 [useVoiceInteraction] Recording stopped, chunks: 1
+index-DpO9ULtm.js:196 [useVoiceInteraction] Audio blob created, size: 54810
+index-DpO9ULtm.js:196 [useVoiceInteraction] Stopped track: audio Bose NC 700 HP (Bluetooth)
+index-DpO9ULtm.js:196 [useVoiceInteraction] Sending audio to speech-to-text API...
+index-DpO9ULtm.js:196 [useVoiceInteraction] Transcription successful: Ouais, coucou Peter, j'écoute de la musique.
+index-DpO9ULtm.js:196 [TutorialScreen] ========== API RESPONSE ==========
+index-DpO9ULtm.js:196 [TutorialScreen] result.response: Salut ! La musique, c’est top, ça aide à se concentrer parfois. Mais dis-moi, que vois-tu au centre de cette grande esplanade ? Ça peut être intéressant d’observer ça ensemble.
+index-DpO9ULtm.js:196 [TutorialScreen] result.response type: string
+index-DpO9ULtm.js:196 [TutorialScreen] result.response length: 176
+index-DpO9ULtm.js:196 [TutorialScreen] First 100 chars: Salut ! La musique, c’est top, ça aide à se concentrer parfois. Mais dis-moi, que vois-tu au centre 
+index-DpO9ULtm.js:196 [TutorialScreen] ===================================
+index-DpO9ULtm.js:196 [TutorialScreen] Clue detection: {previousClues: Array(0), resultFoundClues: Array(0), detectedNewClues: Array(0)}
+index-DpO9ULtm.js:196 [TutorialScreen] Adding assistant message immediately
+index-DpO9ULtm.js:196 [TutorialScreen] Generating TTS for response with retry...
+index-DpO9ULtm.js:196 [TutorialScreen] TTS attempt 1/3
+index-DpO9ULtm.js:196 [API] TTS blob received successfully, size: 170990 type: audio/mpeg
+index-DpO9ULtm.js:196 [TutorialScreen] TTS successful
+index-DpO9ULtm.js:196 [TutorialScreen] TTS generated successfully, blob size: 170990
+index-DpO9ULtm.js:196 [TutorialScreen] About to call playAudio...
+index-DpO9ULtm.js:196 [TutorialScreen] Setting safety timeout: 24080ms for estimated duration: 14080ms
+index-DpO9ULtm.js:196 [TutorialScreen] Starting audio playback...
+index-DpO9ULtm.js:196 [useVoiceInteraction] playAudio called, blob size: 170990
+index-DpO9ULtm.js:196 [useVoiceInteraction] Audio started playing, calling onAudioStart
+index-DpO9ULtm.js:196 [TutorialScreen] Audio playback started
+index-DpO9ULtm.js:196 [useVoiceInteraction] Audio paused (possibly interrupted on mobile)
+index-DpO9ULtm.js:196 [useVoiceInteraction] Audio ended normally
+index-DpO9ULtm.js:196 [TutorialScreen] Audio playback stopped
+index-DpO9ULtm.js:196 [TutorialScreen] Audio playback completed successfully
+index-DpO9ULtm.js:196 [TutorialScreen] Cleaned up safety timeouts
