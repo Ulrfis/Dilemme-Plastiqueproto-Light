@@ -6,6 +6,24 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2025-11-21]
+
+### Corrigé
+- **TTS sur mobile - Reprise automatique de l'audio** (commit [WIP])
+  - Détection automatique du pause audio inattendu sur mobile
+  - Tentative de reprise (resume) après 100ms quand l'audio est pausé accidentellement
+  - Flag `audioExplicitlyStoppedRef` pour différencier pause intentionnelle vs accidentelle
+  - Gestion des cas d'erreur lors de la reprise
+  - Fichier: `client/src/hooks/useVoiceInteraction.ts`
+
+- **Message plein écran sur vidéo intro** (commit [WIP])
+  - Message "Mode paysage fortement recommandé" masqué quand vidéo est en fullscreen
+  - Tracking d'état fullscreen via `fullscreenchange` event listener
+  - Amélioration UX: moins d'informations parasites en fullscreen
+  - Fichier: `client/src/components/VideoIntro.tsx`
+
+---
+
 ## [2025-11-15]
 
 ### Corrigé

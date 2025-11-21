@@ -39,11 +39,13 @@ Preferred communication style: Simple, everyday language.
 - Accessibility-first approach with immediate visual and auditory feedback
 - Progressive enhancement with fallback modes
 
-**Video Introduction Flow** (Recent Enhancement):
+**Video Introduction Flow** (Recent Enhancements):
 - Immediate autoplay after "Commencer" button click (no secondary button)
 - Automatic landscape orientation and fullscreen attempt on mobile
 - Skip button visible throughout playback for quick navigation
 - Simplified UX: single click to start video experience
+- Guidance message "Mode paysage recommandé" hidden when video is fullscreen
+- Fullscreen state tracking via event listeners for smart UI visibility
 
 ### Backend Architecture
 
@@ -107,6 +109,14 @@ Preferred communication style: Simple, everyday language.
 - States: idle → recording → processing → playing → idle
 - Error recovery with user-friendly fallbacks
 - Permission handling for microphone access
+- Mobile-specific: Auto-resume when audio paused unexpectedly
+
+**Mobile Audio Recovery** (Latest Enhancement - Nov 21):
+- Automatic detection of unexpected audio pause on mobile
+- Attempts resume after 100ms delay for accidental interruptions
+- Flag tracking to distinguish intentional vs. accidental pauses
+- Graceful fallback if resume fails (cleanup and transition to idle)
+- Improves reliability on smartphone browsers with aggressive power saving
 
 **Voice-Text Synchronization** (Recent Enhancement):
 - Typewriter effect synchronized with audio playback start

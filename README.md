@@ -9,14 +9,20 @@
 
 ---
 
-## 🆕 Dernières Améliorations (v1.1.0)
+## 🆕 Dernières Améliorations (v1.1.0 - November 21)
 
 ### ✅ Flux Audio Mobile Robuste
 La version 1.1.0 apporte des **corrections critiques** pour le flux audio mobile :
+- **Reprise automatique audio** : Détection du pause audio inattendu, tentative de reprise après 100ms
+- **Différenciation intentionnalité** : Flag pour distinguer les pauses intentionnelles des pauses accidentelles
 - **Problème résolu** : Peter parle maintenant de manière fiable après chaque interaction utilisateur
 - **Détection de blocages** : Système automatique qui détecte et récupère les états audio bloqués
 - **Validation robuste** : Vérification des données audio à chaque étape (client et serveur)
 - **Timeouts améliorés** : Marges de sécurité augmentées pour les connexions mobiles lentes
+
+### 🎬 Vidéo Intro Améliorée
+- Message "Mode paysage fortement recommandé" masqué automatiquement quand la vidéo est en fullscreen
+- Meilleure UX: affichage du message uniquement quand utilisateur n'est pas en fullscreen
 
 ### 🔄 Bouton "Rejouer" Amélioré
 - Le bouton "Rejouer le tutoriel" retourne maintenant correctement à l'écran de titre initial
@@ -529,7 +535,9 @@ Met à jour une session (score, indices trouvés, etc.).
 - **Latence réseau** : Dépend de la connexion (STT + LLM + TTS ≈ 2-4s)
 
 ### ✅ Problèmes Résolus dans v1.1.0
-- ~~**Flux audio mobile instable**~~ : CORRIGÉ - Peter parle maintenant fiablement après chaque interaction
+- ~~**Flux audio mobile instable**~~ : CORRIGÉ - Peter parle maintenant fiablement après chaque interaction avec reprise automatique
+- ~~**Audio pause sur mobile (2ème message+)**~~ : CORRIGÉ - Détection et reprise automatique du pause audio inattendu
+- ~~**Message fullscreen visible**~~ : CORRIGÉ - Message "Mode paysage" masqué en fullscreen
 - ~~**Bouton Rejouer incorrect**~~ : CORRIGÉ - Retourne maintenant correctement à l'écran de titre
 
 ---
