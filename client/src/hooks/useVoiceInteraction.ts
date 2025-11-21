@@ -24,11 +24,12 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const { onAudioStart, onAudioStop } = options || {};
   const [audioState, setAudioState] = useState<AudioState>('idle');
   const [transcription, setTranscription] = useState('');
-  
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const audioExplicitlyStoppedRef = useRef(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
   
   // Utiliser des refs pour stocker les callbacks et éviter les stale closures
   // Les callbacks playAudio/stopAudio seront stables et invoqueront toujours la dernière version
@@ -43,6 +44,38 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   useEffect(() => {
     onAudioStopRef.current = onAudioStop;
   }, [onAudioStop]);
+
+  // MOBILE FIX: Créer et activer l'AudioContext pour débloquer l'audio sur mobile
+  const unlockAudioContext = useCallback(() => {
+    try {
+      if (!audioContextRef.current) {
+        // @ts-ignore - webkit prefix for Safari
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioContextRef.current = new AudioContext();
+        console.log('[useVoiceInteraction] AudioContext created:', audioContextRef.current.state);
+      }
+
+      // Si l'AudioContext est suspendu, le reprendre
+      if (audioContextRef.current.state === 'suspended') {
+        console.log('[useVoiceInteraction] Resuming suspended AudioContext...');
+        audioContextRef.current.resume().then(() => {
+          console.log('[useVoiceInteraction] AudioContext resumed successfully, state:', audioContextRef.current?.state);
+        }).catch(err => {
+          console.warn('[useVoiceInteraction] Failed to resume AudioContext:', err);
+        });
+      }
+
+      // Jouer un buffer silencieux pour "débloquer" l'audio sur mobile
+      const buffer = audioContextRef.current.createBuffer(1, 1, 22050);
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioContextRef.current.destination);
+      source.start(0);
+      console.log('[useVoiceInteraction] Silent audio played to unlock audio context');
+    } catch (error) {
+      console.warn('[useVoiceInteraction] Could not unlock audio context:', error);
+    }
+  }, []);
 
   const checkMicrophonePermission = useCallback(async (): Promise<boolean> => {
     try {
@@ -150,6 +183,10 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
           console.log('[useVoiceInteraction] Stopped track:', track.kind, track.label);
         });
 
+        // MOBILE FIX: Débloquer immédiatement l'audio context pour maintenir le contexte actif
+        // Ceci est crucial pour que l'audio de Peter puisse jouer après le traitement
+        unlockAudioContext();
+
         setAudioState('processing');
 
         try {
@@ -185,6 +222,13 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const playAudio = useCallback(async (audioBlob: Blob): Promise<void> => {
     return new Promise((resolve, reject) => {
       console.log('[useVoiceInteraction] playAudio called, blob size:', audioBlob.size);
+
+      // MOBILE FIX: Réinitialiser le flag d'arrêt explicite pour chaque nouvelle lecture
+      audioExplicitlyStoppedRef.current = false;
+      console.log('[useVoiceInteraction] Reset audioExplicitlyStoppedRef to false');
+
+      // MOBILE FIX: Débloquer l'audio context avant de jouer
+      unlockAudioContext();
 
       // MOBILE FIX: Vérifier que le Blob est valide et non vide
       if (!audioBlob || audioBlob.size === 0) {
@@ -307,30 +351,35 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       // MOBILE FIX: Gérer l'interruption audio (appel entrant, changement d'app, etc.)
       audio.onpause = () => {
         console.log('[useVoiceInteraction] Audio paused (possibly interrupted on mobile)');
-        
+        console.log('[useVoiceInteraction] Audio state:', {
+          paused: audio.paused,
+          ended: audio.ended,
+          currentTime: audio.currentTime,
+          duration: audio.duration,
+          explicitlyStopped: audioExplicitlyStoppedRef.current
+        });
+
         // Si on n'a pas explicitement arrêté l'audio et qu'il n'est pas fini, essayer de reprendre
         if (!audioExplicitlyStoppedRef.current && !audio.ended && audioElementRef.current === audio) {
           console.log('[useVoiceInteraction] Audio was paused unexpectedly, attempting to resume...');
-          
-          // Attendre un peu avant de reprendre (le navigateur peut avoir besoin de temps)
-          setTimeout(() => {
-            if (audio.paused && audioElementRef.current === audio && !audioExplicitlyStoppedRef.current) {
-              console.log('[useVoiceInteraction] Resuming audio playback...');
-              audio.play().catch(err => {
-                console.warn('[useVoiceInteraction] Could not resume audio:', err);
-                // Si la reprise échoue, il faut nettoyer
-                clearTimeout(safetyTimeoutId);
-                clearTimeout(playTimeoutId);
-                URL.revokeObjectURL(audioUrl);
-                setAudioState('idle');
-                audioElementRef.current = null;
-                if (onAudioStopRef.current) {
-                  onAudioStopRef.current();
-                }
-                resolve();
-              });
-            }
-          }, 100);
+
+          // MOBILE FIX: Tenter de reprendre immédiatement (crucial pour mobile)
+          console.log('[useVoiceInteraction] Immediate resume attempt...');
+          audio.play().catch(immediateErr => {
+            console.warn('[useVoiceInteraction] Immediate resume failed:', immediateErr);
+
+            // Si la reprise immédiate échoue, attendre un peu et réessayer
+            setTimeout(() => {
+              if (audio.paused && audioElementRef.current === audio && !audioExplicitlyStoppedRef.current && !audio.ended) {
+                console.log('[useVoiceInteraction] Delayed resume attempt...');
+                audio.play().catch(delayedErr => {
+                  console.warn('[useVoiceInteraction] Delayed resume also failed:', delayedErr);
+                  // Si les deux tentatives échouent, c'est probablement une restriction du navigateur
+                  // Ne pas nettoyer ici - laisser l'audio se terminer naturellement ou le safety timeout
+                });
+              }
+            }, 100);
+          });
         }
       };
 
@@ -344,7 +393,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
       // MOBILE FIX: Tenter de reprendre la lecture si l'audio est suspendu
       const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible' && audio.paused && audioElementRef.current === audio && !wasExplicitlyStopped) {
+        if (document.visibilityState === 'visible' && audio.paused && audioElementRef.current === audio && !audioExplicitlyStoppedRef.current) {
           console.log('[useVoiceInteraction] Page visible again, attempting to resume audio');
           audio.play().catch(err => {
             console.warn('[useVoiceInteraction] Could not resume audio:', err);
@@ -430,7 +479,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         }, 3000);
       }
     });
-  }, []); // Pas de dépendances - le callback reste stable
+  }, [unlockAudioContext]); // Dépendance nécessaire pour unlockAudioContext
 
   // Fonction pour arrêter immédiatement la lecture audio de Peter
   const stopAudio = useCallback(() => {
