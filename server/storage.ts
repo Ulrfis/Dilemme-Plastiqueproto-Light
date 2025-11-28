@@ -1,10 +1,13 @@
-import { 
+import {
   tutorialSessions,
   conversationMessages,
-  type TutorialSession, 
+  feedbackSurveys,
+  type TutorialSession,
   type InsertTutorialSession,
   type ConversationMessage,
-  type InsertConversationMessage
+  type InsertConversationMessage,
+  type FeedbackSurvey,
+  type InsertFeedbackSurvey
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql } from "drizzle-orm";
@@ -19,6 +22,8 @@ export interface IStorage {
   getCompletedSessions(options: { sort: 'recent' | 'upvotes', limit: number }): Promise<TutorialSession[]>;
   incrementUpvote(id: string): Promise<TutorialSession | undefined>;
   incrementMessageCount(sessionId: string): Promise<void>;
+  createFeedback(feedback: InsertFeedbackSurvey): Promise<FeedbackSurvey>;
+  getFeedbackBySession(sessionId: string): Promise<FeedbackSurvey | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -130,6 +135,26 @@ export class DatabaseStorage implements IStorage {
     if (session) {
       googleSheetsSync.updateSessionRow(sessionId, { messageCount: session.messageCount }).catch(console.error);
     }
+  }
+
+  async createFeedback(insertFeedback: InsertFeedbackSurvey): Promise<FeedbackSurvey> {
+    const [feedback] = await db
+      .insert(feedbackSurveys)
+      .values(insertFeedback)
+      .returning();
+
+    // Sync to Google Sheets
+    googleSheetsSync.appendFeedback(feedback).catch(console.error);
+
+    return feedback;
+  }
+
+  async getFeedbackBySession(sessionId: string): Promise<FeedbackSurvey | undefined> {
+    const [feedback] = await db
+      .select()
+      .from(feedbackSurveys)
+      .where(eq(feedbackSurveys.sessionId, sessionId));
+    return feedback || undefined;
   }
 }
 
