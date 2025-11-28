@@ -9,6 +9,14 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+
+    <!-- PHASE 1 OPTIMIZATION: DNS prefetch and preconnect for API domains -->
+    <!-- Reduces DNS lookup and connection establishment latency -->
+    <link rel="dns-prefetch" href="https://api.openai.com">
+    <link rel="dns-prefetch" href="https://api.elevenlabs.io">
+    <link rel="preconnect" href="https://api.openai.com">
+    <link rel="preconnect" href="https://api.elevenlabs.io">
+
     <title>Dilemme - Analyse d'Images IA</title>
   </head>
   <body>

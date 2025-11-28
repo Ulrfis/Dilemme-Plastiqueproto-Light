@@ -131,10 +131,12 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
     console.log('[useVoiceInteraction] Starting audio keepalive');
 
-    // Jouer un son silencieux toutes les 2 secondes pour maintenir le contexte actif
+    // PHASE 1 OPTIMIZATION: Reduced keepalive frequency from 2s to 5s
+    // This reduces overhead while still maintaining audio context on mobile
+    // 5 seconds is sufficient to prevent most browsers from suspending audio
     keepAliveIntervalRef.current = setInterval(() => {
       unlockAudioContext();
-    }, 2000);
+    }, 5000);
   }, [unlockAudioContext]);
 
   const stopAudioKeepAlive = useCallback(() => {

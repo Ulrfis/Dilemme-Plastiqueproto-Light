@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import OpenAI from "openai";
 
 const app = express();
 
@@ -77,5 +78,33 @@ app.use((req, res, next) => {
     reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
+
+    // PHASE 1 OPTIMIZATION: Connection warming for OpenAI API
+    // Keep HTTP connections warm to reduce latency on first request
+    if (process.env.OPENAI_API_KEY) {
+      const openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+        organization: 'org-z0AK8zYLTeapGaiDZFQ5co2N',
+      });
+
+      // Warm the connection every 30 seconds with a lightweight API call
+      const warmConnection = async () => {
+        try {
+          await openai.models.list();
+          log('[Connection Warming] OpenAI connection kept alive');
+        } catch (error) {
+          // Silent fail - don't spam logs if API is down
+          // Connection will be established on next real request anyway
+        }
+      };
+
+      // Initial warmup after 5 seconds (give server time to fully start)
+      setTimeout(warmConnection, 5000);
+
+      // Then keep warm every 30 seconds
+      setInterval(warmConnection, 30000);
+
+      log('[Connection Warming] OpenAI connection warming enabled (every 30s)');
+    }
   });
 })();
