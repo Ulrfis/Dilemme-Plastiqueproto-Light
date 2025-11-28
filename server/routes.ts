@@ -168,6 +168,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       result.details.connectorName = connector.connector_name;
       result.details.hasAccessToken = !!(connector.settings?.access_token || connector.settings?.oauth?.credentials?.access_token);
       result.details.settingsKeys = Object.keys(connector.settings || {});
+      result.details.spreadsheetId = connector.settings?.spreadsheet_id || 'NOT SET (will use hardcoded)';
 
       if (!result.details.hasAccessToken) {
         result.status = 'error';
@@ -184,6 +185,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     res.json(result);
+  });
+
+  // Endpoint de TEST complet pour Google Sheets (essaie vraiment d'écrire)
+  app.get('/api/health/sheets/test', async (req, res) => {
+    try {
+      const { testGoogleSheetsConnection } = await import('./google-sheets-sync');
+      const result = await testGoogleSheetsConnection();
+      res.json(result);
+    } catch (error) {
+      res.json({
+        success: false,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
   });
 
   app.post('/api/sessions', async (req, res) => {
