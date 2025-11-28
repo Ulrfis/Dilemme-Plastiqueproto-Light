@@ -119,6 +119,134 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // PHASE 2 OPTIMIZATION: Streaming TTS endpoint
+  // Uses ElevenLabs streaming to send audio chunks as they're generated
+  app.post('/api/text-to-speech/stream', async (req, res) => {
+    try {
+      console.log('[TTS Stream API] Request received:', { textLength: req.body.text?.length });
+      const { text } = req.body;
+
+      if (!text) {
+        return res.status(400).json({ error: 'No text provided' });
+      }
+
+      // PHASE 1: Still check cache first for instant response
+      const textHash = crypto.createHash('md5').update(text).digest('hex');
+      if (ttsCache.has(textHash)) {
+        console.log('[TTS Stream API] Cache HIT - streaming cached audio:', textHash.substring(0, 8));
+        const cachedBuffer = ttsCache.get(textHash)!;
+        res.set('Content-Type', 'audio/mpeg');
+        res.set('X-Cache', 'HIT');
+        res.send(cachedBuffer);
+        return;
+      }
+
+      console.log('[TTS Stream API] Cache MISS - streaming from ElevenLabs:', textHash.substring(0, 8));
+
+      const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+      const VOICE_ID = 'CBP9p4KAWPqrMHTDtWPR'; // Peter mai 2025 FR
+
+      if (!ELEVENLABS_API_KEY) {
+        console.error('[TTS Stream API] ElevenLabs API key not configured');
+        return res.status(500).json({ error: 'ElevenLabs API key not configured' });
+      }
+
+      console.log('[TTS Stream API] Calling ElevenLabs streaming API...');
+
+      // Call ElevenLabs with stream optimization enabled
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
+        method: 'POST',
+        headers: {
+          'Accept': 'audio/mpeg',
+          'Content-Type': 'application/json',
+          'xi-api-key': ELEVENLABS_API_KEY
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75
+          },
+          optimize_streaming_latency: 3, // 0-4, higher = faster but lower quality
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[TTS Stream API] ElevenLabs API error:', response.status, errorText);
+        throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+      }
+
+      // Set streaming headers
+      res.set('Content-Type', 'audio/mpeg');
+      res.set('Transfer-Encoding', 'chunked');
+      res.set('X-Cache', 'MISS');
+
+      // Collect chunks for caching while streaming to client
+      const chunks: Buffer[] = [];
+
+      console.log('[TTS Stream API] Streaming audio chunks to client...');
+
+      // Stream response body to client
+      if (response.body) {
+        const reader = response.body.getReader();
+        let chunkCount = 0;
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            chunkCount++;
+            const chunk = Buffer.from(value);
+            chunks.push(chunk);
+
+            // Stream chunk to client immediately
+            res.write(chunk);
+
+            if (chunkCount === 1) {
+              console.log('[TTS Stream API] First audio chunk sent (', chunk.length, 'bytes)');
+            }
+          }
+
+          console.log('[TTS Stream API] Stream complete -', chunkCount, 'chunks sent');
+        } catch (streamError) {
+          console.error('[TTS Stream API] Error during streaming:', streamError);
+          throw streamError;
+        }
+      }
+
+      // End the response
+      res.end();
+
+      // Cache the complete audio
+      const completeAudio = Buffer.concat(chunks);
+      if (completeAudio.byteLength > 0) {
+        // Implement LRU-style eviction if cache is full
+        if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
+          const firstKey = ttsCache.keys().next().value;
+          ttsCache.delete(firstKey);
+          console.log('[TTS Stream API] Cache full - evicted oldest entry');
+        }
+        ttsCache.set(textHash, completeAudio);
+        console.log('[TTS Stream API] Audio cached. Size:', completeAudio.byteLength, 'bytes, Cache entries:', ttsCache.size);
+      }
+
+    } catch (error) {
+      console.error('[TTS Stream API] Error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: 'Speech generation failed',
+          details: error instanceof Error ? error.message : 'Unknown error'
+        });
+      } else {
+        // Headers already sent, just end the response
+        res.end();
+      }
+    }
+  });
+
   app.post('/api/text-to-speech', async (req, res) => {
     try {
       console.log('[TTS API] Request received:', { textLength: req.body.text?.length });
@@ -205,6 +333,183 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Speech generation failed',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
+    }
+  });
+
+  // PHASE 2 OPTIMIZATION: Streaming chat endpoint with sentence-by-sentence delivery
+  // This allows TTS to start generating audio while LLM is still responding
+  app.post('/api/chat/stream', async (req, res) => {
+    try {
+      console.log('[Chat Stream API] Request received:', { sessionId: req.body.sessionId, messageLength: req.body.userMessage?.length });
+      const { sessionId, userMessage } = req.body;
+
+      if (!sessionId || !userMessage) {
+        return res.status(400).json({ error: 'Missing sessionId or userMessage' });
+      }
+
+      const session = await storage.getSession(sessionId);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      console.log('[Chat Stream API] Session found:', { sessionId, foundClues: session.foundClues });
+
+      const detectedClues = detectClues(userMessage, session.foundClues);
+      console.log('[Chat Stream API] Clue detection:', { detectedClues, userMessage });
+
+      await storage.addMessage({
+        sessionId,
+        role: 'user',
+        content: userMessage,
+        detectedClue: detectedClues.length > 0 ? detectedClues.join(', ') : undefined,
+      });
+
+      // Set up Server-Sent Events
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+
+      const ASSISTANT_ID = 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9';
+      console.log('[Chat Stream API] Using OpenAI Assistant:', ASSISTANT_ID);
+
+      // Reuse or create thread
+      let threadId = session.threadId;
+
+      if (!threadId) {
+        console.log('[Chat Stream API] Creating new thread for session...');
+        const thread = await openai.beta.threads.create();
+        threadId = thread.id;
+
+        await storage.updateSession(sessionId, { threadId });
+        console.log('[Chat Stream API] Thread created and saved:', threadId);
+
+        const contextPrompt = `Indices déjà trouvés: ${session.foundClues.join(', ') || 'aucun'}`;
+        await openai.beta.threads.messages.create(threadId, {
+          role: 'user',
+          content: `${contextPrompt}\n\n${userMessage}`
+        });
+      } else {
+        console.log('[Chat Stream API] Reusing existing thread:', threadId);
+        await openai.beta.threads.messages.create(threadId, {
+          role: 'user',
+          content: userMessage
+        });
+      }
+
+      // Stream the assistant response
+      console.log('[Chat Stream API] Running assistant with streaming...', { assistantId: ASSISTANT_ID, threadId });
+
+      const stream = await openai.beta.threads.runs.stream(threadId, {
+        assistant_id: ASSISTANT_ID,
+      });
+
+      let fullResponse = "";
+      let currentSentence = "";
+      let sentenceCount = 0;
+
+      // Helper to detect sentence boundaries
+      const isSentenceEnd = (text: string): boolean => {
+        // Match sentence-ending punctuation followed by space or end of string
+        return /[.!?]\s+$/.test(text) || /[.!?]$/.test(text);
+      };
+
+      // Helper to send sentence via SSE
+      const sendSentence = (sentence: string) => {
+        if (sentence.trim().length > 0) {
+          sentenceCount++;
+          console.log('[Chat Stream API] Sending sentence #' + sentenceCount + ':', sentence.substring(0, 50) + '...');
+          res.write(`data: ${JSON.stringify({
+            type: 'sentence',
+            text: sentence.trim(),
+            index: sentenceCount
+          })}\n\n`);
+        }
+      };
+
+      for await (const event of stream) {
+        if (event.event === 'thread.message.delta') {
+          const delta = event.data.delta;
+          if (delta.content && delta.content[0]?.type === 'text') {
+            const textDelta = delta.content[0].text?.value || '';
+            fullResponse += textDelta;
+            currentSentence += textDelta;
+
+            // Check if we have a complete sentence
+            if (isSentenceEnd(currentSentence)) {
+              sendSentence(currentSentence);
+              currentSentence = "";
+            }
+          }
+        }
+
+        if (event.event === 'thread.run.completed') {
+          console.log('[Chat Stream API] Run completed:', { responseLength: fullResponse.length });
+
+          // Send any remaining text as final sentence
+          if (currentSentence.trim().length > 0) {
+            sendSentence(currentSentence);
+          }
+        }
+
+        if (event.event === 'thread.run.failed' ||
+            event.event === 'thread.run.cancelled' ||
+            event.event === 'thread.run.expired') {
+          console.error('[Chat Stream API] Assistant run failed:', event.event);
+          res.write(`data: ${JSON.stringify({
+            type: 'error',
+            message: `Assistant run failed: ${event.event}`
+          })}\n\n`);
+          res.end();
+          return;
+        }
+      }
+
+      // Fallback if response is empty
+      if (!fullResponse) {
+        fullResponse = "Je n'ai pas compris, peux-tu reformuler?";
+        res.write(`data: ${JSON.stringify({
+          type: 'sentence',
+          text: fullResponse,
+          index: 1
+        })}\n\n`);
+      }
+
+      // Save full response to storage
+      await storage.addMessage({
+        sessionId,
+        role: 'assistant',
+        content: fullResponse,
+      });
+
+      // Update session with detected clues
+      if (detectedClues.length > 0) {
+        const updatedClues = [...session.foundClues, ...detectedClues];
+        await storage.updateSession(sessionId, {
+          foundClues: updatedClues,
+          score: updatedClues.length,
+        });
+      }
+
+      // Send completion event with clue information
+      res.write(`data: ${JSON.stringify({
+        type: 'complete',
+        fullResponse,
+        foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
+        detectedClue: detectedClues.length > 0 ? detectedClues[0] : null
+      })}\n\n`);
+
+      res.end();
+      console.log('[Chat Stream API] Stream ended successfully');
+    } catch (error) {
+      console.error('[Chat Stream API] Error:', error);
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      res.write(`data: ${JSON.stringify({
+        type: 'error',
+        message: errorMessage
+      })}\n\n`);
+      res.end();
     }
   });
 
