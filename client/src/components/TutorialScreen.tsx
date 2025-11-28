@@ -362,6 +362,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         onComplete: (finalResponse, newFoundClues, detectedClue) => {
           console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length);
 
+          // Vérifier si la réponse est vide ou invalide
+          if (!finalResponse || finalResponse.trim().length === 0) {
+            console.error('[TutorialScreen] ⚠️ Empty response received from Peter');
+            toast({
+              title: "Réponse vide",
+              description: "Peter n'a pas pu générer de réponse. Veuillez réessayer.",
+              variant: "destructive",
+            });
+            recoverFromError();
+            return;
+          }
+
           // Update final message (in case there was additional text at the end)
           setMessages(prev => {
             const lastMessage = prev[prev.length - 1];
@@ -392,12 +404,23 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         },
 
         onError: (error) => {
-          console.error('[TutorialScreen] Stream error:', error);
+          console.error('[TutorialScreen] ❌ Stream error:', error);
+
+          // Ajouter un message d'erreur visible dans la conversation
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `Erreur: ${error}. Veuillez réessayer.`
+          }]);
+
           toast({
-            title: "Erreur de streaming",
-            description: error,
+            title: "Erreur de Peter",
+            description: `La conversation a échoué: ${error}`,
             variant: "destructive",
+            duration: 10000, // 10 secondes pour être visible
           });
+
+          // Réinitialiser l'état pour permettre de réessayer
+          recoverFromError();
         },
       });
     } catch (error) {
