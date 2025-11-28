@@ -27,36 +27,43 @@ function formatTimeAgo(date: Date | string | null): string {
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 }
 
-function SynthesisCard({ session, onUpvote, upvoting }: { 
-  session: TutorialSession; 
+function SynthesisCard({ session, onUpvote, upvoting }: {
+  session: TutorialSession;
   onUpvote: (id: string) => void;
   upvoting: boolean;
 }) {
   const clueCount = session.foundClues.length;
   const isComplete = clueCount === 4;
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const synthesisText = session.finalSynthesis || '';
+  const isLongText = synthesisText.length > 280;
+  const displayText = isExpanded || !isLongText
+    ? synthesisText
+    : synthesisText.slice(0, 280);
 
   return (
-    <Card 
+    <Card
       className="overflow-visible"
       data-testid={`card-synthesis-${session.id}`}
     >
       <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
         <div className="flex-1 min-w-0">
-          <p 
-            className="font-semibold text-foreground truncate" 
+          <p
+            className="font-semibold text-foreground truncate"
             data-testid={`text-username-${session.id}`}
           >
             {session.userName || 'Anonyme'}
           </p>
-          <p 
+          <p
             className="text-xs text-muted-foreground mt-0.5"
             data-testid={`text-time-${session.id}`}
           >
             {formatTimeAgo(session.completedAt)}
           </p>
         </div>
-        <Badge 
-          variant={isComplete ? "default" : "secondary"} 
+        <Badge
+          variant={isComplete ? "default" : "secondary"}
           className="shrink-0"
           data-testid={`badge-clues-${session.id}`}
         >
@@ -65,11 +72,29 @@ function SynthesisCard({ session, onUpvote, upvoting }: {
         </Badge>
       </CardHeader>
       <CardContent className="py-3">
-        <blockquote 
+        <blockquote
           className="text-sm text-foreground/90 leading-relaxed italic border-l-2 border-primary/30 pl-3"
           data-testid={`text-synthesis-${session.id}`}
         >
-          "{session.finalSynthesis}"
+          "{displayText}"
+          {isLongText && !isExpanded && (
+            <button
+              onClick={() => setIsExpanded(true)}
+              className="text-primary font-medium not-italic hover:underline ml-1"
+              data-testid={`button-expand-${session.id}`}
+            >
+              ... (voir plus)
+            </button>
+          )}
+          {isLongText && isExpanded && (
+            <button
+              onClick={() => setIsExpanded(false)}
+              className="text-primary font-medium not-italic hover:underline ml-1 block mt-1"
+              data-testid={`button-collapse-${session.id}`}
+            >
+              (voir moins)
+            </button>
+          )}
         </blockquote>
       </CardContent>
       <CardFooter className="flex justify-between items-center pt-2">
