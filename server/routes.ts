@@ -19,6 +19,21 @@ const openai = new OpenAI({
   organization: 'org-z0AK8zYLTeapGaiDZFQ5co2N',
 });
 
+const ASSISTANT_ID = 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9';
+
+// Vérifier que l'assistant existe au démarrage
+async function validateAssistant() {
+  try {
+    const assistant = await openai.beta.assistants.retrieve(ASSISTANT_ID);
+    console.log('[Server] ✅ Assistant validated:', assistant.name);
+  } catch (error) {
+    console.error('[Server] ❌ CRITICAL: Assistant not found or invalid!', error);
+  }
+}
+
+// Appeler au démarrage
+validateAssistant();
+
 const TARGET_CLUES = [
   { keyword: "ADN", variants: ["adn", "acide désoxyribonucléique", "génétique", "double hélice"] },
   { keyword: "bébé", variants: ["bébé", "bebe", "nourrisson", "enfant", "nouveau-né"] },
@@ -47,7 +62,49 @@ function detectClues(text: string, alreadyFound: string[]): string[] {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  
+
+  // Endpoint de diagnostic pour vérifier les services AI
+  app.get('/api/health/ai', async (req, res) => {
+    const results: Record<string, { status: string; message: string }> = {
+      openai: { status: 'unknown', message: '' },
+      assistant: { status: 'unknown', message: '' },
+      elevenlabs: { status: 'unknown', message: '' },
+    };
+
+    // Test OpenAI
+    try {
+      const models = await openai.models.list();
+      results.openai = { status: 'ok', message: `${models.data.length} models available` };
+    } catch (error) {
+      results.openai = { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
+    }
+
+    // Test Assistant
+    try {
+      const assistant = await openai.beta.assistants.retrieve(ASSISTANT_ID);
+      results.assistant = { status: 'ok', message: `Assistant: ${assistant.name}` };
+    } catch (error) {
+      results.assistant = { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
+    }
+
+    // Test ElevenLabs
+    try {
+      const response = await fetch('https://api.elevenlabs.io/v1/user', {
+        headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY || '' }
+      });
+      if (response.ok) {
+        const data = await response.json() as { subscription?: { character_count?: number } };
+        results.elevenlabs = { status: 'ok', message: `Characters: ${data.subscription?.character_count || 'N/A'}` };
+      } else {
+        results.elevenlabs = { status: 'error', message: `HTTP ${response.status}` };
+      }
+    } catch (error) {
+      results.elevenlabs = { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
+    }
+
+    res.json(results);
+  });
+
   app.post('/api/sessions', async (req, res) => {
     try {
       const data = insertTutorialSessionSchema.parse(req.body);
@@ -370,7 +427,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
 
-      const ASSISTANT_ID = 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9';
       console.log('[Chat Stream API] Using OpenAI Assistant:', ASSISTANT_ID);
 
       // Reuse or create thread
@@ -403,6 +459,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stream = await openai.beta.threads.runs.stream(threadId, {
         assistant_id: ASSISTANT_ID,
       });
+      console.log('[Chat Stream API] Stream created successfully, starting to process events...');
+
+      // Timeout de sécurité pour détecter les streams bloqués
+      let streamTimeout: NodeJS.Timeout | null = setTimeout(() => {
+        console.error('[Chat Stream API] ⚠️ TIMEOUT: Stream blocked after 30 seconds');
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({
+            type: 'error',
+            message: 'Response timeout - assistant did not respond in time'
+          })}\n\n`);
+          res.end();
+        }
+      }, 30000);
 
       let fullResponse = "";
       let currentSentence = "";
@@ -428,6 +497,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       for await (const event of stream) {
+        // Log tous les événements pour le débogage
+        console.log('[Chat Stream API] Event received:', event.event);
+
         if (event.event === 'thread.message.delta') {
           const delta = event.data.delta;
           if (delta.content && delta.content[0]?.type === 'text') {
@@ -444,7 +516,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         if (event.event === 'thread.run.completed') {
-          console.log('[Chat Stream API] Run completed:', { responseLength: fullResponse.length });
+          console.log('[Chat Stream API] ✅ Run completed:', { responseLength: fullResponse.length });
+
+          // Annuler le timeout car le stream a réussi
+          if (streamTimeout) {
+            clearTimeout(streamTimeout);
+            streamTimeout = null;
+          }
 
           // Send any remaining text as final sentence
           if (currentSentence.trim().length > 0) {
@@ -455,7 +533,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (event.event === 'thread.run.failed' ||
             event.event === 'thread.run.cancelled' ||
             event.event === 'thread.run.expired') {
-          console.error('[Chat Stream API] Assistant run failed:', event.event);
+          console.error('[Chat Stream API] ❌ Assistant run failed:', event.event);
+
+          // Annuler le timeout
+          if (streamTimeout) {
+            clearTimeout(streamTimeout);
+            streamTimeout = null;
+          }
+
           res.write(`data: ${JSON.stringify({
             type: 'error',
             message: `Assistant run failed: ${event.event}`
@@ -463,6 +548,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           res.end();
           return;
         }
+      }
+
+      // Annuler le timeout à la fin du stream (au cas où)
+      if (streamTimeout) {
+        clearTimeout(streamTimeout);
+        streamTimeout = null;
       }
 
       // Fallback if response is empty
