@@ -101,7 +101,7 @@ export default function ScoreScreen({
               // Ajouter le texte transcrit à la synthèse existante
               setSynthesis(prev => {
                 const newText = prev ? prev + ' ' + data.text : data.text;
-                return newText.slice(0, 280); // Respecter la limite
+                return newText.slice(0, 1200); // Respecter la limite
               });
               toast({
                 title: "Transcription réussie",
@@ -270,7 +270,7 @@ export default function ScoreScreen({
                 value={synthesis}
                 onChange={(e) => setSynthesis(e.target.value)}
                 className="min-h-[100px] resize-none rounded-xl pr-14"
-                maxLength={280}
+                maxLength={1200}
                 disabled={isRecording || isTranscribing}
                 data-testid="input-synthesis"
               />
@@ -317,7 +317,7 @@ export default function ScoreScreen({
             
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted-foreground">
-                {synthesis.length}/280 caractères
+                {synthesis.length}/1200 caractères
               </span>
               <Button
                 onClick={handleSaveSynthesis}
