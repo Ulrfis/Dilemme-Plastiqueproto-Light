@@ -84,6 +84,7 @@ export default function Home() {
           totalClues={4}
           foundClues={foundClues}
           userName={userName}
+          sessionId={sessionId}
           onReplay={handleReplay}
           onNextLevel={handleNextLevel}
         />

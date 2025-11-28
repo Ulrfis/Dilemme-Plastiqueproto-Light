@@ -34,10 +34,14 @@ Preferred communication style: Simple, everyday language.
 - Loaded via Google Fonts CDN
 
 **Key Design Patterns**:
-- Screen-based navigation flow (title → video intro → welcome setup → tutorial → score)
+- Screen-based navigation flow (title → video intro → welcome setup → tutorial → score → syntheses)
 - Component composition with examples directory for development
 - Accessibility-first approach with immediate visual and auditory feedback
 - Progressive enhancement with fallback modes
+
+**Routes**:
+- `/`: Main application flow (title → tutorial → score)
+- `/syntheses`: Community syntheses page with upvote system
 
 **Video Introduction Flow** (Recent Enhancements):
 - Immediate autoplay after "Commencer" button click (no secondary button)
@@ -60,10 +64,19 @@ Preferred communication style: Simple, everyday language.
 - Real-time clue detection using keyword matching
 
 **Session Management**:
-- In-memory storage (MemStorage class) for prototype
+- PostgreSQL database storage (DatabaseStorage class)
 - Session tracking with UUID generation
 - Conversation history per session
 - Progress tracking (found clues, score, completion status)
+- Final synthesis phrase capture when all 4 clues found
+- Message count tracking per session
+- Upvote system for synthesis phrases
+
+**Google Sheets Analytics** (Nov 28 Enhancement):
+- Real-time synchronization to Google Sheets spreadsheet
+- Tracks: timestamp, sessionId, userName, foundClues, clueCount, messageCount, finalSynthesis, upvotes, completedAt
+- Fire-and-forget async calls (non-blocking)
+- OAuth authentication via Replit integration
 
 **Audio Processing**:
 - Client-side recording using MediaRecorder API
@@ -81,7 +94,17 @@ Preferred communication style: Simple, everyday language.
 - JSON fields for flexible clue arrays
 - Timestamps for all records
 
-**Development Storage**: In-memory fallback (MemStorage) for rapid prototyping without database dependency
+**Extended Schema** (Nov 28 Enhancement):
+- `finalSynthesis`: Text field for user's synthesis phrase
+- `messageCount`: Integer tracking conversation length
+- `upvotes`: Integer for community voting on syntheses
+- `completedAt`: Timestamp when session completed with 4/4 clues
+
+**API Endpoints for Syntheses**:
+- `POST /api/sessions/:id/synthesis`: Save final synthesis phrase
+- `GET /api/syntheses`: List all completed syntheses (sort by recent/upvotes)
+- `POST /api/syntheses/:id/upvote`: Add upvote to synthesis
+- `GET /api/sessions/:id/stats`: Get session statistics
 
 **Migration Strategy**: Drizzle Kit for schema migrations stored in `/migrations`
 
