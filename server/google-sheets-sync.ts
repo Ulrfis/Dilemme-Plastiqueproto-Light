@@ -87,7 +87,26 @@ async function getGoogleSheetsClient() {
   return google.sheets({ version: 'v4', auth: oauth2Client });
 }
 
-const SPREADSHEET_ID = '1CisRjSfqNpcZGwmklqdIRc93hbK4-Pyu_ysoaT2Dfb4';
+// Récupérer l'ID du spreadsheet depuis le connecteur Replit
+let cachedSpreadsheetId: string | null = null;
+
+async function getSpreadsheetId(): Promise<string> {
+  if (cachedSpreadsheetId) {
+    return cachedSpreadsheetId;
+  }
+
+  // Essayer de récupérer l'ID depuis le connecteur
+  if (connectionSettings?.settings?.spreadsheet_id) {
+    cachedSpreadsheetId = connectionSettings.settings.spreadsheet_id;
+    console.log('[GoogleSheets] ✅ Using spreadsheet ID from connector:', cachedSpreadsheetId);
+    return cachedSpreadsheetId;
+  }
+
+  // Fallback sur l'ID hardcodé
+  cachedSpreadsheetId = '1CisRjSfqNpcZGwmklqdIRc93hbK4-Pyu_ysoaT2Dfb4';
+  console.log('[GoogleSheets] Using hardcoded spreadsheet ID:', cachedSpreadsheetId);
+  return cachedSpreadsheetId;
+}
 
 // Cache pour le nom de la feuille
 let cachedSheetName: string | null = null;
@@ -99,12 +118,17 @@ async function getFirstSheetName(): Promise<string> {
 
   try {
     const sheets = await getGoogleSheetsClient();
+    const spreadsheetId = await getSpreadsheetId();
+
+    console.log('[GoogleSheets] Getting sheet names from spreadsheet:', spreadsheetId);
 
     // Récupérer les métadonnées du spreadsheet pour obtenir le nom de la première feuille
     const spreadsheet = await sheets.spreadsheets.get({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: spreadsheetId,
       fields: 'sheets.properties.title',
     });
+
+    console.log('[GoogleSheets] Spreadsheet response:', JSON.stringify(spreadsheet.data.sheets));
 
     const firstSheet = spreadsheet.data.sheets?.[0];
     if (firstSheet?.properties?.title) {
@@ -114,9 +138,77 @@ async function getFirstSheetName(): Promise<string> {
     }
 
     throw new Error('No sheets found in spreadsheet');
-  } catch (error) {
-    console.error('[GoogleSheets] ❌ Failed to get sheet name:', error);
+  } catch (error: any) {
+    console.error('[GoogleSheets] ❌ Failed to get sheet name:', error?.message || error);
+    console.error('[GoogleSheets] Full error:', JSON.stringify(error?.response?.data || error, null, 2));
     throw error;
+  }
+}
+
+// Fonction de test pour diagnostiquer
+export async function testGoogleSheetsConnection(): Promise<{ success: boolean; message: string; details?: any }> {
+  try {
+    console.log('[GoogleSheets] === TEST CONNECTION START ===');
+
+    // 1. Obtenir le token
+    const accessToken = await getAccessToken();
+    console.log('[GoogleSheets] Step 1: Access token obtained');
+
+    // 2. Vérifier les settings du connecteur
+    console.log('[GoogleSheets] Step 2: Connector settings:', JSON.stringify(connectionSettings?.settings || {}, null, 2));
+
+    // 3. Obtenir l'ID du spreadsheet
+    const spreadsheetId = await getSpreadsheetId();
+    console.log('[GoogleSheets] Step 3: Spreadsheet ID:', spreadsheetId);
+
+    // 4. Obtenir le client
+    const sheets = await getGoogleSheetsClient();
+    console.log('[GoogleSheets] Step 4: Sheets client created');
+
+    // 5. Lire les métadonnées du spreadsheet
+    const metadata = await sheets.spreadsheets.get({
+      spreadsheetId: spreadsheetId,
+    });
+    console.log('[GoogleSheets] Step 5: Spreadsheet title:', metadata.data.properties?.title);
+    console.log('[GoogleSheets] Step 5: Sheets:', metadata.data.sheets?.map(s => s.properties?.title));
+
+    // 6. Obtenir le nom de la feuille
+    const sheetName = await getFirstSheetName();
+    console.log('[GoogleSheets] Step 6: Using sheet:', sheetName);
+
+    // 7. Essayer de lire la première cellule
+    const testRead = await sheets.spreadsheets.values.get({
+      spreadsheetId: spreadsheetId,
+      range: `'${sheetName}'!A1`,
+    });
+    console.log('[GoogleSheets] Step 7: Read test successful, A1 value:', testRead.data.values);
+
+    console.log('[GoogleSheets] === TEST CONNECTION SUCCESS ===');
+
+    return {
+      success: true,
+      message: 'Connection successful',
+      details: {
+        spreadsheetId,
+        spreadsheetTitle: metadata.data.properties?.title,
+        sheetName,
+        sheetCount: metadata.data.sheets?.length,
+        allSheets: metadata.data.sheets?.map(s => s.properties?.title),
+      }
+    };
+  } catch (error: any) {
+    console.error('[GoogleSheets] === TEST CONNECTION FAILED ===');
+    console.error('[GoogleSheets] Error:', error?.message || error);
+
+    return {
+      success: false,
+      message: error?.message || 'Unknown error',
+      details: {
+        errorCode: error?.code,
+        errorStatus: error?.status,
+        errors: error?.errors,
+      }
+    };
   }
 }
 
@@ -128,10 +220,11 @@ export class GoogleSheetsSync {
 
     try {
       const sheets = await getGoogleSheetsClient();
+      const spreadsheetId = await getSpreadsheetId();
       const sheetName = await getFirstSheetName();
 
       const response = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
+        spreadsheetId: spreadsheetId,
         range: `'${sheetName}'!A1:I1`,
       });
 
@@ -139,7 +232,7 @@ export class GoogleSheetsSync {
 
       if (!existingHeaders || existingHeaders.length === 0) {
         await sheets.spreadsheets.values.update({
-          spreadsheetId: SPREADSHEET_ID,
+          spreadsheetId: spreadsheetId,
           range: `'${sheetName}'!A1:I1`,
           valueInputOption: 'USER_ENTERED',
           requestBody: {
@@ -170,10 +263,11 @@ export class GoogleSheetsSync {
       await this.ensureHeaders();
 
       const sheets = await getGoogleSheetsClient();
+      const spreadsheetId = await getSpreadsheetId();
       const sheetName = await getFirstSheetName();
 
       await sheets.spreadsheets.values.append({
-        spreadsheetId: SPREADSHEET_ID,
+        spreadsheetId: spreadsheetId,
         range: `'${sheetName}'!A:I`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
@@ -200,10 +294,11 @@ export class GoogleSheetsSync {
   async updateSessionRow(sessionId: string, updates: Partial<TutorialSession>): Promise<void> {
     try {
       const sheets = await getGoogleSheetsClient();
+      const spreadsheetId = await getSpreadsheetId();
       const sheetName = await getFirstSheetName();
 
       const response = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
+        spreadsheetId: spreadsheetId,
         range: `'${sheetName}'!B:B`,
       });
 
@@ -223,7 +318,7 @@ export class GoogleSheetsSync {
       }
 
       const currentRow = await sheets.spreadsheets.values.get({
-        spreadsheetId: SPREADSHEET_ID,
+        spreadsheetId: spreadsheetId,
         range: `'${sheetName}'!A${rowIndex}:I${rowIndex}`,
       });
 
@@ -242,7 +337,7 @@ export class GoogleSheetsSync {
       ];
 
       await sheets.spreadsheets.values.update({
-        spreadsheetId: SPREADSHEET_ID,
+        spreadsheetId: spreadsheetId,
         range: `'${sheetName}'!A${rowIndex}:I${rowIndex}`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
