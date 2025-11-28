@@ -350,6 +350,89 @@ export class GoogleSheetsSync {
       console.error('[GoogleSheets] ❌ Failed to update session:', error);
     }
   }
+
+  async appendFeedback(feedback: any): Promise<void> {
+    try {
+      const sheets = await getGoogleSheetsClient();
+      const spreadsheetId = await getSpreadsheetId();
+
+      // Use a dedicated sheet for feedback or create one
+      const sheetName = 'Feedback';
+
+      // Try to append to Feedback sheet, if it doesn't exist use first sheet
+      try {
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: spreadsheetId,
+          range: `'${sheetName}'!A:Z`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [[
+              new Date().toISOString(),
+              feedback.sessionId,
+              feedback.userName || '',
+              // Scénario
+              feedback.scenarioComprehension,
+              feedback.scenarioObjectives,
+              feedback.scenarioClueLink,
+              // Gameplay
+              feedback.gameplayExplanation,
+              feedback.gameplaySimplicity,
+              feedback.gameplayBotResponses,
+              // Feeling
+              feedback.feelingOriginality,
+              feedback.feelingPleasant,
+              feedback.feelingInteresting,
+              // Motivation
+              feedback.motivationContinue,
+              feedback.motivationGameplay,
+              feedback.motivationEcology,
+              // Interface
+              feedback.interfaceVisualBeauty,
+              feedback.interfaceVisualClarity,
+              feedback.interfaceVoiceChat,
+              // Note globale
+              feedback.overallRating,
+              // Text
+              feedback.improvements || '',
+              // Boolean fields
+              feedback.wantsUpdates ? 'Oui' : 'Non',
+              feedback.updateEmail || '',
+              feedback.wouldRecommend ? 'Oui' : 'Non',
+              feedback.wantsInSchool ? 'Oui' : 'Non',
+            ]],
+          },
+        });
+        console.log('[GoogleSheets] ✅ Feedback appended:', feedback.id);
+      } catch (sheetError: any) {
+        // If Feedback sheet doesn't exist, try the first sheet
+        console.log('[GoogleSheets] Feedback sheet not found, using first sheet');
+        const firstSheetName = await getFirstSheetName();
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: spreadsheetId,
+          range: `'${firstSheetName}'!A:Z`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [[
+              'FEEDBACK',
+              new Date().toISOString(),
+              feedback.sessionId,
+              feedback.userName || '',
+              `Scenario: ${feedback.scenarioComprehension}/${feedback.scenarioObjectives}/${feedback.scenarioClueLink}`,
+              `Gameplay: ${feedback.gameplayExplanation}/${feedback.gameplaySimplicity}/${feedback.gameplayBotResponses}`,
+              `Feeling: ${feedback.feelingOriginality}/${feedback.feelingPleasant}/${feedback.feelingInteresting}`,
+              `Motivation: ${feedback.motivationContinue}/${feedback.motivationGameplay}/${feedback.motivationEcology}`,
+              `Interface: ${feedback.interfaceVisualBeauty}/${feedback.interfaceVisualClarity}/${feedback.interfaceVoiceChat}`,
+              `Note: ${feedback.overallRating}`,
+              feedback.improvements || '',
+            ]],
+          },
+        });
+        console.log('[GoogleSheets] ✅ Feedback appended to first sheet:', feedback.id);
+      }
+    } catch (error) {
+      console.error('[GoogleSheets] ❌ Failed to append feedback:', error);
+    }
+  }
 }
 
 export const googleSheetsSync = new GoogleSheetsSync();

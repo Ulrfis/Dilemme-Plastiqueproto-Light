@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import multer from "multer";
 import OpenAI from "openai";
 import { z } from "zod";
-import { insertTutorialSessionSchema, insertConversationMessageSchema } from "@shared/schema";
+import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -246,6 +246,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ error: 'Invalid update data', details: error.errors });
       }
+      res.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  // Feedback survey endpoints
+  app.post('/api/feedback', async (req, res) => {
+    try {
+      const data = insertFeedbackSurveySchema.parse(req.body);
+      const feedback = await storage.createFeedback(data);
+      res.json(feedback);
+    } catch (error) {
+      console.error('Error creating feedback:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid feedback data', details: error.errors });
+      }
+      res.status(500).json({ error: 'Server error' });
+    }
+  });
+
+  app.get('/api/feedback/:sessionId', async (req, res) => {
+    try {
+      const feedback = await storage.getFeedbackBySession(req.params.sessionId);
+      if (!feedback) {
+        return res.status(404).json({ error: 'Feedback not found' });
+      }
+      res.json(feedback);
+    } catch (error) {
+      console.error('Error fetching feedback:', error);
       res.status(500).json({ error: 'Server error' });
     }
   });
