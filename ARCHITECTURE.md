@@ -1,5 +1,199 @@
 # Architecture du Système de Conversation Vocale
 
+## 🚀 Améliorations v1.3.0 - Persistance & Feedback
+
+### Vue d'Ensemble Base de Données
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           ARCHITECTURE v1.3.0                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  ┌─────────────┐     ┌─────────────┐     ┌─────────────────────────────┐   │
+│  │   CLIENT    │────▶│   SERVER    │────▶│      PostgreSQL (Neon)      │   │
+│  │   (React)   │     │  (Express)  │     │  ┌─────────────────────────┐ │   │
+│  └─────────────┘     └──────┬──────┘     │  │  tutorial_sessions      │ │   │
+│                             │            │  │  conversation_messages  │ │   │
+│                             │            │  │  feedback_surveys       │ │   │
+│                             ▼            │  └─────────────────────────┘ │   │
+│                      ┌─────────────┐     └─────────────────────────────────┘ │
+│                      │ Google      │                                         │
+│                      │ Sheets API  │◀─── Sync automatique                   │
+│                      └─────────────┘     (sessions + feedbacks)             │
+│                                                                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Schéma de Base de Données
+
+**Fichier**: `shared/schema.ts`
+
+```typescript
+// Table des sessions de tutoriel
+tutorialSessions = {
+  id: varchar (PK, UUID auto-généré),
+  userName: text (NOT NULL),
+  foundClues: jsonb (array de strings, défaut []),
+  score: integer (défaut 0),
+  audioMode: text ('voice' | 'text', défaut 'voice'),
+  completed: integer (0 ou 1),
+  threadId: text (ID thread OpenAI),
+  finalSynthesis: text (synthèse générée par IA),
+  messageCount: integer (défaut 0),
+  upvotes: integer (défaut 0),
+  completedAt: timestamp,
+  createdAt: timestamp (auto)
+}
+
+// Table des messages de conversation
+conversationMessages = {
+  id: varchar (PK, UUID auto-généré),
+  sessionId: varchar (FK vers tutorialSessions),
+  role: text ('user' | 'assistant'),
+  content: text (NOT NULL),
+  detectedClue: text (nullable),
+  createdAt: timestamp (auto)
+}
+
+// Table des feedbacks utilisateurs
+feedbackSurveys = {
+  id: varchar (PK, UUID auto-généré),
+  sessionId: varchar (FK),
+  userName: text,
+
+  // Notes 1-6
+  scenarioComprehension: integer,
+  scenarioObjectives: integer,
+  scenarioClueLink: integer,
+  gameplayExplanation: integer,
+  gameplaySimplicity: integer,
+  gameplayBotResponses: integer,
+  feelingOriginality: integer,
+  feelingPleasant: integer,
+  feelingInteresting: integer,
+  motivationContinue: integer,
+  motivationGameplay: integer,
+  motivationEcology: integer,
+  interfaceVisualBeauty: integer,
+  interfaceVisualClarity: integer,
+  interfaceVoiceChat: integer,
+  overallRating: integer,
+
+  // Champs supplémentaires
+  improvements: text,
+  wantsUpdates: boolean,
+  updateEmail: text,
+  wouldRecommend: boolean,
+  wantsInSchool: boolean,
+
+  createdAt: timestamp (auto)
+}
+```
+
+### Google Sheets Sync
+
+**Fichier**: `server/google-sheets-sync.ts`
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                     GOOGLE SHEETS SYNC FLOW                           │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  1. AUTHENTIFICATION (via Replit Connectors)                         │
+│     ├─ Récupère access_token depuis REPLIT_CONNECTORS_HOSTNAME       │
+│     ├─ Token auto-renouvelé via OAuth2                               │
+│     └─ Cache local pour éviter appels répétés                        │
+│                                                                        │
+│  2. DÉTECTION DYNAMIQUE                                               │
+│     ├─ getSpreadsheetId() - Récupère ID depuis connecteur            │
+│     ├─ getFirstSheetName() - Détecte nom de la première feuille      │
+│     └─ Quotes autour du nom (gère espaces/caractères spéciaux)       │
+│                                                                        │
+│  3. SYNC SESSIONS                                                      │
+│     ├─ appendSession(session) - Nouvelle ligne                       │
+│     └─ updateSession(session) - Mise à jour ligne existante          │
+│                                                                        │
+│  4. SYNC FEEDBACKS                                                     │
+│     └─ appendFeedback(feedback) - Nouvelle ligne                     │
+│                                                                        │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**Colonnes Google Sheets (Sessions):**
+| Colonne | Champ |
+|---------|-------|
+| A | Session ID |
+| B | User Name |
+| C | Score |
+| D | Found Clues |
+| E | Completed |
+| F | Audio Mode |
+| G | Message Count |
+| H | Created At |
+| I | Final Synthesis |
+
+**Colonnes Google Sheets (Feedbacks):**
+| Colonne | Champ |
+|---------|-------|
+| A | Feedback ID |
+| B | Session ID |
+| C-H | Scenario (3) + Gameplay (3) |
+| I-N | Feeling (3) + Motivation (3) |
+| O-Q | Interface (3) |
+| R | Overall Rating |
+| S | Improvements |
+| T-W | Booleans (updates, recommend, school) |
+
+### Endpoints API v1.3.0
+
+| Route | Méthode | Description |
+|-------|---------|-------------|
+| `/api/feedback` | POST | Créer un feedback |
+| `/api/feedback/:sessionId` | GET | Récupérer feedback |
+| `/api/syntheses` | GET | Liste synthèses publiques |
+| `/api/syntheses/:id/upvote` | PATCH | Voter pour synthèse |
+| `/api/health/sheets/test` | GET | Tester connexion Google Sheets |
+
+### Formulaire Feedback (Typeform-style)
+
+**Fichier**: `client/src/components/FeedbackSurvey.tsx`
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                     FEEDBACK SURVEY FLOW                              │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  Question 1/20  ───────────────────────────  [████████░░] 40%        │
+│                                                                        │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                        Scénario                                 │  │
+│  │                                                                  │  │
+│  │  L'histoire est facile à comprendre.                           │  │
+│  │                                                                  │  │
+│  │  ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐ ┌───┐                          │  │
+│  │  │ 1 │ │ 2 │ │ 3 │ │ 4 │ │ 5 │ │ 6 │                          │  │
+│  │  └───┘ └───┘ └───┘ └───┘ └───┘ └───┘                          │  │
+│  │  Pas                            Tout                            │  │
+│  │  du tout                        à fait                          │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+│                                                                        │
+│  ◀ Précédent                                    Suivant ▶            │
+│                                                                        │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+**Catégories de questions:**
+1. **Scénario** (3 questions) - Compréhension, Objectifs, Lien indices
+2. **Gameplay** (3 questions) - Explication, Simplicité, Réponses bot
+3. **Feeling** (3 questions) - Originalité, Plaisant, Intéressant
+4. **Motivation** (3 questions) - Envie continuer, Motivant, Thème éco
+5. **Interface** (3 questions) - Visuel joli, Visuel clair, Voix agréable
+6. **Note globale** (1 question) - Note du tutoriel
+7. **Améliorations** (texte libre)
+8. **Oui/Non** (3 questions) - Contact, Recommandation, École
+
+---
+
 ## 🚀 Améliorations v1.2.0 - Optimisations Latence Majeure
 
 ### Overview des Optimisations
@@ -515,6 +709,11 @@ Met à jour une session (score, indices trouvés, etc.).
 # .env
 OPENAI_API_KEY=sk-...          # Pour STT (Whisper) et LLM (Assistant API)
 ELEVENLABS_API_KEY=...         # Pour TTS
+DATABASE_URL=postgresql://...   # PostgreSQL connection string (Neon)
+
+# Variables Replit (automatiques)
+REPLIT_CONNECTORS_HOSTNAME=... # Pour Google Sheets OAuth
+REPL_IDENTITY=...              # Token Replit
 ```
 
 **Configuration OpenAI:**
@@ -525,22 +724,35 @@ ELEVENLABS_API_KEY=...         # Pour TTS
 - Voice ID : `CBP9p4KAWPqrMHTDtWPR` (Peter mai 2025 FR)
 - Model : `eleven_multilingual_v2`
 
+**Configuration Google Sheets:**
+- Connecteur Replit : `google-sheet`
+- OAuth2 automatique via Replit Connectors
+
 ---
 
 ## 📝 Fichiers Principaux
 
 | Fonctionnalité | Fichier | Description |
 |----------------|---------|-------------|
-| STT Config | `server/routes.ts:88-108` | Configuration Whisper |
-| LLM Chat | `server/routes.ts:172-342` | OpenAI Assistant API |
-| TTS Config | `server/routes.ts:116-170` | Configuration ElevenLabs |
-| TTS Validation | `server/routes.ts:161-165` | Validation audio côté serveur |
-| Storage | `server/storage.ts:17-82` | MemStorage (sessions, messages) |
-| Audio Playback | `client/src/hooks/useVoiceInteraction.ts:184-407` | Lecture audio avec pré-chargement |
-| Audio Cleanup | `client/src/hooks/useVoiceInteraction.ts:199-210` | Nettoyage Audio element |
-| Blob Validation | `client/src/lib/api.ts:74-78` | Validation blob côté client |
-| Audio Timeouts | `client/src/components/TutorialScreen.tsx:310, 323-330` | Timeouts de sécurité |
-| Replay Button | `client/src/pages/Home.tsx:52-63` | Bouton rejouer le tutoriel |
+| **Base de données** | | |
+| Schema DB | `shared/schema.ts` | Définition tables Drizzle |
+| Storage | `server/storage.ts` | CRUD sessions, messages, feedbacks |
+| DB Config | `drizzle.config.ts` | Configuration Drizzle ORM |
+| | | |
+| **Google Sheets** | | |
+| Sync | `server/google-sheets-sync.ts` | Synchronisation Google Sheets |
+| | | |
+| **API Routes** | | |
+| Routes | `server/routes.ts` | Tous les endpoints API |
+| | | |
+| **Frontend** | | |
+| Feedback Form | `client/src/components/FeedbackSurvey.tsx` | Formulaire Typeform |
+| Syntheses | `client/src/pages/Syntheses.tsx` | Page synthèses + bouton feedback |
+| Success | `client/src/components/SuccessFeedback.tsx` | Animation bouteille explosion |
+| | | |
+| **Audio** | | |
+| Voice Hook | `client/src/hooks/useVoiceInteraction.ts` | Gestion audio |
+| Audio Queue | `client/src/hooks/useAudioQueue.ts` | Queue streaming audio |
 
 ---
 
@@ -549,8 +761,12 @@ ELEVENLABS_API_KEY=...         # Pour TTS
 ### Documentation du Projet
 - [README.md](./README.md) - Documentation principale
 - [CHANGELOG.md](./CHANGELOG.md) - Historique des modifications
+- [PHASE1_OPTIMIZATIONS.md](./PHASE1_OPTIMIZATIONS.md) - Optimisations Phase 1
+- [PHASE2_OPTIMIZATIONS.md](./PHASE2_OPTIMIZATIONS.md) - Optimisations Phase 2
 
 ### APIs
 - [OpenAI Whisper](https://platform.openai.com/docs/guides/speech-to-text)
 - [OpenAI Assistant API](https://platform.openai.com/docs/assistants/overview)
 - [ElevenLabs TTS](https://elevenlabs.io/docs)
+- [Google Sheets API v4](https://developers.google.com/sheets/api)
+- [Drizzle ORM](https://orm.drizzle.team/docs/overview)

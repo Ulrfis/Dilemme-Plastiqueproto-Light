@@ -2,15 +2,40 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
 ![Latency](https://img.shields.io/badge/latency-⚡_3--10s-success.svg)
+![Database](https://img.shields.io/badge/database-PostgreSQL-blue.svg)
+![Google Sheets](https://img.shields.io/badge/sync-Google_Sheets-green.svg)
 
 ---
 
-## 🚀 Dernières Améliorations (v1.2.0 - November 28)
+## 🚀 Dernières Améliorations (v1.3.0 - November 28)
+
+### 💾 Persistance Base de Données PostgreSQL
+
+- **Tables de base de données** : Sessions, Messages, Feedbacks
+- **ORM Drizzle** avec PostgreSQL (Neon sur Replit)
+- **Google Sheets Sync** : Synchronisation automatique des données
+
+### 📝 Formulaire de Feedback Typeform-Style
+
+- **20 questions** réparties en 6 catégories (note 1-6)
+- **Navigation écran par écran** avec barre de progression
+- **Champs conditionnels** : email si veut être contacté, partage si recommande
+- **Sync automatique** vers Google Sheets
+
+### 🍾 Animation Bouteille Explosion
+
+- Bouteille plastique plus grande (280x450px)
+- Effet explosion confetti avec 120 particules
+- Animation de minimisation rapide
+
+---
+
+## 🆕 Améliorations v1.2.0 - Optimisations Latence
 
 ### ⚡ Optimisations Latence Majeure - Phase 1 & 2
 
@@ -217,10 +242,67 @@ Audio starts at ~3.3s (vs 7s before!)
 | **OpenAI GPT-4o-mini** | Conversation IA | [Docs](https://platform.openai.com/docs/models/gpt-4o-mini) |
 | **ElevenLabs** | Text-to-Speech (voix custom) | [Docs](https://elevenlabs.io/docs) |
 
-### Stockage
+### Base de Données & Stockage
 
-- **MemStorage** : Stockage en mémoire (sessions, messages)
-- **Schema Drizzle** : Préparé pour PostgreSQL/Neon (non activé en V1)
+| Technologie | Version | Usage |
+|------------|---------|-------|
+| **PostgreSQL** | 15+ | Base de données principale |
+| **Drizzle ORM** | 0.39.1 | ORM TypeScript |
+| **Neon** | - | PostgreSQL serverless (Replit) |
+| **Google Sheets API** | v4 | Synchronisation données |
+
+### Schéma de Base de Données
+
+```
+┌──────────────────────────┐     ┌──────────────────────────┐
+│    tutorial_sessions     │     │  conversation_messages   │
+├──────────────────────────┤     ├──────────────────────────┤
+│ id (PK)                  │     │ id (PK)                  │
+│ userName                 │────▶│ sessionId (FK)           │
+│ foundClues (JSONB)       │     │ role (user/assistant)    │
+│ score                    │     │ content                  │
+│ audioMode (voice/text)   │     │ detectedClue             │
+│ completed                │     │ createdAt                │
+│ threadId                 │     └──────────────────────────┘
+│ finalSynthesis           │
+│ messageCount             │     ┌──────────────────────────┐
+│ upvotes                  │     │    feedback_surveys      │
+│ completedAt              │     ├──────────────────────────┤
+│ createdAt                │     │ id (PK)                  │
+└──────────────────────────┘     │ sessionId (FK)           │
+                                 │ userName                 │
+                                 │ scenarioComprehension    │
+                                 │ scenarioObjectives       │
+                                 │ scenarioClueLink         │
+                                 │ gameplayExplanation      │
+                                 │ gameplaySimplicity       │
+                                 │ gameplayBotResponses     │
+                                 │ feelingOriginality       │
+                                 │ feelingPleasant          │
+                                 │ feelingInteresting       │
+                                 │ motivationContinue       │
+                                 │ motivationGameplay       │
+                                 │ motivationEcology        │
+                                 │ interfaceVisualBeauty    │
+                                 │ interfaceVisualClarity   │
+                                 │ interfaceVoiceChat       │
+                                 │ overallRating            │
+                                 │ improvements (text)      │
+                                 │ wantsUpdates (bool)      │
+                                 │ updateEmail              │
+                                 │ wouldRecommend (bool)    │
+                                 │ wantsInSchool (bool)     │
+                                 │ createdAt                │
+                                 └──────────────────────────┘
+```
+
+### Google Sheets Sync
+
+La synchronisation Google Sheets permet d'exporter automatiquement :
+- **Sessions** : Données de chaque session de tutoriel
+- **Feedbacks** : Réponses au questionnaire de feedback
+
+Configuration via Replit Connectors (OAuth2 automatique).
 
 ---
 
@@ -520,6 +602,66 @@ Récupère une session existante.
 
 Met à jour une session (score, indices trouvés, etc.).
 
+### POST `/api/feedback`
+
+Crée un nouveau feedback utilisateur.
+
+**Request:**
+```json
+{
+  "sessionId": "uuid-v4",
+  "userName": "Sophie",
+  "scenarioComprehension": 5,
+  "scenarioObjectives": 6,
+  "overallRating": 5,
+  "improvements": "Plus de niveaux !",
+  "wantsUpdates": true,
+  "updateEmail": "sophie@email.com",
+  "wouldRecommend": true,
+  "wantsInSchool": true
+}
+```
+
+**Response:**
+```json
+{
+  "id": "uuid-v4",
+  "sessionId": "uuid-v4",
+  "createdAt": "2025-11-28T10:30:00Z",
+  ...
+}
+```
+
+### GET `/api/feedback/:sessionId`
+
+Récupère le feedback d'une session.
+
+### GET `/api/syntheses`
+
+Liste les synthèses publiques (sessions complétées).
+
+### PATCH `/api/syntheses/:id/upvote`
+
+Vote pour une synthèse.
+
+### GET `/api/health/sheets/test`
+
+Teste la connexion Google Sheets et retourne les informations du spreadsheet.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Connection successful",
+  "details": {
+    "spreadsheetId": "...",
+    "spreadsheetTitle": "Mon Google Sheet",
+    "sheetName": "Data From Replit",
+    "allSheets": ["Data From Replit", "Feedbacks"]
+  }
+}
+```
+
 ---
 
 ## 🎓 Cas d'Usage Pédagogiques
@@ -554,15 +696,17 @@ Met à jour une session (score, indices trouvés, etc.).
 
 ### Données Utilisateur
 
-- **Pas de stockage persistant** : Sessions en mémoire uniquement (RAM)
-- **Prénom non conservé** : Effacé à la fin de session
+- **Stockage PostgreSQL** : Sessions et feedbacks persistés en base de données
+- **Google Sheets Sync** : Export optionnel vers Google Sheets (configuré via Replit Connectors)
+- **Prénom optionnel** : Utilisé uniquement pour personnaliser l'expérience
 - **Audio non stocké** : Transcription immédiate puis suppression
-- **Conformité RGPD** : Aucune donnée personnelle collectée
+- **Conformité RGPD** : Consentement explicite pour email de contact
 
 ### APIs Tierces
 
 - **Clés API sécurisées** : Variables d'environnement serveur uniquement
 - **Jamais exposées côté client** : Appels proxy via backend
+- **Google Sheets OAuth2** : Via Replit Connectors (tokens auto-renouvelés)
 - **Rate limiting** : Protection contre les abus (à implémenter)
 
 ### Permissions Navigateur
@@ -573,14 +717,17 @@ Met à jour une session (score, indices trouvés, etc.).
 
 ---
 
-## 🚧 Limitations Connues (V1.2)
+## 🚧 Limitations Connues (V1.3)
 
-- **Stockage temporaire** : Sessions perdues au redémarrage serveur
-- **Pas de comptes utilisateurs** : Pas d'historique persistant
-- **24 sessions max recommandé** : Limitation mémoire RAM
 - **1 seul niveau** : Tutoriel uniquement (pas de progression multi-niveaux)
 - **Pas de RAG étendu** : Base de connaissances limitée aux 4 indices
 - **Coût API accru (Phase 2)** : 3-5× plus d'appels TTS par message (streaming)
+- **Google Sheets Replit only** : Sync fonctionne uniquement sur Replit avec connecteur
+
+### ✅ Problèmes Résolus dans v1.3.0
+- ~~**Stockage temporaire**~~ : CORRIGÉ - PostgreSQL avec Drizzle ORM
+- ~~**Pas de feedback utilisateur**~~ : CORRIGÉ - Formulaire Typeform-style complet
+- ~~**Pas d'export données**~~ : CORRIGÉ - Sync automatique Google Sheets
 
 ### ✅ Problèmes Résolus dans v1.2.0
 - ~~**Latence conversationnelle élevée**~~ : CORRIGÉ - Réduction de 6-11 secondes via streaming (Phase 1 + 2)
@@ -600,7 +747,9 @@ Met à jour une session (score, indices trouvés, etc.).
 
 ### Court Terme (V2)
 
-- [ ] Persistance des sessions (PostgreSQL via Drizzle)
+- [x] ~~Persistance des sessions (PostgreSQL via Drizzle)~~ ✅ v1.3.0
+- [x] ~~Export données Google Sheets~~ ✅ v1.3.0
+- [x] ~~Formulaire feedback utilisateur~~ ✅ v1.3.0
 - [ ] Authentification simple (code classe)
 - [ ] Dashboard enseignant (statistiques, scores)
 - [ ] Multi-niveaux (pollution marine, changement climatique)
@@ -671,12 +820,13 @@ Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
 
 | Métrique | Valeur |
 |----------|--------|
-| Lignes de code | ~5,000 |
-| Composants React | 15+ |
-| Routes API | 6 |
-| Dépendances | 80+ |
-| Temps dev | V1 Prototype |
-| Technologies | 10+ |
+| Lignes de code | ~6,500 |
+| Composants React | 18+ |
+| Routes API | 12 |
+| Tables DB | 3 |
+| Dépendances | 85+ |
+| Temps dev | V1.3 Prototype |
+| Technologies | 12+ |
 
 ---
 
