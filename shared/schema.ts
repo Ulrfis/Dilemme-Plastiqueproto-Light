@@ -11,6 +11,10 @@ export const tutorialSessions = pgTable("tutorial_sessions", {
   audioMode: text("audio_mode").$type<'voice' | 'text'>().default('voice').notNull(),
   completed: integer("completed").default(0).notNull(),
   threadId: text("thread_id"),
+  finalSynthesis: text("final_synthesis"),
+  messageCount: integer("message_count").default(0).notNull(),
+  upvotes: integer("upvotes").default(0).notNull(),
+  completedAt: timestamp("completed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

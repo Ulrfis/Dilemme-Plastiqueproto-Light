@@ -225,8 +225,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (completeAudio.byteLength > 0) {
         // Implement LRU-style eviction if cache is full
         if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
-          const firstKey = ttsCache.keys().next().value;
-          ttsCache.delete(firstKey);
+          const firstKey = ttsCache.keys().next().value as string;
+          if (firstKey) ttsCache.delete(firstKey);
           console.log('[TTS Stream API] Cache full - evicted oldest entry');
         }
         ttsCache.set(textHash, completeAudio);
@@ -316,8 +316,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Implement LRU-style eviction if cache is full
       if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
         // Remove oldest entry (first key in Map)
-        const firstKey = ttsCache.keys().next().value;
-        ttsCache.delete(firstKey);
+        const firstKey = ttsCache.keys().next().value as string;
+        if (firstKey) ttsCache.delete(firstKey);
         console.log('[TTS API] Cache full - evicted oldest entry');
       }
       ttsCache.set(textHash, audioBufferNode);
@@ -682,6 +682,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
           timestamp: new Date().toISOString()
         }
       });
+    }
+  });
+
+  // =============== SYNTHESES ENDPOINTS ===============
+
+  // POST /api/sessions/:id/synthesis - Enregistrer la phrase de synthèse finale
+  app.post('/api/sessions/:id/synthesis', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { finalSynthesis } = req.body;
+
+      if (!finalSynthesis || typeof finalSynthesis !== 'string') {
+        return res.status(400).json({ error: 'finalSynthesis is required' });
+      }
+
+      const session = await storage.updateSession(id, {
+        finalSynthesis,
+        completedAt: new Date(),
+        completed: 1,
+      });
+
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      console.log('[Synthesis API] Synthesis saved for session:', id);
+      res.json(session);
+    } catch (error) {
+      console.error('[Synthesis API] Error saving synthesis:', error);
+      res.status(500).json({ error: 'Failed to save synthesis' });
+    }
+  });
+
+  // GET /api/syntheses - Lister toutes les synthèses (page finale)
+  app.get('/api/syntheses', async (req, res) => {
+    try {
+      const sort = (req.query.sort as 'recent' | 'upvotes') || 'recent';
+      const limit = parseInt(req.query.limit as string) || 50;
+
+      const syntheses = await storage.getCompletedSessions({
+        sort,
+        limit: Math.min(limit, 100), // Max 100
+      });
+
+      // Filter to only return sessions with finalSynthesis
+      const withSynthesis = syntheses.filter(s => s.finalSynthesis);
+
+      console.log('[Syntheses API] Returning', withSynthesis.length, 'syntheses');
+      res.json(withSynthesis);
+    } catch (error) {
+      console.error('[Syntheses API] Error fetching syntheses:', error);
+      res.status(500).json({ error: 'Failed to fetch syntheses' });
+    }
+  });
+
+  // POST /api/syntheses/:id/upvote - Ajouter un upvote à une synthèse
+  app.post('/api/syntheses/:id/upvote', async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const session = await storage.incrementUpvote(id);
+
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      console.log('[Upvote API] Upvote added for session:', id, 'Total:', session.upvotes);
+      res.json({ upvotes: session.upvotes });
+    } catch (error) {
+      console.error('[Upvote API] Error adding upvote:', error);
+      res.status(500).json({ error: 'Failed to add upvote' });
+    }
+  });
+
+  // GET /api/sessions/:id/stats - Stats de la session
+  app.get('/api/sessions/:id/stats', async (req, res) => {
+    try {
+      const session = await storage.getSession(req.params.id);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+
+      res.json({
+        messageCount: session.messageCount,
+        foundClues: session.foundClues,
+        clueCount: session.foundClues.length,
+        score: session.score,
+        completed: session.completed === 1,
+        finalSynthesis: session.finalSynthesis,
+        upvotes: session.upvotes,
+      });
+    } catch (error) {
+      console.error('[Stats API] Error fetching stats:', error);
+      res.status(500).json({ error: 'Failed to fetch stats' });
     }
   });
 
