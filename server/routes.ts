@@ -582,6 +582,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Incrémenter le compteur de messages pour la synchronisation Google Sheets
+      await storage.incrementMessageCount(sessionId);
+      console.log('[Chat Stream API] Message count incremented for session:', sessionId);
+
       // Send completion event with clue information
       res.write(`data: ${JSON.stringify({
         type: 'complete',
@@ -742,6 +746,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           score: updatedClues.length,
         });
       }
+
+      // Incrémenter le compteur de messages pour la synchronisation Google Sheets
+      await storage.incrementMessageCount(sessionId);
+      console.log('[Chat API] Message count incremented for session:', sessionId);
 
       console.log('[Chat API] Sending response to client');
       res.json({

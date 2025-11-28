@@ -119,12 +119,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async incrementMessageCount(sessionId: string): Promise<void> {
-    await db
+    const [session] = await db
       .update(tutorialSessions)
       .set({
         messageCount: sql`${tutorialSessions.messageCount} + 1`
       })
-      .where(eq(tutorialSessions.id, sessionId));
+      .where(eq(tutorialSessions.id, sessionId))
+      .returning();
+
+    if (session) {
+      googleSheetsSync.updateSessionRow(sessionId, { messageCount: session.messageCount }).catch(console.error);
+    }
   }
 }
 
