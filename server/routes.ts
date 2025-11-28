@@ -105,6 +105,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(results);
   });
 
+  // Endpoint de diagnostic pour Google Sheets
+  app.get('/api/health/sheets', async (req, res) => {
+    const result: { status: string; message: string; details?: any } = {
+      status: 'unknown',
+      message: '',
+    };
+
+    try {
+      // Vérifier les variables d'environnement
+      const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
+      const hasReplIdentity = !!process.env.REPL_IDENTITY;
+      const hasWebReplRenewal = !!process.env.WEB_REPL_RENEWAL;
+
+      result.details = {
+        REPLIT_CONNECTORS_HOSTNAME: hostname ? 'SET' : 'NOT SET',
+        REPL_IDENTITY: hasReplIdentity ? 'SET' : 'NOT SET',
+        WEB_REPL_RENEWAL: hasWebReplRenewal ? 'SET' : 'NOT SET',
+      };
+
+      if (!hostname) {
+        result.status = 'error';
+        result.message = 'REPLIT_CONNECTORS_HOSTNAME not set - Not running on Replit?';
+        return res.json(result);
+      }
+
+      if (!hasReplIdentity && !hasWebReplRenewal) {
+        result.status = 'error';
+        result.message = 'No Replit token available (REPL_IDENTITY or WEB_REPL_RENEWAL)';
+        return res.json(result);
+      }
+
+      // Tester la connexion au connecteur
+      const xReplitToken = hasReplIdentity
+        ? 'repl ' + process.env.REPL_IDENTITY
+        : 'depl ' + process.env.WEB_REPL_RENEWAL;
+
+      const url = 'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=google-sheet';
+      const response = await fetch(url, {
+        headers: {
+          'Accept': 'application/json',
+          'X_REPLIT_TOKEN': xReplitToken
+        }
+      });
+
+      if (!response.ok) {
+        result.status = 'error';
+        result.message = `Connector API error: ${response.status} ${response.statusText}`;
+        return res.json(result);
+      }
+
+      const data = await response.json();
+      const connector = data.items?.[0];
+
+      if (!connector) {
+        result.status = 'error';
+        result.message = 'No Google Sheet connector found. Please add Google Sheets connection in Replit panel.';
+        result.details.connectorCount = data.items?.length || 0;
+        return res.json(result);
+      }
+
+      result.details.connectorName = connector.connector_name;
+      result.details.hasAccessToken = !!(connector.settings?.access_token || connector.settings?.oauth?.credentials?.access_token);
+      result.details.settingsKeys = Object.keys(connector.settings || {});
+
+      if (!result.details.hasAccessToken) {
+        result.status = 'error';
+        result.message = 'Google Sheet connector found but no access token';
+        return res.json(result);
+      }
+
+      result.status = 'ok';
+      result.message = 'Google Sheets connection is configured correctly';
+
+    } catch (error) {
+      result.status = 'error';
+      result.message = error instanceof Error ? error.message : 'Unknown error';
+    }
+
+    res.json(result);
+  });
+
   app.post('/api/sessions', async (req, res) => {
     try {
       const data = insertTutorialSessionSchema.parse(req.body);

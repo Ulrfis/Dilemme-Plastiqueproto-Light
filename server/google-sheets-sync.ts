@@ -4,36 +4,75 @@ import type { TutorialSession } from '@shared/schema';
 let connectionSettings: any;
 
 async function getAccessToken() {
-  if (connectionSettings && connectionSettings.settings.expires_at && new Date(connectionSettings.settings.expires_at).getTime() > Date.now()) {
+  console.log('[GoogleSheets] Getting access token...');
+
+  if (connectionSettings && connectionSettings.settings?.expires_at && new Date(connectionSettings.settings.expires_at).getTime() > Date.now()) {
+    console.log('[GoogleSheets] Using cached token');
     return connectionSettings.settings.access_token;
   }
-  
+
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-  const xReplitToken = process.env.REPL_IDENTITY 
-    ? 'repl ' + process.env.REPL_IDENTITY 
-    : process.env.WEB_REPL_RENEWAL 
-    ? 'depl ' + process.env.WEB_REPL_RENEWAL 
+  console.log('[GoogleSheets] REPLIT_CONNECTORS_HOSTNAME:', hostname ? 'SET' : 'NOT SET');
+
+  const xReplitToken = process.env.REPL_IDENTITY
+    ? 'repl ' + process.env.REPL_IDENTITY
+    : process.env.WEB_REPL_RENEWAL
+    ? 'depl ' + process.env.WEB_REPL_RENEWAL
     : null;
 
+  console.log('[GoogleSheets] Token type:', process.env.REPL_IDENTITY ? 'REPL_IDENTITY' : process.env.WEB_REPL_RENEWAL ? 'WEB_REPL_RENEWAL' : 'NONE');
+
+  if (!hostname) {
+    console.error('[GoogleSheets] ❌ REPLIT_CONNECTORS_HOSTNAME is not set - Google Sheets sync disabled');
+    throw new Error('REPLIT_CONNECTORS_HOSTNAME not set - Are you running on Replit?');
+  }
+
   if (!xReplitToken) {
+    console.error('[GoogleSheets] ❌ X_REPLIT_TOKEN not found');
     throw new Error('X_REPLIT_TOKEN not found for repl/depl');
   }
 
-  connectionSettings = await fetch(
-    'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=google-sheet',
-    {
+  try {
+    const url = 'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=google-sheet';
+    console.log('[GoogleSheets] Fetching connection from:', url);
+
+    const response = await fetch(url, {
       headers: {
         'Accept': 'application/json',
         'X_REPLIT_TOKEN': xReplitToken
       }
+    });
+
+    if (!response.ok) {
+      console.error('[GoogleSheets] ❌ Connector API error:', response.status, response.statusText);
+      throw new Error(`Connector API error: ${response.status} ${response.statusText}`);
     }
-  ).then(res => res.json()).then(data => data.items?.[0]);
 
-  const accessToken = connectionSettings?.settings?.access_token || connectionSettings.settings?.oauth?.credentials?.access_token;
+    const data = await response.json();
+    console.log('[GoogleSheets] Connector response items:', data.items?.length || 0);
 
-  if (!connectionSettings || !accessToken) {
-    throw new Error('Google Sheet not connected');
+    connectionSettings = data.items?.[0];
+
+    if (!connectionSettings) {
+      console.error('[GoogleSheets] ❌ No Google Sheet connector found. Please connect Google Sheets in Replit.');
+      throw new Error('No Google Sheet connector found');
+    }
+
+    console.log('[GoogleSheets] Connector found:', connectionSettings.connector_name);
+  } catch (fetchError) {
+    console.error('[GoogleSheets] ❌ Failed to fetch connector:', fetchError);
+    throw fetchError;
   }
+
+  const accessToken = connectionSettings?.settings?.access_token || connectionSettings?.settings?.oauth?.credentials?.access_token;
+
+  if (!accessToken) {
+    console.error('[GoogleSheets] ❌ No access token in connector settings');
+    console.error('[GoogleSheets] Available settings keys:', Object.keys(connectionSettings?.settings || {}));
+    throw new Error('Google Sheet access token not found');
+  }
+
+  console.log('[GoogleSheets] ✅ Access token obtained');
   return accessToken;
 }
 
