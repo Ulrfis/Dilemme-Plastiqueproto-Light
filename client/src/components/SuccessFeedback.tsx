@@ -52,8 +52,14 @@ interface PlasticBottleProps {
 function PlasticBottle({ isExploding, isShaking, message, clueNames }: PlasticBottleProps) {
   return (
     <div
-      className={`relative transition-all duration-300 ${isExploding ? 'scale-150 opacity-0' : 'scale-100 opacity-100'}`}
-      style={{ animation: isShaking && !isExploding ? 'bottle-shake 0.1s ease-in-out infinite' : 'none' }}
+      className="relative"
+      style={{
+        animation: isExploding
+          ? 'bottle-explode 0.3s ease-in forwards'
+          : isShaking
+            ? 'bottle-shake 0.08s ease-in-out infinite'
+            : 'none'
+      }}
     >
       {/* Grande bouteille de plastique stylisée en SVG */}
       <svg width="280" height="450" viewBox="0 0 200 320" className="drop-shadow-2xl">
@@ -152,23 +158,26 @@ export default function SuccessFeedback({ clueNames }: SuccessFeedbackProps) {
 
   const message = isMultiple ? "Indices trouvés !" : "Indice trouvé !";
 
-  // Générer les particules une seule fois avec useMemo (effet confetti massif)
+  // Générer les particules une seule fois avec useMemo (effet confetti explosif)
   const particles = useMemo<Particle[]>(() => {
-    return Array.from({ length: 100 }, (_, i) => {
-      const angle = (Math.PI * 2 * i) / 100 + Math.random() * 0.8;
-      const velocity = 250 + Math.random() * 400;
+    return Array.from({ length: 120 }, (_, i) => {
+      // Distribution radiale plus uniforme pour un vrai effet d'explosion
+      const angle = (Math.PI * 2 * i) / 120 + (Math.random() - 0.5) * 0.5;
+      const velocity = 200 + Math.random() * 500;
+      // Les particules vont surtout vers le haut et les côtés (moins vers le bas)
+      const yBias = -Math.abs(Math.sin(angle)) * 150 - 100;
       return {
         id: i,
         x: Math.cos(angle) * velocity,
-        y: Math.sin(angle) * velocity - 100 - Math.random() * 150, // Monte plus haut
+        y: Math.sin(angle) * velocity + yBias,
         color: PLASTIC_COLORS[Math.floor(Math.random() * PLASTIC_COLORS.length)],
         shape: PLASTIC_SHAPES[Math.floor(Math.random() * PLASTIC_SHAPES.length)],
-        size: 15 + Math.random() * 30,
-        rotation: Math.random() * 1080 - 540, // Plus de rotation
+        size: 12 + Math.random() * 35,
+        rotation: Math.random() * 1440 - 720, // Encore plus de rotation
         velocityX: Math.cos(angle) * velocity,
         velocityY: Math.sin(angle) * velocity,
-        rotationSpeed: Math.random() * 360 - 180,
-        delay: Math.random() * 0.15,
+        rotationSpeed: Math.random() * 540 - 270,
+        delay: Math.random() * 0.08, // Délai plus court pour effet plus instantané
       };
     });
   }, []);
@@ -200,33 +209,37 @@ export default function SuccessFeedback({ clueNames }: SuccessFeedbackProps) {
       <style>{`
         @keyframes explode-particle {
           0% {
-            transform: translate(-50%, -50%) translate(0, 0) rotate(0deg) scale(1.5);
+            transform: translate(-50%, -50%) translate(0, 0) rotate(0deg) scale(0);
             opacity: 1;
           }
-          20% {
+          10% {
+            transform: translate(-50%, -50%) translate(calc(var(--particle-x) * 0.15), calc(var(--particle-y) * 0.15)) rotate(calc(var(--particle-rotation) * 0.1)) scale(1.5);
             opacity: 1;
-            transform: translate(-50%, -50%) translate(calc(var(--particle-x) * 0.3), calc(var(--particle-y) * 0.3)) rotate(calc(var(--particle-rotation) * 0.3)) scale(1.2);
           }
-          50% {
+          30% {
             opacity: 1;
+            transform: translate(-50%, -50%) translate(calc(var(--particle-x) * 0.5), calc(var(--particle-y) * 0.5)) rotate(calc(var(--particle-rotation) * 0.4)) scale(1.2);
+          }
+          60% {
+            opacity: 0.9;
           }
           100% {
-            transform: translate(-50%, -50%) translate(var(--particle-x), calc(var(--particle-y) + 200px)) rotate(var(--particle-rotation)) scale(0.3);
+            transform: translate(-50%, -50%) translate(var(--particle-x), calc(var(--particle-y) + 300px)) rotate(var(--particle-rotation)) scale(0.2);
             opacity: 0;
           }
         }
 
         @keyframes bottle-shake {
           0%, 100% { transform: translateX(0) rotate(0deg); }
-          10% { transform: translateX(-8px) rotate(-5deg); }
-          20% { transform: translateX(8px) rotate(5deg); }
-          30% { transform: translateX(-8px) rotate(-5deg); }
-          40% { transform: translateX(8px) rotate(5deg); }
-          50% { transform: translateX(-6px) rotate(-4deg); }
-          60% { transform: translateX(6px) rotate(4deg); }
-          70% { transform: translateX(-6px) rotate(-3deg); }
-          80% { transform: translateX(6px) rotate(3deg); }
-          90% { transform: translateX(-4px) rotate(-2deg); }
+          10% { transform: translateX(-10px) rotate(-6deg); }
+          20% { transform: translateX(10px) rotate(6deg); }
+          30% { transform: translateX(-10px) rotate(-6deg); }
+          40% { transform: translateX(10px) rotate(6deg); }
+          50% { transform: translateX(-8px) rotate(-5deg); }
+          60% { transform: translateX(8px) rotate(5deg); }
+          70% { transform: translateX(-8px) rotate(-4deg); }
+          80% { transform: translateX(8px) rotate(4deg); }
+          90% { transform: translateX(-6px) rotate(-3deg); }
         }
 
         @keyframes bottle-appear {
@@ -240,6 +253,21 @@ export default function SuccessFeedback({ clueNames }: SuccessFeedbackProps) {
           100% {
             transform: scale(1);
             opacity: 1;
+          }
+        }
+
+        @keyframes bottle-explode {
+          0% {
+            transform: scale(1) rotate(0deg);
+            opacity: 1;
+          }
+          30% {
+            transform: scale(1.15) rotate(3deg);
+            opacity: 1;
+          }
+          100% {
+            transform: scale(0) rotate(15deg);
+            opacity: 0;
           }
         }
       `}</style>
