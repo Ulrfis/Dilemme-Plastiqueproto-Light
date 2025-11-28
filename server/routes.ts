@@ -5,8 +5,14 @@ import multer from "multer";
 import OpenAI from "openai";
 import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema } from "@shared/schema";
+import crypto from "crypto";
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+// PHASE 1 OPTIMIZATION: TTS Response Cache
+// Cache TTS audio by text hash to avoid regenerating identical responses
+const ttsCache = new Map<string, Buffer>();
+const TTS_CACHE_MAX_SIZE = 100; // Limit cache to 100 entries to prevent memory issues
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -122,6 +128,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'No text provided' });
       }
 
+      // PHASE 1 OPTIMIZATION: Check cache first
+      const textHash = crypto.createHash('md5').update(text).digest('hex');
+      if (ttsCache.has(textHash)) {
+        console.log('[TTS API] Cache HIT - returning cached audio for hash:', textHash.substring(0, 8));
+        const cachedBuffer = ttsCache.get(textHash)!;
+        res.set('Content-Type', 'audio/mpeg');
+        res.set('X-Cache', 'HIT'); // Debug header to confirm cache usage
+        return res.send(cachedBuffer);
+      }
+
+      console.log('[TTS API] Cache MISS - generating new audio for hash:', textHash.substring(0, 8));
+
       const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
       const VOICE_ID = 'CBP9p4KAWPqrMHTDtWPR'; // Peter mai 2025 FR
 
@@ -164,9 +182,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error('Received empty audio from ElevenLabs');
       }
 
+      const audioBufferNode = Buffer.from(audioBuffer);
+
+      // PHASE 1 OPTIMIZATION: Store in cache
+      // Implement LRU-style eviction if cache is full
+      if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
+        // Remove oldest entry (first key in Map)
+        const firstKey = ttsCache.keys().next().value;
+        ttsCache.delete(firstKey);
+        console.log('[TTS API] Cache full - evicted oldest entry');
+      }
+      ttsCache.set(textHash, audioBufferNode);
+      console.log('[TTS API] Audio cached successfully. Cache size:', ttsCache.size);
+
       console.log('[TTS API] Audio generated successfully, size:', audioBuffer.byteLength, 'bytes');
       res.set('Content-Type', 'audio/mpeg');
-      res.send(Buffer.from(audioBuffer));
+      res.set('X-Cache', 'MISS'); // Debug header to confirm cache usage
+      res.send(audioBufferNode);
     } catch (error) {
       console.error('[TTS API] Error generating speech:', error);
       res.status(500).json({
