@@ -7,7 +7,8 @@ import ConversationPanel from "./ConversationPanel";
 import SuccessFeedback from "./SuccessFeedback";
 import ZoomableImage from "./ZoomableImage";
 import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
-import { sendChatMessage, textToSpeech } from "@/lib/api";
+import { useAudioQueue } from "@/hooks/useAudioQueue";
+import { sendChatMessage, textToSpeech, sendChatMessageStreaming, textToSpeechStreaming } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
 interface Message {
@@ -40,6 +41,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   // MOBILE FIX: Ajouter un état local pour forcer le retour à idle en cas de blocage
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
 
+  // PHASE 2 OPTIMIZATION: Enable streaming by default for better latency
+  const useStreaming = useRef(true); // Set to false to use old non-streaming pipeline
+
   const {
     audioState,
     transcription,
@@ -61,6 +65,19 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     onAudioStop: () => {
       console.log('[TutorialScreen] Audio playback stopped');
       setIsAudioPlaying(false);
+    },
+  });
+
+  // PHASE 2 OPTIMIZATION: Audio queue for streaming sentence-by-sentence playback
+  const audioQueue = useAudioQueue({
+    playAudio,
+    onQueueEmpty: () => {
+      console.log('[TutorialScreen] Audio queue empty');
+      setIsAudioPlaying(false);
+    },
+    onPlaybackStart: () => {
+      console.log('[TutorialScreen] Audio queue playback started');
+      setIsAudioPlaying(true);
     },
   });
 
@@ -160,6 +177,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const handleInterruptPeter = () => {
     console.log('[TutorialScreen] User wants to interrupt Peter');
 
+    // PHASE 2: Clear audio queue for streaming
+    audioQueue.clear();
+
     // Arrêter immédiatement la lecture audio de Peter
     // handleAudioStop sera automatiquement appelé et gérera l'affichage du message
     stopAudio();
@@ -238,9 +258,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const processMessage = async (userMessage: string) => {
     // SIMPLIFICATION: Retrait du mécanisme de blocage strict qui causait des problèmes sur mobile
     // Si un audio est en cours, on l'interrompt automatiquement au lieu de bloquer l'utilisateur
-    if (audioState === 'playing') {
+    if (audioState === 'playing' || audioQueue.isPlaying) {
       console.log('[TutorialScreen] Interrupting Peter automatically to process new message');
-      stopAudio();
+      handleInterruptPeter();
     }
 
     // Si on attend déjà une réponse (processing), ignorer les nouveaux messages
@@ -258,105 +278,13 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       // Ajouter le message utilisateur
       setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
 
-      const result = await sendChatMessage(sessionId, userMessage);
-      
-      console.log('[TutorialScreen] ========== API RESPONSE ==========');
-      console.log('[TutorialScreen] result.response:', result.response);
-      console.log('[TutorialScreen] result.response type:', typeof result.response);
-      console.log('[TutorialScreen] result.response length:', result.response?.length);
-      console.log('[TutorialScreen] First 100 chars:', result.response?.substring(0, 100));
-      console.log('[TutorialScreen] ===================================');
-
-      // Détecter les NOUVEAUX indices en comparant avec l'état actuel
-      const previousClues = foundClues;
-      const detectedNewClues = result.foundClues.filter(clue => !previousClues.includes(clue));
-
-      console.log('[TutorialScreen] Clue detection:', {
-        previousClues,
-        resultFoundClues: result.foundClues,
-        detectedNewClues,
-      });
-
-      if (detectedNewClues.length > 0) {
-        console.log('[TutorialScreen] New clues detected:', detectedNewClues);
-        setFoundClues(result.foundClues);
-        setNewClues(detectedNewClues);
-        setShowSuccess(true);
-        setTimeout(() => setShowSuccess(false), 3000);
-      }
-
-      // CHANGEMENT : Afficher le message IMMEDIATEMENT, sans attendre l'audio
-      // Cela garantit que le texte s'affiche toujours, même si l'audio échoue
-      console.log('[TutorialScreen] Adding assistant message immediately');
-      setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
-
-      // IMPORTANT: Peter doit TOUJOURS parler (TTS), même si l'utilisateur est en mode texte (fallbackMode)
-      // Le fallbackMode affecte seulement l'INPUT utilisateur (texte vs voix), pas l'OUTPUT de Peter
-      try {
-        console.log('[TutorialScreen] Generating TTS for response with retry...');
-        const audioBlob = await textToSpeechWithRetry(result.response);
-        console.log('[TutorialScreen] TTS generated successfully, blob size:', audioBlob.size);
-
-        // MOBILE FIX: Vérifier que le blob est valide avant de le jouer
-        if (audioBlob.size === 0) {
-          throw new Error('Received empty audio blob from TTS');
-        }
-
-        console.log('[TutorialScreen] About to call playAudio...');
-
-        // MOBILE FIX: Timeout de sécurité pour forcer le retour à idle si l'audio ne se termine pas
-        // Estimer la durée de l'audio (environ 150 mots par minute de parole)
-        const estimatedDuration = Math.max(10000, (result.response.length / 5) * 60 / 150 * 1000);
-        const safetyTimeout = estimatedDuration + 10000; // Ajouter 10 secondes de marge pour mobile
-
-        console.log(`[TutorialScreen] Setting safety timeout: ${safetyTimeout}ms for estimated duration: ${estimatedDuration}ms`);
-        const timeoutId = setTimeout(() => {
-          console.warn('[TutorialScreen] Safety timeout triggered - forcing audio to stop');
-          stopAudio();
-          // Forcer le retour à idle si le hook ne le fait pas
-          if (audioState !== 'idle') {
-            console.warn('[TutorialScreen] Force recovering from error state');
-            recoverFromError();
-          }
-        }, safetyTimeout);
-
-        // MOBILE FIX: Détecter si l'audio ne démarre pas dans les 5 secondes
-        const startTimeoutId = setTimeout(() => {
-          if (audioState === 'playing' && !isAudioPlaying) {
-            console.warn('[TutorialScreen] Audio stuck in playing state but not actually playing - recovering');
-            stopAudio();
-            recoverFromError();
-          }
-        }, 5000);
-
-        try {
-          console.log('[TutorialScreen] Starting audio playback...');
-          await playAudio(audioBlob);
-          console.log('[TutorialScreen] Audio playback completed successfully');
-        } finally {
-          // Toujours nettoyer les timeouts, que l'audio réussisse ou échoue
-          clearTimeout(timeoutId);
-          clearTimeout(startTimeoutId);
-          console.log('[TutorialScreen] Cleaned up safety timeouts');
-        }
-      } catch (error) {
-        console.error('[TutorialScreen] TTS or playback failed:', error);
-
-        // CRITIQUE: S'assurer que l'état revient à idle pour permettre de continuer
-        console.log('[TutorialScreen] Forcing state back to idle after audio error');
-        recoverFromError();
-
-        // Afficher un toast informatif seulement si on n'est PAS déjà en fallbackMode
-        // (pour éviter de spammer l'utilisateur avec des toasts sur mobile)
-        if (!fallbackMode) {
-          toast({
-            title: "Voix temporairement indisponible",
-            description: "La réponse de Peter s'affiche en texte uniquement.",
-            variant: "default",
-          });
-        }
-
-        // NE PAS activer fallbackMode - le mode texte est seulement pour l'INPUT
+      // PHASE 2 OPTIMIZATION: Use streaming pipeline for better latency
+      if (useStreaming.current) {
+        console.log('[TutorialScreen] Using STREAMING pipeline');
+        await processMessageStreaming(userMessage);
+      } else {
+        console.log('[TutorialScreen] Using NON-STREAMING pipeline (legacy)');
+        await processMessageNonStreaming(userMessage);
       }
     } catch (error) {
       console.error('Error processing message:', error);
@@ -381,6 +309,146 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         description: detailedDescription,
         variant: "destructive",
       });
+    }
+  };
+
+  // PHASE 2 OPTIMIZATION: Streaming message processing
+  const processMessageStreaming = async (userMessage: string) => {
+    console.log('[TutorialScreen] Processing message with streaming');
+    let fullResponse = '';
+    const sentencesReceived: string[] = [];
+
+    try {
+      // Send streaming chat message
+      await sendChatMessageStreaming(sessionId, userMessage, {
+        onSentence: async (sentence, index) => {
+          console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...');
+          fullResponse += sentence + ' ';
+          sentencesReceived.push(sentence);
+
+          // Update UI with partial response (progressive display)
+          setMessages(prev => {
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage && lastMessage.role === 'assistant') {
+              // Update existing message
+              return [...prev.slice(0, -1), { role: 'assistant', content: fullResponse.trim() }];
+            } else {
+              // Add new assistant message
+              return [...prev, { role: 'assistant', content: fullResponse.trim() }];
+            }
+          });
+
+          // Generate TTS for this sentence immediately (parallel to LLM)
+          try {
+            console.log('[TutorialScreen] Generating TTS for sentence #' + index);
+            const audioBlob = await textToSpeechStreaming(sentence);
+            console.log('[TutorialScreen] TTS generated for sentence #' + index + ', size:', audioBlob.size);
+
+            // Add to audio queue for sequential playback
+            audioQueue.enqueue(audioBlob, sentence, index);
+          } catch (ttsError) {
+            console.error('[TutorialScreen] TTS failed for sentence #' + index + ':', ttsError);
+            // Continue processing other sentences even if one fails
+          }
+        },
+
+        onComplete: (finalResponse, newFoundClues, detectedClue) => {
+          console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length);
+
+          // Update final message (in case there was additional text at the end)
+          setMessages(prev => {
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage && lastMessage.role === 'assistant') {
+              return [...prev.slice(0, -1), { role: 'assistant', content: finalResponse }];
+            } else {
+              return [...prev, { role: 'assistant', content: finalResponse }];
+            }
+          });
+
+          // Handle clue detection
+          const previousClues = foundClues;
+          const detectedNewClues = newFoundClues.filter(clue => !previousClues.includes(clue));
+
+          console.log('[TutorialScreen] Clue detection:', {
+            previousClues,
+            newFoundClues,
+            detectedNewClues,
+          });
+
+          if (detectedNewClues.length > 0) {
+            console.log('[TutorialScreen] New clues detected:', detectedNewClues);
+            setFoundClues(newFoundClues);
+            setNewClues(detectedNewClues);
+            setShowSuccess(true);
+            setTimeout(() => setShowSuccess(false), 3000);
+          }
+        },
+
+        onError: (error) => {
+          console.error('[TutorialScreen] Stream error:', error);
+          toast({
+            title: "Erreur de streaming",
+            description: error,
+            variant: "destructive",
+          });
+        },
+      });
+    } catch (error) {
+      console.error('[TutorialScreen] Streaming failed:', error);
+      // Fallback to non-streaming
+      console.log('[TutorialScreen] Falling back to non-streaming');
+      await processMessageNonStreaming(userMessage);
+    }
+  };
+
+  // Legacy non-streaming message processing (kept for fallback)
+  const processMessageNonStreaming = async (userMessage: string) => {
+    const result = await sendChatMessage(sessionId, userMessage);
+
+    console.log('[TutorialScreen] ========== API RESPONSE ==========');
+    console.log('[TutorialScreen] result.response:', result.response);
+    console.log('[TutorialScreen] ===================================');
+
+    // Détecter les NOUVEAUX indices en comparant avec l'état actuel
+    const previousClues = foundClues;
+    const detectedNewClues = result.foundClues.filter(clue => !previousClues.includes(clue));
+
+    if (detectedNewClues.length > 0) {
+      console.log('[TutorialScreen] New clues detected:', detectedNewClues);
+      setFoundClues(result.foundClues);
+      setNewClues(detectedNewClues);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    }
+
+    // Afficher le message IMMEDIATEMENT
+    console.log('[TutorialScreen] Adding assistant message immediately');
+    setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
+
+    // Generate TTS and play
+    try {
+      console.log('[TutorialScreen] Generating TTS for response with retry...');
+      const audioBlob = await textToSpeechWithRetry(result.response);
+      console.log('[TutorialScreen] TTS generated successfully, blob size:', audioBlob.size);
+
+      if (audioBlob.size === 0) {
+        throw new Error('Received empty audio blob from TTS');
+      }
+
+      console.log('[TutorialScreen] Starting audio playback...');
+      await playAudio(audioBlob);
+      console.log('[TutorialScreen] Audio playback completed successfully');
+    } catch (error) {
+      console.error('[TutorialScreen] TTS or playback failed:', error);
+      recoverFromError();
+
+      if (!fallbackMode) {
+        toast({
+          title: "Voix temporairement indisponible",
+          description: "La réponse de Peter s'affiche en texte uniquement.",
+          variant: "default",
+        });
+      }
     }
   };
 

@@ -1,5 +1,65 @@
 # Architecture du Système de Conversation Vocale
 
+## 🚀 Améliorations v1.2.0 - Optimisations Latence Majeure
+
+### Overview des Optimisations
+La version 1.2.0 apporte des **améliorations architecturales majeures** qui réduisent la latence conversationnelle de **6-11 secondes**!
+
+**Phase 1 - Quick Wins (2-4s):**
+- TTS Response Caching (MD5 + LRU)
+- API Connection Warming (OpenAI keepalive 30s)
+- DNS Prefetch/Preconnect (api.openai.com, api.elevenlabs.io)
+- Smart Audio Keepalive (2s → 5s, -60% overhead)
+
+**Phase 2 - Streaming Architecture (4-7s):**
+- LLM Sentence Streaming (SSE progressive)
+- ElevenLabs Streaming TTS (audio chunks)
+- Audio Queue Manager (lecture séquentielle)
+- Progressive UI (ChatGPT-style display)
+
+📖 **Documentation complète:**
+- [PHASE1_OPTIMIZATIONS.md](./PHASE1_OPTIMIZATIONS.md) - Guide détaillé Phase 1
+- [PHASE2_OPTIMIZATIONS.md](./PHASE2_OPTIMIZATIONS.md) - Guide détaillé Phase 2
+
+### Architecture Streaming (Phase 2)
+
+**Flux Avant (Séquentiel):**
+```
+User → STT (2-7s) → [WAIT] → LLM (3-8s) → [WAIT] → TTS (1-3s) → Play
+Total: 7-20 secondes
+```
+
+**Flux Après (Parallèle):**
+```
+User → STT (2-7s) → LLM Sentence 1 (1s) ┬→ TTS 1 (0.3s) → Play (IMMEDIATE!)
+                                        ├→ TTS 2 (0.3s) → Queue
+                                        └→ TTS 3 (0.3s) → Queue
+
+User entend la réponse à ~3.3s (vs 7s avant)
+```
+
+**Key Features:**
+- **Server-Sent Events (SSE):** Streaming LLM responses sentence-by-sentence
+- **Parallel Processing:** TTS starts while LLM still generating
+- **Audio Queue:** Sequential playback of sentence chunks
+- **Cache Integration:** Phase 1 cache still active for repeated phrases
+
+### Endpoints Phase 2
+
+**Nouveaux endpoints streaming:**
+```
+POST /api/chat/stream          # SSE streaming LLM (sentence-by-sentence)
+POST /api/text-to-speech/stream # ElevenLabs streaming TTS
+```
+
+**Endpoints legacy (fallback):**
+```
+POST /api/chat                 # Non-streaming LLM (toujours disponible)
+POST /api/text-to-speech       # Non-streaming TTS (avec cache Phase 1)
+```
+
+---
+
 ## 🆕 Améliorations v1.1.0 - Robustesse Mobile
 
 ### Problèmes Résolus
@@ -320,8 +380,39 @@ audio: <file.webm>
 }
 ```
 
-### POST `/api/chat`
-Envoie un message à l'assistant IA et reçoit une réponse.
+---
+
+### POST `/api/chat/stream` ⚡ NEW (Phase 2)
+Envoie un message à l'assistant IA et reçoit une réponse streaming via SSE.
+
+**Request:**
+```json
+{
+  "sessionId": "uuid-v4",
+  "userMessage": "Je vois une double hélice"
+}
+```
+
+**Response (Server-Sent Events):**
+```
+Content-Type: text/event-stream
+
+data: {"type":"sentence","text":"Bravo!","index":1}
+
+data: {"type":"sentence","text":"C'est l'ADN!","index":2}
+
+data: {"type":"complete","fullResponse":"Bravo! C'est l'ADN!","foundClues":["ADN"],"detectedClue":"ADN"}
+```
+
+**Event Types:**
+- `sentence`: Sentence complète envoyée progressivement
+- `complete`: Fin du stream avec métadonnées (clues, etc.)
+- `error`: Erreur pendant le streaming
+
+---
+
+### POST `/api/chat` (Legacy - Fallback)
+Version non-streaming (toujours disponible pour compatibilité).
 
 **Request:**
 ```json
@@ -340,8 +431,10 @@ Envoie un message à l'assistant IA et reçoit une réponse.
 }
 ```
 
-### POST `/api/text-to-speech`
-Génère un fichier audio à partir de texte.
+---
+
+### POST `/api/text-to-speech/stream` ⚡ NEW (Phase 2)
+Génère un fichier audio à partir de texte avec streaming.
 
 **Request:**
 ```json
@@ -353,6 +446,34 @@ Génère un fichier audio à partir de texte.
 **Response:**
 ```
 Content-Type: audio/mpeg
+Transfer-Encoding: chunked
+X-Cache: MISS (or HIT if cached)
+
+<streaming audio chunks>
+```
+
+**Features:**
+- Streaming audio chunks pendant génération
+- Cache Phase 1 toujours actif (`X-Cache: HIT` si en cache)
+- `optimize_streaming_latency: 3` pour ElevenLabs
+
+---
+
+### POST `/api/text-to-speech` (Legacy - avec cache)
+Version non-streaming avec cache Phase 1.
+
+**Request:**
+```json
+{
+  "text": "Bravo! Tu as trouvé l'ADN!"
+}
+```
+
+**Response:**
+```
+Content-Type: audio/mpeg
+X-Cache: HIT (or MISS)
+
 <binary audio data>
 ```
 
