@@ -81,8 +81,21 @@ export async function textToSpeech(text: string): Promise<Blob> {
   return blob;
 }
 
-// PHASE 2 OPTIMIZATION: Streaming TTS API
-export async function textToSpeechStreaming(text: string): Promise<Blob> {
+// PHASE 2 OPTIMIZATION: Streaming TTS API with early playback
+// This function streams audio chunks and calls onFirstChunk as soon as data arrives
+// allowing playback to start before the full audio is generated
+export interface StreamingTTSCallbacks {
+  onFirstChunk?: (audioBlob: Blob) => void;  // Called when first chunk arrives for early playback
+  onComplete?: (fullAudioBlob: Blob) => void; // Called when full audio is available
+  onError?: (error: Error) => void;
+}
+
+export async function textToSpeechStreaming(
+  text: string,
+  callbacks?: StreamingTTSCallbacks
+): Promise<Blob> {
+  console.log('[API] Starting streaming TTS for text length:', text.length);
+
   const response = await fetch('/api/text-to-speech/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -92,18 +105,67 @@ export async function textToSpeechStreaming(text: string): Promise<Blob> {
   if (!response.ok) {
     const errorText = await response.text();
     console.error('[API] TTS Stream error response:', errorText);
-    throw new Error(`Failed to generate speech: ${response.status}`);
+    const error = new Error(`Failed to generate speech: ${response.status}`);
+    callbacks?.onError?.(error);
+    throw error;
   }
 
-  const blob = await response.blob();
-
-  if (!blob || blob.size === 0) {
-    console.error('[API] Received empty or invalid audio blob from streaming');
-    throw new Error('Received empty or invalid audio blob from server');
+  // Check for cache hit (non-streaming response)
+  const cacheHeader = response.headers.get('X-Cache');
+  if (cacheHeader === 'HIT') {
+    console.log('[API] TTS Cache HIT - returning full audio immediately');
+    const blob = await response.blob();
+    callbacks?.onFirstChunk?.(blob);
+    callbacks?.onComplete?.(blob);
+    return blob;
   }
 
-  console.log('[API] TTS streaming blob received successfully, size:', blob.size, 'type:', blob.type);
-  return blob;
+  // Stream the response
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const error = new Error('No response body reader available');
+    callbacks?.onError?.(error);
+    throw error;
+  }
+
+  const chunks: Uint8Array[] = [];
+  let firstChunkSent = false;
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      chunks.push(value);
+      totalBytes += value.length;
+
+      // On first chunk, create a partial blob and notify for early playback
+      // We need enough data for the audio decoder to start (~4KB minimum for MP3)
+      if (!firstChunkSent && totalBytes >= 4096 && callbacks?.onFirstChunk) {
+        console.log('[API] First chunk threshold reached (', totalBytes, 'bytes) - enabling early playback');
+        const partialBlob = new Blob(chunks, { type: 'audio/mpeg' });
+        callbacks.onFirstChunk(partialBlob);
+        firstChunkSent = true;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  // Create final complete blob
+  const fullBlob = new Blob(chunks, { type: 'audio/mpeg' });
+
+  if (fullBlob.size === 0) {
+    const error = new Error('Received empty audio from streaming');
+    callbacks?.onError?.(error);
+    throw error;
+  }
+
+  console.log('[API] TTS streaming complete, total size:', fullBlob.size, 'bytes');
+  callbacks?.onComplete?.(fullBlob);
+
+  return fullBlob;
 }
 
 // PHASE 2 OPTIMIZATION: Streaming chat API with SSE

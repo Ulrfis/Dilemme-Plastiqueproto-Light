@@ -163,12 +163,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_multilingual_v2',
+          model_id: 'eleven_turbo_v2_5', // Faster model for lower latency
           voice_settings: {
             stability: 0.5,
             similarity_boost: 0.75
           },
-          optimize_streaming_latency: 3, // 0-4, higher = faster but lower quality
+          optimize_streaming_latency: 4, // 0-4, max optimization for lowest latency
         })
       });
 
