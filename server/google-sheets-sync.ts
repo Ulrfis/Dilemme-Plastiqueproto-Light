@@ -89,6 +89,37 @@ async function getGoogleSheetsClient() {
 
 const SPREADSHEET_ID = '1CisRjSfqNpcZGwmklqdIRc93hbK4-Pyu_ysoaT2Dfb4';
 
+// Cache pour le nom de la feuille
+let cachedSheetName: string | null = null;
+
+async function getFirstSheetName(): Promise<string> {
+  if (cachedSheetName) {
+    return cachedSheetName;
+  }
+
+  try {
+    const sheets = await getGoogleSheetsClient();
+
+    // Récupérer les métadonnées du spreadsheet pour obtenir le nom de la première feuille
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: SPREADSHEET_ID,
+      fields: 'sheets.properties.title',
+    });
+
+    const firstSheet = spreadsheet.data.sheets?.[0];
+    if (firstSheet?.properties?.title) {
+      cachedSheetName = firstSheet.properties.title;
+      console.log('[GoogleSheets] ✅ Found sheet name:', cachedSheetName);
+      return cachedSheetName;
+    }
+
+    throw new Error('No sheets found in spreadsheet');
+  } catch (error) {
+    console.error('[GoogleSheets] ❌ Failed to get sheet name:', error);
+    throw error;
+  }
+}
+
 export class GoogleSheetsSync {
   private initialized = false;
 
@@ -97,18 +128,19 @@ export class GoogleSheetsSync {
 
     try {
       const sheets = await getGoogleSheetsClient();
-      
+      const sheetName = await getFirstSheetName();
+
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: 'Sheet1!A1:I1',
+        range: `'${sheetName}'!A1:I1`,
       });
 
       const existingHeaders = response.data.values?.[0];
-      
+
       if (!existingHeaders || existingHeaders.length === 0) {
         await sheets.spreadsheets.values.update({
           spreadsheetId: SPREADSHEET_ID,
-          range: 'Sheet1!A1:I1',
+          range: `'${sheetName}'!A1:I1`,
           valueInputOption: 'USER_ENTERED',
           requestBody: {
             values: [[
@@ -126,7 +158,7 @@ export class GoogleSheetsSync {
         });
         console.log('[GoogleSheets] Headers created');
       }
-      
+
       this.initialized = true;
     } catch (error) {
       console.error('[GoogleSheets] Failed to initialize headers:', error);
@@ -136,12 +168,13 @@ export class GoogleSheetsSync {
   async appendSession(session: TutorialSession): Promise<void> {
     try {
       await this.ensureHeaders();
-      
+
       const sheets = await getGoogleSheetsClient();
-      
+      const sheetName = await getFirstSheetName();
+
       await sheets.spreadsheets.values.append({
         spreadsheetId: SPREADSHEET_ID,
-        range: 'Sheet1!A:I',
+        range: `'${sheetName}'!A:I`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [[
@@ -157,25 +190,26 @@ export class GoogleSheetsSync {
           ]],
         },
       });
-      
-      console.log('[GoogleSheets] Session appended:', session.id);
+
+      console.log('[GoogleSheets] ✅ Session appended:', session.id);
     } catch (error) {
-      console.error('[GoogleSheets] Failed to append session:', error);
+      console.error('[GoogleSheets] ❌ Failed to append session:', error);
     }
   }
 
   async updateSessionRow(sessionId: string, updates: Partial<TutorialSession>): Promise<void> {
     try {
       const sheets = await getGoogleSheetsClient();
-      
+      const sheetName = await getFirstSheetName();
+
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: 'Sheet1!B:B',
+        range: `'${sheetName}'!B:B`,
       });
 
       const rows = response.data.values || [];
       let rowIndex = -1;
-      
+
       for (let i = 0; i < rows.length; i++) {
         if (rows[i][0] === sessionId) {
           rowIndex = i + 1;
@@ -190,11 +224,11 @@ export class GoogleSheetsSync {
 
       const currentRow = await sheets.spreadsheets.values.get({
         spreadsheetId: SPREADSHEET_ID,
-        range: `Sheet1!A${rowIndex}:I${rowIndex}`,
+        range: `'${sheetName}'!A${rowIndex}:I${rowIndex}`,
       });
 
       const currentValues = currentRow.data.values?.[0] || [];
-      
+
       const updatedValues = [
         currentValues[0] || new Date().toISOString(),
         sessionId,
@@ -209,16 +243,16 @@ export class GoogleSheetsSync {
 
       await sheets.spreadsheets.values.update({
         spreadsheetId: SPREADSHEET_ID,
-        range: `Sheet1!A${rowIndex}:I${rowIndex}`,
+        range: `'${sheetName}'!A${rowIndex}:I${rowIndex}`,
         valueInputOption: 'USER_ENTERED',
         requestBody: {
           values: [updatedValues],
         },
       });
-      
-      console.log('[GoogleSheets] Session updated:', sessionId);
+
+      console.log('[GoogleSheets] ✅ Session updated:', sessionId);
     } catch (error) {
-      console.error('[GoogleSheets] Failed to update session:', error);
+      console.error('[GoogleSheets] ❌ Failed to update session:', error);
     }
   }
 }
