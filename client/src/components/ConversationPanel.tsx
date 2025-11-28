@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { Mic, Square, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,7 @@ export default function ConversationPanel({
 }: ConversationPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll pour garder les deux derniers échanges visibles
   useEffect(() => {
@@ -45,12 +46,22 @@ export default function ConversationPanel({
     }
   }, [messages]);
 
-  const handleSendText = () => {
-    if (textInput.trim()) {
-      onSendText(textInput.trim());
+  const handleSendText = useCallback(() => {
+    // Lire la valeur directement depuis le DOM en plus du state React
+    // Cela assure la compatibilité avec les outils de test automatisés
+    const inputValue = inputRef.current?.value || textInput;
+    
+    if (inputValue.trim()) {
+      onSendText(inputValue.trim());
       onTextInputChange("");
+      // Réinitialiser aussi le DOM input
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
     }
-  };
+  }, [textInput, onSendText, onTextInputChange]);
+  
+  const isButtonDisabled = !textInput.trim() || state === 'processing';
 
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-transparent to-background/95 backdrop-blur-sm">
@@ -131,8 +142,16 @@ export default function ConversationPanel({
           {fallbackMode ? (
             <>
               <Input
+                ref={inputRef}
                 value={textInput}
                 onChange={(e) => onTextInputChange(e.target.value)}
+                onInput={(e) => {
+                  // Backup handler pour capturer les changements même si onChange ne se déclenche pas
+                  const target = e.target as HTMLInputElement;
+                  if (target.value !== textInput) {
+                    onTextInputChange(target.value);
+                  }
+                }}
                 onKeyDown={(e) => e.key === 'Enter' && handleSendText()}
                 placeholder="Tapez votre message..."
                 className="flex-1 rounded-2xl text-sm sm:text-base bg-card/90 backdrop-blur-sm"
@@ -140,7 +159,7 @@ export default function ConversationPanel({
               />
               <Button
                 onClick={handleSendText}
-                disabled={!textInput.trim() || state === 'processing'}
+                disabled={isButtonDisabled}
                 size="icon"
                 className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex-shrink-0"
                 data-testid="button-send-text"

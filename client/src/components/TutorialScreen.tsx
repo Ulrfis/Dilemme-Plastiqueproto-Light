@@ -224,6 +224,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       if (isPermanentError) {
         // Basculer en fallbackMode pour les erreurs définitives
         console.log('[TutorialScreen] Permanent error detected - switching to text mode');
+        // IMPORTANT: Réinitialiser l'état audio AVANT de passer en mode texte
+        // Sinon audioState peut rester bloqué et désactiver le bouton d'envoi
+        recoverFromError();
         setFallbackMode(true);
         toast({
           title: "Mode texte activé",
