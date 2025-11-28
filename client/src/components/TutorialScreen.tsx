@@ -339,33 +339,17 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           });
 
           // Generate TTS for this sentence immediately (parallel to LLM)
-          // Use streaming TTS with early playback callback
+          // Use streaming endpoint for faster generation, but wait for complete audio
           try {
-            console.log('[TutorialScreen] Generating streaming TTS for sentence #' + index);
-            let earlyPlaybackStarted = false;
+            console.log('[TutorialScreen] Generating TTS for sentence #' + index);
 
-            await textToSpeechStreaming(sentence, {
-              // PHASE 2: Start playing as soon as first chunk arrives (~4KB)
-              onFirstChunk: (partialBlob) => {
-                if (!earlyPlaybackStarted) {
-                  console.log('[TutorialScreen] Early playback starting for sentence #' + index + ', partial size:', partialBlob.size);
-                  audioQueue.enqueue(partialBlob, sentence, index);
-                  earlyPlaybackStarted = true;
-                }
-              },
-              // If early playback didn't happen (cache hit or small response), use full blob
-              onComplete: (fullBlob) => {
-                if (!earlyPlaybackStarted) {
-                  console.log('[TutorialScreen] TTS complete for sentence #' + index + ', full size:', fullBlob.size);
-                  audioQueue.enqueue(fullBlob, sentence, index);
-                } else {
-                  console.log('[TutorialScreen] TTS complete for sentence #' + index + ' (early playback already started)');
-                }
-              },
-              onError: (error) => {
-                console.error('[TutorialScreen] TTS streaming error for sentence #' + index + ':', error);
-              }
-            });
+            // textToSpeechStreaming uses the faster streaming endpoint
+            // but returns the complete audio blob to avoid playback cuts
+            const audioBlob = await textToSpeechStreaming(sentence);
+            console.log('[TutorialScreen] TTS complete for sentence #' + index + ', size:', audioBlob.size);
+
+            // Add complete audio to queue for sequential playback
+            audioQueue.enqueue(audioBlob, sentence, index);
           } catch (ttsError) {
             console.error('[TutorialScreen] TTS failed for sentence #' + index + ':', ttsError);
             // Continue processing other sentences even if one fails
