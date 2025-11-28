@@ -6,6 +6,84 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.3.0] - 2025-11-28
+
+### Ajouté - Persistance Base de Données PostgreSQL
+
+- **Tables de base de données** (commit [WIP])
+  - `tutorial_sessions` : Sessions utilisateurs avec indices trouvés, score, synthèse finale
+  - `conversation_messages` : Historique des conversations avec Peter
+  - `feedback_surveys` : Formulaire de feedback utilisateur complet
+  - ORM Drizzle avec PostgreSQL (Neon sur Replit)
+  - Fichier: `shared/schema.ts`
+
+- **Google Sheets Sync** (commit [WIP])
+  - Synchronisation automatique des sessions vers Google Sheets
+  - Synchronisation automatique des feedbacks vers Google Sheets
+  - Détection dynamique du nom de la feuille (plus de "Sheet1" hardcodé)
+  - ID du spreadsheet récupéré depuis le connecteur Replit
+  - Endpoint de diagnostic `/api/health/sheets/test`
+  - Logs détaillés à chaque étape pour debug
+  - Fichier: `server/google-sheets-sync.ts`
+
+### Ajouté - Formulaire de Feedback Typeform-Style
+
+- **FeedbackSurvey Component** (commit [WIP])
+  - Navigation écran par écran (style Typeform)
+  - Barre de progression en haut
+  - Animations fluides entre questions
+  - Fichier: `client/src/components/FeedbackSurvey.tsx`
+
+- **Questions de feedback** (16 questions rating 1-6)
+  - **Scénario** : Compréhension, Objectifs clairs, Lien indices
+  - **Gameplay** : Explication, Simplicité, Réponses bot
+  - **Feeling** : Originalité, Plaisant, Intéressant
+  - **Motivation** : Envie continuer, Motivant, Thème éco
+  - **Interface** : Visuel joli, Visuel clair, Voix agréable
+  - **Note globale** : Note du tutoriel
+
+- **Champs supplémentaires**
+  - Texte libre : "Quelles améliorations verrais-tu ?"
+  - Oui/Non : Veux-tu être au courant ? → Email si oui
+  - Oui/Non : Recommanderais-tu ? → Bouton Partager si oui
+  - Oui/Non : Utilisation à l'école ?
+
+- **Bouton plastique sur Syntheses** (commit [WIP])
+  - Style plastique bleu avec dégradé
+  - Texte: "Donner votre avis sur l'expérience !"
+  - Fichier: `client/src/pages/Syntheses.tsx`
+
+- **API Feedback** (commit [WIP])
+  - `POST /api/feedback` : Créer un feedback
+  - `GET /api/feedback/:sessionId` : Récupérer un feedback
+  - Fichier: `server/routes.ts`
+
+### Ajouté - Animation Bouteille Explosion
+
+- **Bouteille plastique plus grande** (commit [WIP])
+  - Taille augmentée : 200x320px → 280x450px
+  - Textes sur étiquette plus grands
+  - Fichier: `client/src/components/SuccessFeedback.tsx`
+
+- **Effet explosion confetti** (commit [WIP])
+  - Bouteille qui se minimise rapidement (scale 0)
+  - 120 particules confetti explosant depuis le centre
+  - Animation `bottle-explode` : grossit légèrement puis rétrécit
+  - Tremblement intense avant explosion (0.5s)
+  - Fichier: `client/src/components/SuccessFeedback.tsx`
+
+### Ajouté - Nouvelles Routes API
+
+| Route | Méthode | Description |
+|-------|---------|-------------|
+| `/api/feedback` | POST | Créer un feedback |
+| `/api/feedback/:sessionId` | GET | Récupérer feedback par session |
+| `/api/health/sheets/test` | GET | Tester connexion Google Sheets |
+| `/api/syntheses` | GET | Liste des synthèses publiques |
+| `/api/syntheses/:id/upvote` | PATCH | Voter pour une synthèse |
+
+---
+
 ## [1.2.0] - 2025-11-28
 
 ### Ajouté - Phase 2: Streaming Architecture (⚡ 4-7s latency reduction)
@@ -176,4 +254,4 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 - Tous les commits "Published your App" sont des déploiements automatiques
 - Les dates sont au format UTC (temps universel)
-- Version actuelle : 1.1.0
+- Version actuelle : 1.3.0
