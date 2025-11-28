@@ -52,11 +52,11 @@ interface PlasticBottleProps {
 function PlasticBottle({ isExploding, isShaking, message, clueNames }: PlasticBottleProps) {
   return (
     <div
-      className={`relative transition-all duration-500 ${isExploding ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}
-      style={{ animation: isShaking && !isExploding ? 'bottle-shake 0.15s ease-in-out infinite' : 'none' }}
+      className={`relative transition-all duration-300 ${isExploding ? 'scale-150 opacity-0' : 'scale-100 opacity-100'}`}
+      style={{ animation: isShaking && !isExploding ? 'bottle-shake 0.1s ease-in-out infinite' : 'none' }}
     >
       {/* Grande bouteille de plastique stylisée en SVG */}
-      <svg width="200" height="320" viewBox="0 0 200 320" className="drop-shadow-2xl">
+      <svg width="280" height="450" viewBox="0 0 200 320" className="drop-shadow-2xl">
         {/* Dégradé pour le plastique */}
         <defs>
           <linearGradient id="bottleGradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -91,32 +91,32 @@ function PlasticBottle({ isExploding, isShaking, message, clueNames }: PlasticBo
         <path d="M55 120 L55 270 Q55 290 70 290" stroke="rgba(255,255,255,0.6)" strokeWidth="8" fill="none" strokeLinecap="round" />
         <path d="M65 130 L65 250" stroke="rgba(255,255,255,0.3)" strokeWidth="4" fill="none" strokeLinecap="round" />
 
-        {/* Étiquette rectangulaire */}
-        <rect x="45" y="145" width="110" height="100" rx="6" fill="white" stroke="#E0E0E0" strokeWidth="1" />
+        {/* Étiquette rectangulaire - plus grande */}
+        <rect x="40" y="135" width="120" height="120" rx="6" fill="white" stroke="#E0E0E0" strokeWidth="1" />
 
-        {/* Contenu de l'étiquette */}
-        <text x="100" y="175" textAnchor="middle" fontSize="18" fill="#1976D2" fontWeight="bold">BRAVO!</text>
-        <line x1="60" y1="185" x2="140" y2="185" stroke="#1976D2" strokeWidth="1" opacity="0.5" />
-        <text x="100" y="210" textAnchor="middle" fontSize="14" fill="#424242">{message}</text>
+        {/* Contenu de l'étiquette - textes plus grands */}
+        <text x="100" y="170" textAnchor="middle" fontSize="26" fill="#1976D2" fontWeight="bold">BRAVO!</text>
+        <line x1="55" y1="182" x2="145" y2="182" stroke="#1976D2" strokeWidth="2" opacity="0.5" />
+        <text x="100" y="210" textAnchor="middle" fontSize="18" fill="#424242" fontWeight="500">{message}</text>
 
-        {/* Noms des indices sur l'étiquette */}
+        {/* Noms des indices sur l'étiquette - plus grands */}
         {clueNames.slice(0, 2).map((clue, index) => (
           <text
             key={index}
             x="100"
-            y={225 + index * 14}
+            y={232 + index * 18}
             textAnchor="middle"
-            fontSize="10"
+            fontSize="14"
             fill="#1976D2"
-            fontWeight="500"
+            fontWeight="600"
           >
-            {clue.length > 20 ? clue.substring(0, 18) + '...' : clue}
+            {clue.length > 18 ? clue.substring(0, 16) + '...' : clue}
           </text>
         ))}
 
         {/* Ondulations plastique en bas */}
-        <path d="M50 260 Q70 265 100 260 Q130 255 150 260" stroke="#0288D1" strokeWidth="1" fill="none" opacity="0.3" />
         <path d="M50 270 Q70 275 100 270 Q130 265 150 270" stroke="#0288D1" strokeWidth="1" fill="none" opacity="0.3" />
+        <path d="M50 280 Q70 285 100 280 Q130 275 150 280" stroke="#0288D1" strokeWidth="1" fill="none" opacity="0.3" />
       </svg>
     </div>
   );
@@ -134,10 +134,11 @@ function PlasticParticle({ particle }: { particle: Particle }) {
         backgroundColor: particle.color,
         clipPath: particle.shape,
         transform: `translate(-50%, -50%)`,
-        animation: `explode-particle 2s ease-out ${particle.delay}s forwards`,
+        animation: `explode-particle 2.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) ${particle.delay}s forwards`,
         '--particle-x': `${particle.x}px`,
         '--particle-y': `${particle.y}px`,
         '--particle-rotation': `${particle.rotation}deg`,
+        boxShadow: `0 0 ${particle.size / 3}px ${particle.color}40`,
       } as React.CSSProperties}
     />
   );
@@ -151,41 +152,41 @@ export default function SuccessFeedback({ clueNames }: SuccessFeedbackProps) {
 
   const message = isMultiple ? "Indices trouvés !" : "Indice trouvé !";
 
-  // Générer les particules une seule fois avec useMemo (plus nombreuses et plus grandes)
+  // Générer les particules une seule fois avec useMemo (effet confetti massif)
   const particles = useMemo<Particle[]>(() => {
-    return Array.from({ length: 60 }, (_, i) => {
-      const angle = (Math.PI * 2 * i) / 60 + Math.random() * 0.5;
-      const velocity = 200 + Math.random() * 300;
+    return Array.from({ length: 100 }, (_, i) => {
+      const angle = (Math.PI * 2 * i) / 100 + Math.random() * 0.8;
+      const velocity = 250 + Math.random() * 400;
       return {
         id: i,
         x: Math.cos(angle) * velocity,
-        y: Math.sin(angle) * velocity - 50,
+        y: Math.sin(angle) * velocity - 100 - Math.random() * 150, // Monte plus haut
         color: PLASTIC_COLORS[Math.floor(Math.random() * PLASTIC_COLORS.length)],
         shape: PLASTIC_SHAPES[Math.floor(Math.random() * PLASTIC_SHAPES.length)],
-        size: 12 + Math.random() * 24,
-        rotation: Math.random() * 720 - 360,
+        size: 15 + Math.random() * 30,
+        rotation: Math.random() * 1080 - 540, // Plus de rotation
         velocityX: Math.cos(angle) * velocity,
         velocityY: Math.sin(angle) * velocity,
         rotationSpeed: Math.random() * 360 - 180,
-        delay: Math.random() * 0.2,
+        delay: Math.random() * 0.15,
       };
     });
   }, []);
 
   useEffect(() => {
-    // Phase 1: La bouteille apparaît et reste visible 3 secondes
-    // Phase 2: Elle commence à trembler pendant 1 seconde
-    // Phase 3: Elle explose
+    // Phase 1: La bouteille apparaît et reste visible 3.5 secondes
+    // Phase 2: Elle commence à trembler pendant 0.5 seconde (tremblement intense)
+    // Phase 3: Elle explose à 4 secondes
 
     const shakeTimer = setTimeout(() => {
       setIsShaking(true);
-    }, 3000); // Commence à trembler après 3 secondes
+    }, 3500); // Commence à trembler après 3.5 secondes
 
     const explodeTimer = setTimeout(() => {
       setIsShaking(false);
       setIsExploding(true);
       setShowParticles(true);
-    }, 4000); // Explose après 4 secondes (3s d'affichage + 1s de tremblement)
+    }, 4000); // Explose à exactement 4 secondes
 
     return () => {
       clearTimeout(shakeTimer);
@@ -199,35 +200,42 @@ export default function SuccessFeedback({ clueNames }: SuccessFeedbackProps) {
       <style>{`
         @keyframes explode-particle {
           0% {
-            transform: translate(-50%, -50%) translate(0, 0) rotate(0deg) scale(1);
+            transform: translate(-50%, -50%) translate(0, 0) rotate(0deg) scale(1.5);
             opacity: 1;
           }
-          60% {
+          20% {
+            opacity: 1;
+            transform: translate(-50%, -50%) translate(calc(var(--particle-x) * 0.3), calc(var(--particle-y) * 0.3)) rotate(calc(var(--particle-rotation) * 0.3)) scale(1.2);
+          }
+          50% {
             opacity: 1;
           }
           100% {
-            transform: translate(-50%, -50%) translate(var(--particle-x), var(--particle-y)) rotate(var(--particle-rotation)) scale(0.2);
+            transform: translate(-50%, -50%) translate(var(--particle-x), calc(var(--particle-y) + 200px)) rotate(var(--particle-rotation)) scale(0.3);
             opacity: 0;
           }
         }
 
         @keyframes bottle-shake {
           0%, 100% { transform: translateX(0) rotate(0deg); }
-          10% { transform: translateX(-5px) rotate(-3deg); }
-          20% { transform: translateX(5px) rotate(3deg); }
-          30% { transform: translateX(-5px) rotate(-3deg); }
-          40% { transform: translateX(5px) rotate(3deg); }
-          50% { transform: translateX(-5px) rotate(-2deg); }
-          60% { transform: translateX(5px) rotate(2deg); }
-          70% { transform: translateX(-3px) rotate(-1deg); }
-          80% { transform: translateX(3px) rotate(1deg); }
-          90% { transform: translateX(-2px) rotate(-1deg); }
+          10% { transform: translateX(-8px) rotate(-5deg); }
+          20% { transform: translateX(8px) rotate(5deg); }
+          30% { transform: translateX(-8px) rotate(-5deg); }
+          40% { transform: translateX(8px) rotate(5deg); }
+          50% { transform: translateX(-6px) rotate(-4deg); }
+          60% { transform: translateX(6px) rotate(4deg); }
+          70% { transform: translateX(-6px) rotate(-3deg); }
+          80% { transform: translateX(6px) rotate(3deg); }
+          90% { transform: translateX(-4px) rotate(-2deg); }
         }
 
         @keyframes bottle-appear {
           0% {
-            transform: scale(0.5);
+            transform: scale(0.3);
             opacity: 0;
+          }
+          50% {
+            transform: scale(1.1);
           }
           100% {
             transform: scale(1);
