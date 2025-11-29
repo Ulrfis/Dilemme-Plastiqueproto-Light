@@ -49,11 +49,11 @@ export const tutorialSessions = pgTable("tutorial_sessions", {
   // Questionnaire responses - Text field
   improvements: text("improvements"),
 
-  // Questionnaire responses - Yes/No fields
-  wantsUpdates: boolean("wants_updates").default(false),
+  // Questionnaire responses - Yes/No fields (nullable until survey completed)
+  wantsUpdates: boolean("wants_updates"),
   updateEmail: text("update_email"),
-  wouldRecommend: boolean("would_recommend").default(false),
-  wantsInSchool: boolean("wants_in_school").default(false),
+  wouldRecommend: boolean("would_recommend"),
+  wantsInSchool: boolean("wants_in_school"),
 
   // Timestamp when questionnaire was completed
   feedbackCompletedAt: timestamp("feedback_completed_at"),

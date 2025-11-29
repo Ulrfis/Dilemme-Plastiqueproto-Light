@@ -87,7 +87,6 @@ async function getGoogleSheetsClient() {
   return google.sheets({ version: 'v4', auth: oauth2Client });
 }
 
-// Récupérer l'ID du spreadsheet depuis le connecteur Replit
 let cachedSpreadsheetId: string | null = null;
 
 async function getSpreadsheetId(): Promise<string> {
@@ -95,20 +94,17 @@ async function getSpreadsheetId(): Promise<string> {
     return cachedSpreadsheetId;
   }
 
-  // Essayer de récupérer l'ID depuis le connecteur
   if (connectionSettings?.settings?.spreadsheet_id) {
     cachedSpreadsheetId = connectionSettings.settings.spreadsheet_id;
     console.log('[GoogleSheets] ✅ Using spreadsheet ID from connector:', cachedSpreadsheetId);
     return cachedSpreadsheetId;
   }
 
-  // Fallback sur l'ID hardcodé
   cachedSpreadsheetId = '1CisRjSfqNpcZGwmklqdIRc93hbK4-Pyu_ysoaT2Dfb4';
   console.log('[GoogleSheets] Using hardcoded spreadsheet ID:', cachedSpreadsheetId);
   return cachedSpreadsheetId;
 }
 
-// Cache pour le nom de la feuille
 let cachedSheetName: string | null = null;
 
 async function getFirstSheetName(): Promise<string> {
@@ -122,7 +118,6 @@ async function getFirstSheetName(): Promise<string> {
 
     console.log('[GoogleSheets] Getting sheet names from spreadsheet:', spreadsheetId);
 
-    // Récupérer les métadonnées du spreadsheet pour obtenir le nom de la première feuille
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId: spreadsheetId,
       fields: 'sheets.properties.title',
@@ -145,38 +140,30 @@ async function getFirstSheetName(): Promise<string> {
   }
 }
 
-// Fonction de test pour diagnostiquer
 export async function testGoogleSheetsConnection(): Promise<{ success: boolean; message: string; details?: any }> {
   try {
     console.log('[GoogleSheets] === TEST CONNECTION START ===');
 
-    // 1. Obtenir le token
     const accessToken = await getAccessToken();
     console.log('[GoogleSheets] Step 1: Access token obtained');
 
-    // 2. Vérifier les settings du connecteur
     console.log('[GoogleSheets] Step 2: Connector settings:', JSON.stringify(connectionSettings?.settings || {}, null, 2));
 
-    // 3. Obtenir l'ID du spreadsheet
     const spreadsheetId = await getSpreadsheetId();
     console.log('[GoogleSheets] Step 3: Spreadsheet ID:', spreadsheetId);
 
-    // 4. Obtenir le client
     const sheets = await getGoogleSheetsClient();
     console.log('[GoogleSheets] Step 4: Sheets client created');
 
-    // 5. Lire les métadonnées du spreadsheet
     const metadata = await sheets.spreadsheets.get({
       spreadsheetId: spreadsheetId,
     });
     console.log('[GoogleSheets] Step 5: Spreadsheet title:', metadata.data.properties?.title);
     console.log('[GoogleSheets] Step 5: Sheets:', metadata.data.sheets?.map(s => s.properties?.title));
 
-    // 6. Obtenir le nom de la feuille
     const sheetName = await getFirstSheetName();
     console.log('[GoogleSheets] Step 6: Using sheet:', sheetName);
 
-    // 7. Essayer de lire la première cellule
     const testRead = await sheets.spreadsheets.values.get({
       spreadsheetId: spreadsheetId,
       range: `'${sheetName}'!A1`,
@@ -212,10 +199,64 @@ export async function testGoogleSheetsConnection(): Promise<{ success: boolean; 
   }
 }
 
+// Headers for unified session row (35 columns)
+const UNIFIED_HEADERS = [
+  // Session info (1-12)
+  'userName',           // A - Nom de l'utilisateur (clé principale)
+  'sessionId',          // B
+  'startedAt',          // C - Début de l'expérience
+  'completedAt',        // D - Fin de l'expérience (4 indices trouvés)
+  'feedbackCompletedAt', // E - Fin du questionnaire
+  'foundClues',         // F - Liste des indices trouvés
+  'clueCount',          // G - Nombre d'indices
+  'messageCount',       // H - Nombre de messages
+  'finalSynthesis',     // I - Phrase de synthèse
+  'upvotes',            // J - Votes
+  'audioMode',          // K - Mode audio (voice/text)
+  'score',              // L - Score
+  
+  // Questionnaire - Scénario (13-15)
+  'scenarioComprehension', // M
+  'scenarioObjectives',    // N
+  'scenarioClueLink',      // O
+  
+  // Questionnaire - Gameplay (16-18)
+  'gameplayExplanation',   // P
+  'gameplaySimplicity',    // Q
+  'gameplayBotResponses',  // R
+  
+  // Questionnaire - Feeling (19-21)
+  'feelingOriginality',    // S
+  'feelingPleasant',       // T
+  'feelingInteresting',    // U
+  
+  // Questionnaire - Motivation (22-24)
+  'motivationContinue',    // V
+  'motivationGameplay',    // W
+  'motivationEcology',     // X
+  
+  // Questionnaire - Interface (25-27)
+  'interfaceVisualBeauty', // Y
+  'interfaceVisualClarity', // Z
+  'interfaceVoiceChat',    // AA
+  
+  // Questionnaire - Note globale (28)
+  'overallRating',         // AB
+  
+  // Questionnaire - Texte (29)
+  'improvements',          // AC
+  
+  // Questionnaire - Oui/Non (30-33)
+  'wantsUpdates',          // AD
+  'updateEmail',           // AE
+  'wouldRecommend',        // AF
+  'wantsInSchool',         // AG
+];
+
 export class GoogleSheetsSync {
   private initialized = false;
 
-  async ensureHeaders(): Promise<void> {
+  async ensureUnifiedHeaders(): Promise<void> {
     if (this.initialized) return;
 
     try {
@@ -225,31 +266,21 @@ export class GoogleSheetsSync {
 
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: spreadsheetId,
-        range: `'${sheetName}'!A1:I1`,
+        range: `'${sheetName}'!A1:AG1`,
       });
 
       const existingHeaders = response.data.values?.[0];
 
-      if (!existingHeaders || existingHeaders.length === 0) {
+      if (!existingHeaders || existingHeaders.length === 0 || existingHeaders[0] !== 'userName') {
         await sheets.spreadsheets.values.update({
           spreadsheetId: spreadsheetId,
-          range: `'${sheetName}'!A1:I1`,
+          range: `'${sheetName}'!A1:AG1`,
           valueInputOption: 'USER_ENTERED',
           requestBody: {
-            values: [[
-              'timestamp',
-              'sessionId',
-              'userName',
-              'foundClues',
-              'clueCount',
-              'messageCount',
-              'finalSynthesis',
-              'upvotes',
-              'completedAt'
-            ]],
+            values: [UNIFIED_HEADERS],
           },
         });
-        console.log('[GoogleSheets] Headers created');
+        console.log('[GoogleSheets] ✅ Unified headers created (35 columns)');
       }
 
       this.initialized = true;
@@ -258,45 +289,70 @@ export class GoogleSheetsSync {
     }
   }
 
-  async appendSession(session: TutorialSession): Promise<void> {
-    try {
-      await this.ensureHeaders();
-
-      const sheets = await getGoogleSheetsClient();
-      const spreadsheetId = await getSpreadsheetId();
-      const sheetName = await getFirstSheetName();
-
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: spreadsheetId,
-        range: `'${sheetName}'!A:I`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-          values: [[
-            new Date().toISOString(),
-            session.id,
-            session.userName,
-            JSON.stringify(session.foundClues),
-            session.foundClues.length,
-            session.messageCount,
-            session.finalSynthesis || '',
-            session.upvotes,
-            session.completedAt?.toISOString() || '',
-          ]],
-        },
-      });
-
-      console.log('[GoogleSheets] ✅ Session appended:', session.id);
-    } catch (error) {
-      console.error('[GoogleSheets] ❌ Failed to append session:', error);
-    }
+  sessionToRowValues(session: TutorialSession): any[] {
+    return [
+      // Session info
+      session.userName,
+      session.id,
+      session.startedAt?.toISOString() || session.createdAt?.toISOString() || '',
+      session.completedAt?.toISOString() || '',
+      session.feedbackCompletedAt?.toISOString() || '',
+      JSON.stringify(session.foundClues || []),
+      (session.foundClues || []).length,
+      session.messageCount || 0,
+      session.finalSynthesis || '',
+      session.upvotes || 0,
+      session.audioMode || 'voice',
+      session.score || 0,
+      
+      // Questionnaire - Scénario
+      session.scenarioComprehension ?? '',
+      session.scenarioObjectives ?? '',
+      session.scenarioClueLink ?? '',
+      
+      // Questionnaire - Gameplay
+      session.gameplayExplanation ?? '',
+      session.gameplaySimplicity ?? '',
+      session.gameplayBotResponses ?? '',
+      
+      // Questionnaire - Feeling
+      session.feelingOriginality ?? '',
+      session.feelingPleasant ?? '',
+      session.feelingInteresting ?? '',
+      
+      // Questionnaire - Motivation
+      session.motivationContinue ?? '',
+      session.motivationGameplay ?? '',
+      session.motivationEcology ?? '',
+      
+      // Questionnaire - Interface
+      session.interfaceVisualBeauty ?? '',
+      session.interfaceVisualClarity ?? '',
+      session.interfaceVoiceChat ?? '',
+      
+      // Questionnaire - Note globale
+      session.overallRating ?? '',
+      
+      // Questionnaire - Texte
+      session.improvements || '',
+      
+      // Questionnaire - Oui/Non (only show value if feedbackCompletedAt is set)
+      session.feedbackCompletedAt ? (session.wantsUpdates ? 'Oui' : 'Non') : '',
+      session.updateEmail || '',
+      session.feedbackCompletedAt ? (session.wouldRecommend ? 'Oui' : 'Non') : '',
+      session.feedbackCompletedAt ? (session.wantsInSchool ? 'Oui' : 'Non') : '',
+    ];
   }
 
-  async updateSessionRow(sessionId: string, updates: Partial<TutorialSession>): Promise<void> {
+  async upsertSessionRow(session: TutorialSession): Promise<void> {
     try {
+      await this.ensureUnifiedHeaders();
+
       const sheets = await getGoogleSheetsClient();
       const spreadsheetId = await getSpreadsheetId();
       const sheetName = await getFirstSheetName();
 
+      // Find existing row by sessionId (column B)
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: spreadsheetId,
         range: `'${sheetName}'!B:B`,
@@ -306,132 +362,53 @@ export class GoogleSheetsSync {
       let rowIndex = -1;
 
       for (let i = 0; i < rows.length; i++) {
-        if (rows[i][0] === sessionId) {
+        if (rows[i][0] === session.id) {
           rowIndex = i + 1;
           break;
         }
       }
 
+      const rowValues = this.sessionToRowValues(session);
+
       if (rowIndex === -1) {
-        console.log('[GoogleSheets] Session not found, skipping update:', sessionId);
-        return;
+        // Insert new row
+        await sheets.spreadsheets.values.append({
+          spreadsheetId: spreadsheetId,
+          range: `'${sheetName}'!A:AG`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [rowValues],
+          },
+        });
+        console.log('[GoogleSheets] ✅ Session inserted:', session.id, 'userName:', session.userName);
+      } else {
+        // Update existing row
+        await sheets.spreadsheets.values.update({
+          spreadsheetId: spreadsheetId,
+          range: `'${sheetName}'!A${rowIndex}:AG${rowIndex}`,
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [rowValues],
+          },
+        });
+        console.log('[GoogleSheets] ✅ Session updated:', session.id, 'userName:', session.userName);
       }
-
-      const currentRow = await sheets.spreadsheets.values.get({
-        spreadsheetId: spreadsheetId,
-        range: `'${sheetName}'!A${rowIndex}:I${rowIndex}`,
-      });
-
-      const currentValues = currentRow.data.values?.[0] || [];
-
-      const updatedValues = [
-        currentValues[0] || new Date().toISOString(),
-        sessionId,
-        updates.userName ?? currentValues[2] ?? '',
-        updates.foundClues ? JSON.stringify(updates.foundClues) : currentValues[3] ?? '[]',
-        updates.foundClues ? updates.foundClues.length : currentValues[4] ?? 0,
-        updates.messageCount ?? currentValues[5] ?? 0,
-        updates.finalSynthesis ?? currentValues[6] ?? '',
-        updates.upvotes ?? currentValues[7] ?? 0,
-        updates.completedAt?.toISOString() ?? currentValues[8] ?? '',
-      ];
-
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: spreadsheetId,
-        range: `'${sheetName}'!A${rowIndex}:I${rowIndex}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: {
-          values: [updatedValues],
-        },
-      });
-
-      console.log('[GoogleSheets] ✅ Session updated:', sessionId);
     } catch (error) {
-      console.error('[GoogleSheets] ❌ Failed to update session:', error);
+      console.error('[GoogleSheets] ❌ Failed to upsert session:', error);
     }
   }
 
+  // Legacy methods for backward compatibility
+  async appendSession(session: TutorialSession): Promise<void> {
+    return this.upsertSessionRow(session);
+  }
+
+  async updateSessionRow(sessionId: string, updates: Partial<TutorialSession>): Promise<void> {
+    console.log('[GoogleSheets] updateSessionRow called - redirecting to upsertSessionRow');
+  }
+
   async appendFeedback(feedback: any): Promise<void> {
-    try {
-      const sheets = await getGoogleSheetsClient();
-      const spreadsheetId = await getSpreadsheetId();
-
-      // Use a dedicated sheet for feedback or create one
-      const sheetName = 'Feedback';
-
-      // Try to append to Feedback sheet, if it doesn't exist use first sheet
-      try {
-        await sheets.spreadsheets.values.append({
-          spreadsheetId: spreadsheetId,
-          range: `'${sheetName}'!A:Z`,
-          valueInputOption: 'USER_ENTERED',
-          requestBody: {
-            values: [[
-              new Date().toISOString(),
-              feedback.sessionId,
-              feedback.userName || '',
-              // Scénario
-              feedback.scenarioComprehension,
-              feedback.scenarioObjectives,
-              feedback.scenarioClueLink,
-              // Gameplay
-              feedback.gameplayExplanation,
-              feedback.gameplaySimplicity,
-              feedback.gameplayBotResponses,
-              // Feeling
-              feedback.feelingOriginality,
-              feedback.feelingPleasant,
-              feedback.feelingInteresting,
-              // Motivation
-              feedback.motivationContinue,
-              feedback.motivationGameplay,
-              feedback.motivationEcology,
-              // Interface
-              feedback.interfaceVisualBeauty,
-              feedback.interfaceVisualClarity,
-              feedback.interfaceVoiceChat,
-              // Note globale
-              feedback.overallRating,
-              // Text
-              feedback.improvements || '',
-              // Boolean fields
-              feedback.wantsUpdates ? 'Oui' : 'Non',
-              feedback.updateEmail || '',
-              feedback.wouldRecommend ? 'Oui' : 'Non',
-              feedback.wantsInSchool ? 'Oui' : 'Non',
-            ]],
-          },
-        });
-        console.log('[GoogleSheets] ✅ Feedback appended:', feedback.id);
-      } catch (sheetError: any) {
-        // If Feedback sheet doesn't exist, try the first sheet
-        console.log('[GoogleSheets] Feedback sheet not found, using first sheet');
-        const firstSheetName = await getFirstSheetName();
-        await sheets.spreadsheets.values.append({
-          spreadsheetId: spreadsheetId,
-          range: `'${firstSheetName}'!A:Z`,
-          valueInputOption: 'USER_ENTERED',
-          requestBody: {
-            values: [[
-              'FEEDBACK',
-              new Date().toISOString(),
-              feedback.sessionId,
-              feedback.userName || '',
-              `Scenario: ${feedback.scenarioComprehension}/${feedback.scenarioObjectives}/${feedback.scenarioClueLink}`,
-              `Gameplay: ${feedback.gameplayExplanation}/${feedback.gameplaySimplicity}/${feedback.gameplayBotResponses}`,
-              `Feeling: ${feedback.feelingOriginality}/${feedback.feelingPleasant}/${feedback.feelingInteresting}`,
-              `Motivation: ${feedback.motivationContinue}/${feedback.motivationGameplay}/${feedback.motivationEcology}`,
-              `Interface: ${feedback.interfaceVisualBeauty}/${feedback.interfaceVisualClarity}/${feedback.interfaceVoiceChat}`,
-              `Note: ${feedback.overallRating}`,
-              feedback.improvements || '',
-            ]],
-          },
-        });
-        console.log('[GoogleSheets] ✅ Feedback appended to first sheet:', feedback.id);
-      }
-    } catch (error) {
-      console.error('[GoogleSheets] ❌ Failed to append feedback:', error);
-    }
+    console.log('[GoogleSheets] appendFeedback called - feedback is now stored in session row');
   }
 }
 
