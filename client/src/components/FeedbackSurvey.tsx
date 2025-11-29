@@ -81,6 +81,17 @@ const QUESTIONS: Question[] = [
   { id: 'y3', category: 'Éducation', question: "Aimerais-tu que ce jeu soit utilisé à l'école ?", type: 'yesno', field: 'wantsInSchool' },
 ];
 
+// Group questions by category
+const CHAPTERS = QUESTIONS.reduce((acc, question) => {
+  if (!acc[question.category]) {
+    acc[question.category] = [];
+  }
+  acc[question.category].push(question);
+  return acc;
+}, {} as Record<string, Question[]>);
+
+const CHAPTER_NAMES = Object.keys(CHAPTERS);
+
 // Rating slider component
 function RatingSlider({ value, onChange }: { value: number | undefined; onChange: (v: number) => void }) {
   const labels = ['Pas du tout', '', '', '', '', 'Tout à fait'];
@@ -147,7 +158,7 @@ function YesNoButtons({ value, onChange }: { value: boolean | undefined; onChang
 }
 
 export default function FeedbackSurvey({ sessionId, userName, onClose, onComplete }: FeedbackSurveyProps) {
-  const [currentStep, setCurrentStep] = useState(0);
+  const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
   const [feedbackData, setFeedbackData] = useState<FeedbackData>({
     sessionId,
     userName,
@@ -155,9 +166,10 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
   const [email, setEmail] = useState('');
   const [showThankYou, setShowThankYou] = useState(false);
 
-  const totalSteps = QUESTIONS.length;
-  const progress = ((currentStep + 1) / totalSteps) * 100;
-  const currentQuestion = QUESTIONS[currentStep];
+  const totalChapters = CHAPTER_NAMES.length;
+  const progress = ((currentChapterIndex + 1) / totalChapters) * 100;
+  const currentChapter = CHAPTER_NAMES[currentChapterIndex];
+  const currentQuestions = CHAPTERS[currentChapter];
 
   const submitMutation = useMutation({
     mutationFn: async (data: FeedbackData) => {
@@ -177,8 +189,8 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
   };
 
   const handleNext = () => {
-    if (currentStep < totalSteps - 1) {
-      setCurrentStep(prev => prev + 1);
+    if (currentChapterIndex < totalChapters - 1) {
+      setCurrentChapterIndex(prev => prev + 1);
     } else {
       // Submit
       const finalData = { ...feedbackData };
@@ -190,18 +202,21 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
   };
 
   const handlePrev = () => {
-    if (currentStep > 0) {
-      setCurrentStep(prev => prev - 1);
+    if (currentChapterIndex > 0) {
+      setCurrentChapterIndex(prev => prev - 1);
     }
   };
 
   const canProceed = () => {
-    const value = feedbackData[currentQuestion.field];
-    if (currentQuestion.type === 'text') return true; // Optional
-    if (currentQuestion.type === 'yesno' || currentQuestion.type === 'yesno-email' || currentQuestion.type === 'yesno-share') {
+    // Check if all questions in the current chapter are answered
+    return currentQuestions.every(question => {
+      const value = feedbackData[question.field];
+      if (question.type === 'text') return true; // Optional
+      if (question.type === 'yesno' || question.type === 'yesno-email' || question.type === 'yesno-share') {
+        return value !== undefined;
+      }
       return value !== undefined;
-    }
-    return value !== undefined;
+    });
   };
 
   const handleShare = () => {
@@ -231,12 +246,12 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
     <div className="fixed inset-0 bg-background z-50 flex flex-col">
       {/* Header with progress */}
       <div className="sticky top-0 bg-background border-b p-4">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-3xl mx-auto">
           <div className="flex items-center justify-between mb-2">
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
               <X className="w-6 h-6" />
             </button>
-            <span className="text-sm text-muted-foreground">{currentStep + 1} / {totalSteps}</span>
+            <span className="text-sm text-muted-foreground">{currentChapterIndex + 1} / {totalChapters}</span>
           </div>
           <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
             <div
@@ -248,66 +263,75 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
       </div>
 
       {/* Question content */}
-      <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">
-        <div className="w-full max-w-lg text-center animate-in fade-in slide-in-from-right-4 duration-300" key={currentStep}>
-          <p className="text-sm font-medium text-primary mb-2">{currentQuestion.category}</p>
-          <h2 className="text-xl md:text-2xl font-bold mb-8">{currentQuestion.question}</h2>
+      <div className="flex-1 p-6 overflow-y-auto">
+        <div className="w-full max-w-3xl mx-auto animate-in fade-in slide-in-from-right-4 duration-300" key={currentChapterIndex}>
+          {/* Chapter title */}
+          <h1 className="text-3xl md:text-4xl font-bold mb-8 text-center">{currentChapter}</h1>
 
-          {currentQuestion.type === 'rating' && (
-            <RatingSlider
-              value={feedbackData[currentQuestion.field] as number | undefined}
-              onChange={(v) => updateField(currentQuestion.field, v)}
-            />
-          )}
+          {/* Questions in this chapter */}
+          <div className="space-y-8">
+            {currentQuestions.map((question) => (
+              <div key={question.id} className="bg-card border rounded-xl p-6 shadow-sm">
+                <h2 className="text-lg md:text-xl font-semibold mb-6 text-left">{question.question}</h2>
 
-          {currentQuestion.type === 'text' && (
-            <Textarea
-              placeholder="Partage tes idées... (optionnel)"
-              className="min-h-32 text-base"
-              value={(feedbackData[currentQuestion.field] as string) || ''}
-              onChange={(e) => updateField(currentQuestion.field, e.target.value)}
-            />
-          )}
-
-          {(currentQuestion.type === 'yesno' || currentQuestion.type === 'yesno-email' || currentQuestion.type === 'yesno-share') && (
-            <div className="space-y-4">
-              <YesNoButtons
-                value={feedbackData[currentQuestion.field] as boolean | undefined}
-                onChange={(v) => updateField(currentQuestion.field, v)}
-              />
-
-              {currentQuestion.type === 'yesno-email' && feedbackData.wantsUpdates === true && (
-                <div className="mt-6 animate-in fade-in slide-in-from-bottom-2">
-                  <Input
-                    type="email"
-                    placeholder="Ton email..."
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="text-center text-base"
+                {question.type === 'rating' && (
+                  <RatingSlider
+                    value={feedbackData[question.field] as number | undefined}
+                    onChange={(v) => updateField(question.field, v)}
                   />
-                </div>
-              )}
+                )}
 
-              {currentQuestion.type === 'yesno-share' && feedbackData.wouldRecommend === true && (
-                <div className="mt-6 animate-in fade-in slide-in-from-bottom-2">
-                  <Button onClick={handleShare} variant="outline" className="gap-2">
-                    <Share2 className="w-4 h-4" /> Partager le jeu
-                    <ExternalLink className="w-3 h-3" />
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
+                {question.type === 'text' && (
+                  <Textarea
+                    placeholder="Partage tes idées... (optionnel)"
+                    className="min-h-32 text-base"
+                    value={(feedbackData[question.field] as string) || ''}
+                    onChange={(e) => updateField(question.field, e.target.value)}
+                  />
+                )}
+
+                {(question.type === 'yesno' || question.type === 'yesno-email' || question.type === 'yesno-share') && (
+                  <div className="space-y-4">
+                    <YesNoButtons
+                      value={feedbackData[question.field] as boolean | undefined}
+                      onChange={(v) => updateField(question.field, v)}
+                    />
+
+                    {question.type === 'yesno-email' && feedbackData.wantsUpdates === true && (
+                      <div className="mt-6 animate-in fade-in slide-in-from-bottom-2">
+                        <Input
+                          type="email"
+                          placeholder="Ton email..."
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="text-center text-base"
+                        />
+                      </div>
+                    )}
+
+                    {question.type === 'yesno-share' && feedbackData.wouldRecommend === true && (
+                      <div className="mt-6 animate-in fade-in slide-in-from-bottom-2">
+                        <Button onClick={handleShare} variant="outline" className="gap-2">
+                          <Share2 className="w-4 h-4" /> Partager le jeu
+                          <ExternalLink className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Navigation */}
       <div className="sticky bottom-0 bg-background border-t p-4">
-        <div className="max-w-2xl mx-auto flex justify-between">
+        <div className="max-w-3xl mx-auto flex justify-between">
           <Button
             variant="ghost"
             onClick={handlePrev}
-            disabled={currentStep === 0}
+            disabled={currentChapterIndex === 0}
           >
             <ChevronLeft className="w-4 h-4 mr-1" /> Précédent
           </Button>
@@ -315,7 +339,7 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
             onClick={handleNext}
             disabled={!canProceed() || submitMutation.isPending}
           >
-            {currentStep === totalSteps - 1 ? (
+            {currentChapterIndex === totalChapters - 1 ? (
               submitMutation.isPending ? 'Envoi...' : 'Terminer'
             ) : (
               <>Suivant <ChevronRight className="w-4 h-4 ml-1" /></>
