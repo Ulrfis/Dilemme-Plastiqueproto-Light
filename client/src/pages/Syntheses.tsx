@@ -148,25 +148,6 @@ function SynthesesSkeleton() {
   );
 }
 
-// Plastic-style feedback button
-function PlasticFeedbackButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="w-full py-4 px-6 rounded-2xl text-white font-bold text-lg shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
-      style={{
-        background: 'linear-gradient(135deg, #29B6F6 0%, #0288D1 50%, #01579B 100%)',
-        boxShadow: '0 4px 15px rgba(2, 136, 209, 0.4), inset 0 1px 0 rgba(255,255,255,0.3)',
-        border: '2px solid #0277BD',
-      }}
-      data-testid="button-feedback"
-    >
-      <MessageCircle className="w-6 h-6" />
-      Donner votre avis sur l'expérience !
-    </button>
-  );
-}
-
 export default function Syntheses() {
   const [sortBy, setSortBy] = useState<SortOption>('recent');
   const [upvotingId, setUpvotingId] = useState<string | null>(null);
@@ -207,6 +188,31 @@ export default function Syntheses() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6">
+        {/* Feedback button at the top */}
+        {!feedbackCompleted && (
+          <div className="mb-6">
+            <button
+              onClick={() => setShowFeedback(true)}
+              className="w-full py-4 px-6 rounded-2xl text-white font-bold text-lg shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
+              style={{
+                background: 'linear-gradient(135deg, #29B6F6 0%, #0288D1 50%, #01579B 100%)',
+                boxShadow: '0 4px 15px rgba(2, 136, 209, 0.4), inset 0 1px 0 rgba(255,255,255,0.3)',
+                border: '2px solid #0277BD',
+              }}
+              data-testid="button-feedback-top"
+            >
+              <MessageCircle className="w-6 h-6" />
+              Donne ton avis sur l'expérience
+            </button>
+          </div>
+        )}
+
+        {feedbackCompleted && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl text-center">
+            <p className="text-green-700 font-medium">✅ Merci pour ton avis !</p>
+          </div>
+        )}
+
         <div className="flex items-center gap-2 mb-6">
           <Button
             variant={sortBy === 'recent' ? 'default' : 'outline'}
@@ -270,19 +276,6 @@ export default function Syntheses() {
                 upvoting={upvotingId === session.id}
               />
             ))}
-          </div>
-        )}
-
-        {/* Feedback button - always visible at bottom */}
-        {!feedbackCompleted && (
-          <div className="mt-8 mb-4">
-            <PlasticFeedbackButton onClick={() => setShowFeedback(true)} />
-          </div>
-        )}
-
-        {feedbackCompleted && (
-          <div className="mt-8 mb-4 p-4 bg-green-50 border border-green-200 rounded-xl text-center">
-            <p className="text-green-700 font-medium">✅ Merci pour ton avis !</p>
           </div>
         )}
       </main>
