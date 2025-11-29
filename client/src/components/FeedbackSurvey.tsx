@@ -71,26 +71,32 @@ const QUESTIONS: Question[] = [
   { id: 'i1', category: 'Interface', question: "Le contenu visuel est joli.", type: 'rating', field: 'interfaceVisualBeauty' },
   { id: 'i2', category: 'Interface', question: "Le contenu visuel est clair.", type: 'rating', field: 'interfaceVisualClarity' },
   { id: 'i3', category: 'Interface', question: "La discussion vocale est agréable.", type: 'rating', field: 'interfaceVoiceChat' },
-  // Note globale
-  { id: 'o1', category: 'Note globale', question: "Quelle note donnerais-tu à ce tutoriel ?", type: 'rating', field: 'overallRating' },
-  // Text
-  { id: 't1', category: 'Améliorations', question: "Quelles améliorations verrais-tu ?", type: 'text', field: 'improvements' },
-  // Yes/No
-  { id: 'y1', category: 'Contact', question: "Veux-tu être au courant lors de la sortie du jeu ?", type: 'yesno-email', field: 'wantsUpdates' },
-  { id: 'y2', category: 'Recommandation', question: "Recommanderais-tu ce jeu à un ami ?", type: 'yesno-share', field: 'wouldRecommend' },
-  { id: 'y3', category: 'Éducation', question: "Aimerais-tu que ce jeu soit utilisé à l'école ?", type: 'yesno', field: 'wantsInSchool' },
+  // Bilan et perspectives
+  { id: 'o1', category: "Bilan et perspectives", question: "Quelle note donnerais-tu à ce tutoriel ?", type: 'rating', field: 'overallRating' },
+  { id: 't1', category: "Bilan et perspectives", question: "Quelles améliorations verrais-tu ?", type: 'text', field: 'improvements' },
+  { id: 'y2', category: "Bilan et perspectives", question: "Recommanderais-tu ce jeu à un ami ?", type: 'yesno-share', field: 'wouldRecommend' },
+  { id: 'y3', category: 'Bilan et perspectives', question: "Aimerais-tu que ce jeu soit utilisé à l'école ?", type: 'yesno', field: 'wantsInSchool' },
+  { id: 'y1', category: 'Bilan et perspectives', question: "Veux-tu être au courant lors de la sortie du jeu ?", type: 'yesno-email', field: 'wantsUpdates' },
 ];
 
-// Group questions by category
-const CHAPTERS = QUESTIONS.reduce((acc, question) => {
-  if (!acc[question.category]) {
-    acc[question.category] = [];
-  }
-  acc[question.category].push(question);
-  return acc;
-}, {} as Record<string, Question[]>);
+// Group questions by category while preserving order
+interface Chapter {
+  name: string;
+  questions: Question[];
+}
 
-const CHAPTER_NAMES = Object.keys(CHAPTERS);
+const CHAPTERS: Chapter[] = [];
+const seenCategories = new Set<string>();
+
+for (const question of QUESTIONS) {
+  if (!seenCategories.has(question.category)) {
+    seenCategories.add(question.category);
+    CHAPTERS.push({
+      name: question.category,
+      questions: QUESTIONS.filter(q => q.category === question.category),
+    });
+  }
+}
 
 // Rating slider component
 function RatingSlider({ value, onChange }: { value: number | undefined; onChange: (v: number) => void }) {
@@ -166,10 +172,10 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
   const [email, setEmail] = useState('');
   const [showThankYou, setShowThankYou] = useState(false);
 
-  const totalChapters = CHAPTER_NAMES.length;
+  const totalChapters = CHAPTERS.length;
   const progress = ((currentChapterIndex + 1) / totalChapters) * 100;
-  const currentChapter = CHAPTER_NAMES[currentChapterIndex];
-  const currentQuestions = CHAPTERS[currentChapter];
+  const currentChapter = CHAPTERS[currentChapterIndex];
+  const currentQuestions = currentChapter.questions;
 
   const submitMutation = useMutation({
     mutationFn: async (data: FeedbackData) => {
@@ -197,6 +203,7 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
       if (feedbackData.wantsUpdates && email) {
         finalData.updateEmail = email;
       }
+      console.log('[FeedbackSurvey] Submitting feedback data:', finalData);
       submitMutation.mutate(finalData);
     }
   };
@@ -266,7 +273,7 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
       <div className="flex-1 p-6 overflow-y-auto">
         <div className="w-full max-w-3xl mx-auto animate-in fade-in slide-in-from-right-4 duration-300" key={currentChapterIndex}>
           {/* Chapter title */}
-          <h1 className="text-3xl md:text-4xl font-bold mb-8 text-center">{currentChapter}</h1>
+          <h1 className="text-3xl md:text-4xl font-bold mb-8 text-center">{currentChapter.name}</h1>
 
           {/* Questions in this chapter */}
           <div className="space-y-8">
