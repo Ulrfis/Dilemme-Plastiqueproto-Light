@@ -6,6 +6,26 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.3.1] - 2025-11-29
+
+### Modifié - Organisation du Repository
+
+- **Restructuration de la documentation** (commit [WIP])
+  - Déplacement de tous les fichiers de documentation vers le dossier `Documentation/`
+  - Fichiers déplacés :
+    - `ARCHITECTURE.md` → `Documentation/ARCHITECTURE.md`
+    - `PHASE1_OPTIMIZATIONS.md` → `Documentation/PHASE1_OPTIMIZATIONS.md`
+    - `PHASE2_OPTIMIZATIONS.md` → `Documentation/PHASE2_OPTIMIZATIONS.md`
+    - `TESTING.md` → `Documentation/TESTING.md`
+    - `SETUP.md` → `Documentation/SETUP.md`
+    - `design_guidelines.md` → `Documentation/design_guidelines.md`
+    - `replit.md` → `Documentation/replit.md`
+    - `attached_assets/Prototype-Dilemme-Light_PRD_1762430698665.md` → `Documentation/Prototype-Dilemme-Light_PRD_1762430698665.md`
+  - Mise à jour de tous les liens dans le README
+  - Structure du projet plus claire et organisée
+
+---
+
 ## [1.3.0] - 2025-11-28
 
 ### Ajouté - Persistance Base de Données PostgreSQL
@@ -254,4 +274,4 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 - Tous les commits "Published your App" sont des déploiements automatiques
 - Les dates sont au format UTC (temps universel)
-- Version actuelle : 1.3.0
+- Version actuelle : 1.3.1

@@ -2,7 +2,7 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.3.1-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
@@ -12,7 +12,17 @@
 
 ---
 
-## 🚀 Dernières Améliorations (v1.3.0 - November 28)
+## 🆕 Version Actuelle (v1.3.1 - November 29)
+
+### 📁 Organisation du Repository
+
+- **Restructuration de la documentation** : Tous les fichiers de documentation ont été déplacés dans le dossier `Documentation/`
+- **Structure claire** : Séparation entre documentation et code source
+- **Liens mis à jour** : README et structure de projet reflètent la nouvelle organisation
+
+---
+
+## 🚀 Améliorations Précédentes (v1.3.0 - November 28)
 
 ### 💾 Persistance Base de Données PostgreSQL
 
@@ -203,9 +213,9 @@ Audio starts at ~3.3s (vs 7s before!)
 **Architecture Legacy:**
 **1. Enregistrement Audio** → **2. Transcription (Whisper)** → **3. Analyse IA (GPT)** → **4. Synthèse Vocale (ElevenLabs)** → **5. Lecture Audio**
 
-📖 **Documentation complète** : [ARCHITECTURE.md](./ARCHITECTURE.md)
-📊 **Détails Phase 1** : [PHASE1_OPTIMIZATIONS.md](./PHASE1_OPTIMIZATIONS.md)
-🔥 **Détails Phase 2** : [PHASE2_OPTIMIZATIONS.md](./PHASE2_OPTIMIZATIONS.md)
+📖 **Documentation complète** : [ARCHITECTURE.md](./Documentation/ARCHITECTURE.md)
+📊 **Détails Phase 1** : [PHASE1_OPTIMIZATIONS.md](./Documentation/PHASE1_OPTIMIZATIONS.md)
+🔥 **Détails Phase 2** : [PHASE2_OPTIMIZATIONS.md](./Documentation/PHASE2_OPTIMIZATIONS.md)
 
 ---
 
@@ -417,21 +427,32 @@ Dilemme-Plastiqueproto-Light/
 │   └── schema.ts                    # Schémas Drizzle + Zod
 │
 ├── attached_assets/                 # Assets du projet
-│   ├── Prototype-Dilemme-Light_PRD_1762430698665.md  # PRD
 │   └── generated_images/            # Images générées
 │       ├── Peter_AI_mascot_character_ddfcb150.png
 │       ├── Dilemme_app_logo_f1e850c1.png
 │       └── ...
 │
-├── ARCHITECTURE.md                  # Documentation architecture détaillée
+├── Documentation/                   # Documentation du projet
+│   ├── ARCHITECTURE.md              # Documentation architecture détaillée
+│   ├── PHASE1_OPTIMIZATIONS.md      # Optimisations Phase 1
+│   ├── PHASE2_OPTIMIZATIONS.md      # Optimisations Phase 2
+│   ├── TESTING.md                   # Guide de test
+│   ├── SETUP.md                     # Guide d'installation
+│   ├── design_guidelines.md         # Guidelines design
+│   ├── replit.md                    # Documentation Replit
+│   ├── Prototype-Dilemme-Light_PRD_1762430698665.md  # PRD
+│   ├── FIX_QUESTIONNAIRE_STORAGE.md
+│   ├── PLAN_DATABASE_GOOGLE_SHEETS.md
+│   ├── DEBUG_PETER_CONVERSATION.md
+│   └── UNIFIED_SESSION_STRUCTURE.md
+│
 ├── CHANGELOG.md                     # Historique des modifications
 ├── README.md                        # Ce fichier
 ├── package.json                     # Dépendances & scripts
 ├── tsconfig.json                    # Config TypeScript
 ├── vite.config.ts                   # Config Vite
 ├── tailwind.config.ts               # Config Tailwind
-├── drizzle.config.ts                # Config Drizzle ORM
-└── design_guidelines.md             # Guidelines design
+└── drizzle.config.ts                # Config Drizzle ORM
 ```
 
 ---
@@ -809,9 +830,9 @@ Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
 
 ## 📞 Contact & Support
 
-- **Documentation complète** : [ARCHITECTURE.md](./ARCHITECTURE.md)
+- **Documentation complète** : [ARCHITECTURE.md](./Documentation/ARCHITECTURE.md)
 - **Historique des changements** : [CHANGELOG.md](./CHANGELOG.md)
-- **Product Requirements** : [attached_assets/Prototype-Dilemme-Light_PRD_1762430698665.md](./attached_assets/Prototype-Dilemme-Light_PRD_1762430698665.md)
+- **Product Requirements** : [Prototype-Dilemme-Light_PRD.md](./Documentation/Prototype-Dilemme-Light_PRD_1762430698665.md)
 - **Issues** : [GitHub Issues](https://github.com/Ulrfis/Dilemme-Plastiqueproto-Light/issues)
 
 ---
