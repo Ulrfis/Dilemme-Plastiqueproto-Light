@@ -4,10 +4,11 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, XCircle, Trophy, RotateCcw, Send, Users, Mic, Square, Loader2 } from "lucide-react";
+import { CheckCircle2, XCircle, Trophy, RotateCcw, Send, Users, Mic, Square, Loader2, MessageCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import type { TutorialSession } from "@shared/schema";
+import FeedbackSurvey from "@/components/FeedbackSurvey";
 
 interface ScoreScreenProps {
   score: number;
@@ -33,6 +34,8 @@ export default function ScoreScreen({
   const [hasSaved, setHasSaved] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackCompleted, setFeedbackCompleted] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const { toast } = useToast();
@@ -361,16 +364,26 @@ export default function ScoreScreen({
         )}
 
         <div className="space-y-3 pt-2">
-          <Button
-            onClick={onReplay}
-            variant="outline"
-            className="w-full rounded-2xl text-base py-6"
-            data-testid="button-replay"
-          >
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Rejouer le tutoriel
-          </Button>
-          
+          {!feedbackCompleted ? (
+            <button
+              onClick={() => setShowFeedback(true)}
+              className="w-full py-6 px-6 rounded-2xl text-white font-bold text-lg shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-3"
+              style={{
+                background: 'linear-gradient(135deg, #29B6F6 0%, #0288D1 50%, #01579B 100%)',
+                boxShadow: '0 4px 15px rgba(2, 136, 209, 0.4), inset 0 1px 0 rgba(255,255,255,0.3)',
+                border: '2px solid #0277BD',
+              }}
+              data-testid="button-feedback"
+            >
+              <MessageCircle className="w-6 h-6" />
+              Ton avis sur l'expérience
+            </button>
+          ) : (
+            <div className="p-4 bg-green-50 border border-green-200 rounded-xl text-center">
+              <p className="text-green-700 font-medium">✅ Merci pour ton avis !</p>
+            </div>
+          )}
+
           <Link href="/syntheses" className="block">
             <Button
               variant="ghost"
@@ -381,18 +394,21 @@ export default function ScoreScreen({
               Découvrir les synthèses des autres
             </Button>
           </Link>
-          
-          {onNextLevel && (
-            <Button
-              onClick={onNextLevel}
-              className="w-full rounded-2xl text-base py-6"
-              data-testid="button-next-level"
-            >
-              Niveau 1 - Pollution dans la mer
-            </Button>
-          )}
         </div>
       </div>
+
+      {/* Feedback survey modal */}
+      {showFeedback && (
+        <FeedbackSurvey
+          sessionId={sessionId}
+          userName={userName}
+          onClose={() => setShowFeedback(false)}
+          onComplete={() => {
+            setShowFeedback(false);
+            setFeedbackCompleted(true);
+          }}
+        />
+      )}
     </div>
   );
 }
