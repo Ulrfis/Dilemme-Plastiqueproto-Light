@@ -7,7 +7,8 @@ import {
   type ConversationMessage,
   type InsertConversationMessage,
   type FeedbackSurvey,
-  type InsertFeedbackSurvey
+  type InsertFeedbackSurvey,
+  type FeedbackData
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, sql } from "drizzle-orm";
@@ -22,6 +23,7 @@ export interface IStorage {
   getCompletedSessions(options: { sort: 'recent' | 'upvotes', limit: number }): Promise<TutorialSession[]>;
   incrementUpvote(id: string): Promise<TutorialSession | undefined>;
   incrementMessageCount(sessionId: string): Promise<void>;
+  saveFeedbackToSession(sessionId: string, feedback: FeedbackData): Promise<TutorialSession | undefined>;
   createFeedback(feedback: InsertFeedbackSurvey): Promise<FeedbackSurvey>;
   getFeedbackBySession(sessionId: string): Promise<FeedbackSurvey | undefined>;
 }
@@ -33,7 +35,7 @@ export class DatabaseStorage implements IStorage {
       .values(insertSession)
       .returning();
 
-    googleSheetsSync.appendSession(session).catch(console.error);
+    googleSheetsSync.upsertSessionRow(session).catch(console.error);
 
     return session;
   }
@@ -71,7 +73,7 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     if (session) {
-      googleSheetsSync.updateSessionRow(id, updates).catch(console.error);
+      googleSheetsSync.upsertSessionRow(session).catch(console.error);
     }
 
     return session || undefined;
@@ -117,7 +119,7 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     if (session) {
-      googleSheetsSync.updateSessionRow(id, { upvotes: session.upvotes }).catch(console.error);
+      googleSheetsSync.upsertSessionRow(session).catch(console.error);
     }
 
     return session || undefined;
@@ -133,8 +135,45 @@ export class DatabaseStorage implements IStorage {
       .returning();
 
     if (session) {
-      googleSheetsSync.updateSessionRow(sessionId, { messageCount: session.messageCount }).catch(console.error);
+      googleSheetsSync.upsertSessionRow(session).catch(console.error);
     }
+  }
+
+  async saveFeedbackToSession(sessionId: string, feedback: FeedbackData): Promise<TutorialSession | undefined> {
+    const [session] = await db
+      .update(tutorialSessions)
+      .set({
+        scenarioComprehension: feedback.scenarioComprehension,
+        scenarioObjectives: feedback.scenarioObjectives,
+        scenarioClueLink: feedback.scenarioClueLink,
+        gameplayExplanation: feedback.gameplayExplanation,
+        gameplaySimplicity: feedback.gameplaySimplicity,
+        gameplayBotResponses: feedback.gameplayBotResponses,
+        feelingOriginality: feedback.feelingOriginality,
+        feelingPleasant: feedback.feelingPleasant,
+        feelingInteresting: feedback.feelingInteresting,
+        motivationContinue: feedback.motivationContinue,
+        motivationGameplay: feedback.motivationGameplay,
+        motivationEcology: feedback.motivationEcology,
+        interfaceVisualBeauty: feedback.interfaceVisualBeauty,
+        interfaceVisualClarity: feedback.interfaceVisualClarity,
+        interfaceVoiceChat: feedback.interfaceVoiceChat,
+        overallRating: feedback.overallRating,
+        improvements: feedback.improvements,
+        wantsUpdates: feedback.wantsUpdates,
+        updateEmail: feedback.updateEmail,
+        wouldRecommend: feedback.wouldRecommend,
+        wantsInSchool: feedback.wantsInSchool,
+        feedbackCompletedAt: new Date(),
+      })
+      .where(eq(tutorialSessions.id, sessionId))
+      .returning();
+
+    if (session) {
+      googleSheetsSync.upsertSessionRow(session).catch(console.error);
+    }
+
+    return session || undefined;
   }
 
   async createFeedback(insertFeedback: InsertFeedbackSurvey): Promise<FeedbackSurvey> {
@@ -143,8 +182,9 @@ export class DatabaseStorage implements IStorage {
       .values(insertFeedback)
       .returning();
 
-    // Sync to Google Sheets
-    googleSheetsSync.appendFeedback(feedback).catch(console.error);
+    if (insertFeedback.sessionId) {
+      this.saveFeedbackToSession(insertFeedback.sessionId, insertFeedback as FeedbackData).catch(console.error);
+    }
 
     return feedback;
   }
