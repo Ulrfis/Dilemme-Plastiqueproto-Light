@@ -35,10 +35,12 @@ async function validateAssistant() {
 validateAssistant();
 
 const TARGET_CLUES = [
-  { keyword: "ADN", variants: ["adn", "acide désoxyribonucléique", "génétique", "double hélice"] },
-  { keyword: "bébé", variants: ["bébé", "bebe", "nourrisson", "enfant", "nouveau-né"] },
-  { keyword: "penseur de Rodin", variants: ["penseur", "rodin", "sculpture", "statue penseur"] },
-  { keyword: "plastique", variants: ["plastique", "pollution plastique", "déchets plastiques", "pollution"] }
+  { keyword: "Déchets plastiques", variants: ["déchets plastiques", "dechets plastiques", "plastique", "pollution plastique", "déchets", "ordures plastiques"] },
+  { keyword: "ADN", variants: ["adn", "acide désoxyribonucléique", "génétique", "double hélice", "hélice adn"] },
+  { keyword: "Traité plastique", variants: ["traité plastique", "traite plastique", "traité", "accord plastique", "convention plastique"] },
+  { keyword: "Algues", variants: ["algues", "algue", "végétation marine", "plantes marines", "végétaux marins"] },
+  { keyword: "Homme", variants: ["homme", "penseur", "rodin", "sculpture homme", "figure masculine", "personnage masculin"] },
+  { keyword: "Femme", variants: ["femme", "figure féminine", "personnage féminin", "sculpture femme", "mère", "terre-mère"] }
 ];
 
 function detectClues(text: string, alreadyFound: string[]): string[] {

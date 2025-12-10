@@ -31,7 +31,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [messages, setMessages] = useState<Message[]>([]);
   const [textInput, setTextInput] = useState('');
   const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 4 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé.`);
+  const [exchangeCount, setExchangeCount] = useState(0);
+  const [conversationEnded, setConversationEnded] = useState(false);
+  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé.`);
+  
+  const MAX_EXCHANGES = 8;
+  const TOTAL_CLUES = 6;
 
   // Ref pour s'assurer que le message de bienvenue ne joue qu'une seule fois
   const hasPlayedWelcome = useRef(false);
@@ -277,14 +282,28 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       return;
     }
 
+    // Vérifier si la conversation est terminée
+    if (conversationEnded) {
+      toast({
+        title: "Conversation terminée",
+        description: "Cliquez sur 'Poursuivre' pour continuer.",
+        variant: "default",
+      });
+      return;
+    }
+
     try {
+      // Incrémenter le compteur d'échanges
+      const newExchangeCount = exchangeCount + 1;
+      setExchangeCount(newExchangeCount);
+      
       // Ajouter le message utilisateur
       setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
 
       // PHASE 2 OPTIMIZATION: Use streaming pipeline for better latency
       if (useStreaming.current) {
         console.log('[TutorialScreen] Using STREAMING pipeline');
-        await processMessageStreaming(userMessage);
+        await processMessageStreaming(userMessage, newExchangeCount);
       } else {
         console.log('[TutorialScreen] Using NON-STREAMING pipeline (legacy)');
         await processMessageNonStreaming(userMessage);
@@ -316,8 +335,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   };
 
   // PHASE 2 OPTIMIZATION: Streaming message processing
-  const processMessageStreaming = async (userMessage: string) => {
-    console.log('[TutorialScreen] Processing message with streaming');
+  const processMessageStreaming = async (userMessage: string, currentExchange: number) => {
+    console.log('[TutorialScreen] Processing message with streaming, exchange:', currentExchange);
     let fullResponse = '';
     const sentencesReceived: string[] = [];
 
@@ -400,6 +419,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             setNewClues(detectedNewClues);
             setShowSuccess(true);
             setTimeout(() => setShowSuccess(false), 3000);
+          }
+          
+          // Vérifier si tous les indices sont trouvés ou si on a atteint la limite
+          const allCluesFound = newFoundClues.length >= TOTAL_CLUES;
+          const maxExchangesReached = currentExchange >= MAX_EXCHANGES;
+          
+          if (allCluesFound || maxExchangesReached) {
+            console.log('[TutorialScreen] Conversation ending:', { allCluesFound, maxExchangesReached, currentExchange });
+            setConversationEnded(true);
           }
         },
 
@@ -521,14 +549,23 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       <div className="flex flex-col h-full lg:hidden">
         {/* Header fixe en haut avec compteur */}
         <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between">
-          <Badge
-            variant="secondary"
-            className="text-sm sm:text-base px-2 sm:px-3 py-1 sm:py-1.5 rounded-full"
-            data-testid="badge-clue-counter"
-          >
-            <span className="font-bold text-primary">{foundClues.length}</span>
-            <span className="text-muted-foreground">/4 indices</span>
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge
+              variant="secondary"
+              className="text-sm sm:text-base px-2 sm:px-3 py-1 sm:py-1.5 rounded-full"
+              data-testid="badge-clue-counter"
+            >
+              <span className="font-bold text-primary">{foundClues.length}</span>
+              <span className="text-muted-foreground">/{TOTAL_CLUES} indices</span>
+            </Badge>
+            <Badge
+              variant="outline"
+              className="text-xs px-2 py-1 rounded-full"
+              data-testid="badge-exchange-counter"
+            >
+              <span className="text-muted-foreground">{exchangeCount}/{MAX_EXCHANGES}</span>
+            </Badge>
+          </div>
 
           <Button
             size="icon"
@@ -544,7 +581,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         {showHelp && (
           <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-3 sm:px-4 py-2 sm:py-3 animate-slide-up border-b border-card-border z-20">
             <p className="text-xs sm:text-sm">
-              Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
+              Analysez l'image et parlez pour découvrir les {TOTAL_CLUES} indices cachés. Peter vous guidera!
             </p>
           </div>
         )}
@@ -559,10 +596,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
         {/* Zone fixe pour les indices trouvés - toujours présente */}
         <div className="px-3 sm:px-4 py-2 bg-background border-b border-card-border flex-shrink-0 min-h-[50px] sm:min-h-[60px] flex items-center">
-          {foundClues.length > 0 ? (
-            <div className="flex items-center justify-between gap-2 w-full">
-              <div className="flex flex-wrap gap-1.5 sm:gap-2 flex-1">
-                {foundClues.map((clue, index) => (
+          <div className="flex items-center justify-between gap-2 w-full">
+            <div className="flex flex-wrap gap-1.5 sm:gap-2 flex-1">
+              {foundClues.length > 0 ? (
+                foundClues.map((clue, index) => (
                   <Badge
                     key={index}
                     variant="default"
@@ -572,24 +609,24 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
                     <CheckCircle2 className="w-3 h-3 mr-1" />
                     {clue}
                   </Badge>
-                ))}
-              </div>
-
-              {foundClues.length >= 2 && (
-                <Button
-                  onClick={handleFinish}
-                  size="sm"
-                  variant="outline"
-                  className="rounded-xl flex-shrink-0 text-xs sm:text-sm px-2 sm:px-3"
-                  data-testid="button-finish"
-                >
-                  Terminer
-                </Button>
+                ))
+              ) : (
+                <p className="text-xs sm:text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
               )}
             </div>
-          ) : (
-            <p className="text-xs sm:text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
-          )}
+
+            {(conversationEnded || foundClues.length >= 2) && (
+              <Button
+                onClick={handleFinish}
+                size="sm"
+                variant={conversationEnded ? "default" : "outline"}
+                className={`rounded-xl flex-shrink-0 text-xs sm:text-sm px-2 sm:px-3 ${conversationEnded ? 'animate-pulse' : ''}`}
+                data-testid="button-finish"
+              >
+                Poursuivre
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Zone de conversation - seule partie scrollable */}
@@ -640,7 +677,16 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
                 data-testid="badge-clue-counter"
               >
                 <span className="font-bold text-primary">{foundClues.length}</span>
-                <span className="text-muted-foreground">/4 indices</span>
+                <span className="text-muted-foreground">/{TOTAL_CLUES} indices</span>
+              </Badge>
+              
+              {/* Exchange counter */}
+              <Badge
+                variant="outline"
+                className="text-sm px-2 py-1 rounded-full"
+                data-testid="badge-exchange-counter"
+              >
+                <span className="text-muted-foreground">{exchangeCount}/{MAX_EXCHANGES}</span>
               </Badge>
 
               {/* Clue tags */}
@@ -665,15 +711,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
             {/* Right section: Help button and Finish button */}
             <div className="flex items-center gap-2 flex-shrink-0">
-              {foundClues.length >= 2 && (
+              {(conversationEnded || foundClues.length >= 2) && (
                 <Button
                   onClick={handleFinish}
                   size="sm"
-                  variant="outline"
-                  className="rounded-xl"
+                  variant={conversationEnded ? "default" : "outline"}
+                  className={`rounded-xl ${conversationEnded ? 'animate-pulse' : ''}`}
                   data-testid="button-finish"
                 >
-                  Terminer
+                  Poursuivre
                 </Button>
               )}
 
@@ -693,7 +739,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           {showHelp && (
             <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-4 py-3 animate-slide-up border-b border-card-border">
               <p className="text-sm">
-                Analysez l'image et parlez pour découvrir les 4 indices cachés. Peter vous guidera!
+                Analysez l'image et parlez pour découvrir les {TOTAL_CLUES} indices cachés. Peter vous guidera!
               </p>
             </div>
           )}

@@ -157,7 +157,7 @@ export default function ScoreScreen({
     return "Continuez vos efforts!";
   };
 
-  const allClues = ['ADN', 'bébé', 'penseur de Rodin', 'plastique'];
+  const allClues = ['Déchets plastiques', 'ADN', 'Traité plastique', 'Algues', 'Homme', 'Femme'];
 
   const handleSaveSynthesis = async () => {
     if (!sessionId) {
