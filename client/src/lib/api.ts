@@ -146,15 +146,26 @@ export interface StreamChatCallbacks {
   onError?: (error: string) => void;
 }
 
+export interface StreamChatOptions {
+  exchangeCount?: number; // Current exchange number (1-8)
+  userName?: string; // User's name for personalized goodbye
+}
+
 export async function sendChatMessageStreaming(
   sessionId: string,
   userMessage: string,
-  callbacks: StreamChatCallbacks
+  callbacks: StreamChatCallbacks,
+  options?: StreamChatOptions
 ): Promise<void> {
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, userMessage }),
+    body: JSON.stringify({
+      sessionId,
+      userMessage,
+      exchangeCount: options?.exchangeCount,
+      userName: options?.userName
+    }),
   });
 
   if (!response.ok) {
