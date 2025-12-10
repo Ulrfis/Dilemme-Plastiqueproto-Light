@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { Mic, Square, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import peterImage from "@assets/Peter Avatar_1763217836125.jpg";
 import type { AudioState } from "@/hooks/useVoiceInteraction";
 
@@ -21,6 +22,8 @@ interface ConversationPanelProps {
   fallbackMode?: boolean;
   textInput: string;
   onTextInputChange: (text: string) => void;
+  exchangeCount: number;
+  maxExchanges: number;
 }
 
 export default function ConversationPanel({
@@ -34,6 +37,8 @@ export default function ConversationPanel({
   fallbackMode = false,
   textInput,
   onTextInputChange,
+  exchangeCount,
+  maxExchanges,
 }: ConversationPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -105,6 +110,17 @@ export default function ConversationPanel({
 
       {/* Zone d'input et contrôles */}
       <div className="px-3 sm:px-4 pb-3 sm:pb-4 pt-2">
+        {/* Compteur d'échanges */}
+        <div className="flex justify-center mb-2">
+          <Badge
+            variant="outline"
+            className="text-xs sm:text-sm px-3 py-1 rounded-full bg-background/80 backdrop-blur-sm"
+            data-testid="badge-exchange-counter-conversation"
+          >
+            <span className="font-medium">{exchangeCount}/{maxExchanges} échanges</span>
+          </Badge>
+        </div>
+
         {/* Indicateur d'état */}
         {state === 'recording' && (
           <div className="flex justify-center gap-1 items-end h-6 sm:h-8 mb-2">

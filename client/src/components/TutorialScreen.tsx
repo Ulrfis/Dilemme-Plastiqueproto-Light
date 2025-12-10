@@ -341,6 +341,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     let fullResponse = '';
     const sentencesReceived: string[] = [];
 
+    // Track pending TTS requests to ensure all sentences are played
+    const pendingTTSRequests: Promise<void>[] = [];
+
     // Reset the audio queue's expected index for this new response
     audioQueue.reset();
 
@@ -366,23 +369,33 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
           // Generate TTS for this sentence immediately (parallel to LLM)
           // Use streaming endpoint for faster generation, but wait for complete audio
-          try {
-            console.log('[TutorialScreen] Generating TTS for sentence #' + index);
+          // CRITICAL: Track this promise to ensure all sentences are queued before completion
+          const ttsPromise = (async () => {
+            try {
+              console.log('[TutorialScreen] Generating TTS for sentence #' + index);
 
-            // textToSpeechStreaming uses the faster streaming endpoint
-            // but returns the complete audio blob to avoid playback cuts
-            const audioBlob = await textToSpeechStreaming(sentence);
-            console.log('[TutorialScreen] TTS complete for sentence #' + index + ', size:', audioBlob.size);
+              // textToSpeechStreaming uses the faster streaming endpoint
+              // but returns the complete audio blob to avoid playback cuts
+              const audioBlob = await textToSpeechStreaming(sentence);
+              console.log('[TutorialScreen] TTS complete for sentence #' + index + ', size:', audioBlob.size);
 
-            // Add complete audio to queue for sequential playback
-            audioQueue.enqueue(audioBlob, sentence, index);
-          } catch (ttsError) {
-            console.error('[TutorialScreen] TTS failed for sentence #' + index + ':', ttsError);
-            // Continue processing other sentences even if one fails
-          }
+              // Add complete audio to queue for sequential playback
+              audioQueue.enqueue(audioBlob, sentence, index);
+            } catch (ttsError) {
+              console.error('[TutorialScreen] TTS failed for sentence #' + index + ':', ttsError);
+              // Continue processing other sentences even if one fails
+            }
+          })();
+
+          pendingTTSRequests.push(ttsPromise);
         },
 
-        onComplete: (finalResponse, newFoundClues, detectedClue) => {
+        onComplete: async (finalResponse, newFoundClues, detectedClue) => {
+          // CRITICAL: Wait for all TTS requests to complete before processing completion
+          // This ensures the last sentence is fully queued for playback
+          console.log('[TutorialScreen] Waiting for', pendingTTSRequests.length, 'pending TTS requests to complete...');
+          await Promise.all(pendingTTSRequests);
+          console.log('[TutorialScreen] All TTS requests completed, processing onComplete');
           console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length);
 
           // Vérifier si la réponse est vide ou invalide
@@ -425,12 +438,13 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             setTimeout(() => setShowSuccess(false), 3000);
           }
           
-          // Vérifier si tous les indices sont trouvés ou si on a atteint la limite
-          const allCluesFound = newFoundClues.length >= TOTAL_CLUES;
+          // Vérifier si on a atteint la limite d'échanges (garantir au moins 8 échanges)
+          // Note: On ne termine PAS la conversation même si tous les indices sont trouvés
+          // L'utilisateur doit pouvoir discuter au moins 8 fois avec Peter
           const maxExchangesReached = currentExchange >= MAX_EXCHANGES;
-          
-          if (allCluesFound || maxExchangesReached) {
-            console.log('[TutorialScreen] Conversation ending:', { allCluesFound, maxExchangesReached, currentExchange });
+
+          if (maxExchangesReached) {
+            console.log('[TutorialScreen] Conversation ending: max exchanges reached', { currentExchange, foundClues: newFoundClues.length });
             setConversationEnded(true);
           }
         },
@@ -566,13 +580,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               <span className="font-bold text-primary">{foundClues.length}</span>
               <span className="text-muted-foreground">/{TOTAL_CLUES} indices</span>
             </Badge>
-            <Badge
-              variant="outline"
-              className="text-xs px-2 py-1 rounded-full"
-              data-testid="badge-exchange-counter"
-            >
-              <span className="text-muted-foreground">{exchangeCount}/{MAX_EXCHANGES}</span>
-            </Badge>
           </div>
 
           <Button
@@ -642,6 +649,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             fallbackMode={fallbackMode}
             textInput={textInput}
             onTextInputChange={setTextInput}
+            exchangeCount={exchangeCount}
+            maxExchanges={MAX_EXCHANGES}
           />
         </div>
       </div>
@@ -661,6 +670,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             fallbackMode={fallbackMode}
             textInput={textInput}
             onTextInputChange={setTextInput}
+            exchangeCount={exchangeCount}
+            maxExchanges={MAX_EXCHANGES}
           />
         </div>
 
@@ -678,15 +689,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               >
                 <span className="font-bold text-primary">{foundClues.length}</span>
                 <span className="text-muted-foreground">/{TOTAL_CLUES} indices</span>
-              </Badge>
-              
-              {/* Exchange counter */}
-              <Badge
-                variant="outline"
-                className="text-sm px-2 py-1 rounded-full"
-                data-testid="badge-exchange-counter"
-              >
-                <span className="text-muted-foreground">{exchangeCount}/{MAX_EXCHANGES}</span>
               </Badge>
 
               {/* Clue tags */}

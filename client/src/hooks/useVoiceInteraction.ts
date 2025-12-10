@@ -74,7 +74,11 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     };
   }, []);
 
+  // Track if we've already played the initial silent buffer to unlock audio
+  const audioUnlockedRef = useRef(false);
+
   // MOBILE FIX: Créer et activer l'AudioContext pour débloquer l'audio sur mobile
+  // OPTIMIZATION: Ne jouer le buffer silencieux qu'une seule fois pour éviter les micro-coupures
   const unlockAudioContext = useCallback(() => {
     try {
       if (!audioContextRef.current) {
@@ -94,13 +98,18 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         });
       }
 
-      // Jouer un buffer silencieux pour "débloquer" l'audio sur mobile
-      const buffer = audioContextRef.current.createBuffer(1, 1, 22050);
-      const source = audioContextRef.current.createBufferSource();
-      source.buffer = buffer;
-      source.connect(audioContextRef.current.destination);
-      source.start(0);
-      console.log('[useVoiceInteraction] Silent audio played to unlock audio context');
+      // OPTIMIZATION: Jouer un buffer silencieux SEULEMENT la première fois
+      // pour "débloquer" l'audio sur mobile. Les appels suivants ne font que reprendre le contexte.
+      // Cela évite les micro-coupures causées par la création répétée de buffers audio.
+      if (!audioUnlockedRef.current && audioContextRef.current.state === 'running') {
+        const buffer = audioContextRef.current.createBuffer(1, 1, 22050);
+        const source = audioContextRef.current.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioContextRef.current.destination);
+        source.start(0);
+        audioUnlockedRef.current = true;
+        console.log('[useVoiceInteraction] Silent audio played to unlock audio context (first time only)');
+      }
     } catch (error) {
       console.warn('[useVoiceInteraction] Could not unlock audio context:', error);
     }
@@ -123,21 +132,27 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   }, []);
 
   // MOBILE FIX: Keepalive pour maintenir le contexte audio actif
+  // OPTIMIZATION: Augmenter l'intervalle à 10s et ne faire que reprendre le contexte, pas jouer de buffer
   const startAudioKeepAlive = useCallback(() => {
     // Arrêter le keepalive existant s'il y en a un
     if (keepAliveIntervalRef.current) {
       clearInterval(keepAliveIntervalRef.current);
     }
 
-    console.log('[useVoiceInteraction] Starting audio keepalive');
+    console.log('[useVoiceInteraction] Starting audio keepalive (10s interval)');
 
-    // PHASE 1 OPTIMIZATION: Reduced keepalive frequency from 2s to 5s
-    // This reduces overhead while still maintaining audio context on mobile
-    // 5 seconds is sufficient to prevent most browsers from suspending audio
+    // OPTIMIZATION: Augmenter l'intervalle à 10s pour réduire l'overhead
+    // et éviter les interférences avec la lecture audio
     keepAliveIntervalRef.current = setInterval(() => {
-      unlockAudioContext();
-    }, 5000);
-  }, [unlockAudioContext]);
+      // Ne reprendre le contexte que s'il est suspendu, sans jouer de buffer
+      if (audioContextRef.current?.state === 'suspended') {
+        console.log('[useVoiceInteraction] Keepalive: resuming suspended AudioContext');
+        audioContextRef.current.resume().catch(err => {
+          console.warn('[useVoiceInteraction] Keepalive: failed to resume AudioContext:', err);
+        });
+      }
+    }, 10000);
+  }, []);
 
   const stopAudioKeepAlive = useCallback(() => {
     if (keepAliveIntervalRef.current) {
