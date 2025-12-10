@@ -23,7 +23,7 @@ Preferred communication style: Simple, everyday language.
 **Framework**: React 18 with TypeScript, built using Vite for optimal development and production performance.
 
 **Routing**: Wouter for lightweight client-side routing with two main routes:
-- `/`: Main application flow (title → video → welcome → tutorial → score)
+- `/`: Main application flow (title → video → welcome → tutorial → drag-drop game → synthesis → feedback)
 - `/syntheses`: Community page displaying user synthesis submissions with upvoting
 
 **State Management**: 
