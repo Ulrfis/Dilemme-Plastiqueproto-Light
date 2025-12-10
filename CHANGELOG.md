@@ -6,6 +6,92 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.4.0] - 2025-12-10
+
+### Ajouté - Jeu de Reconstruction de Phrase
+
+- **DragDropGame Component** (commit 751b41e)
+  - Nouveau jeu interactif après le tutoriel
+  - Mode click-to-select/place pour meilleure UX mobile
+  - Reconstruction de phrase sur le thème du plastique
+  - Glisser-déposer ou clic pour placer les mots
+  - Validation automatique de l'ordre correct
+  - Feedback visuel immédiat (✓ ou ✗)
+  - Bouton "Réessayer" si erreur
+  - Transition fluide vers l'écran de synthèse
+  - Fichier: `client/src/components/DragDropGame.tsx`
+
+- **SynthesisScreen Component** (commit 751b41e)
+  - Nouvel écran de synthèse finale
+  - Affichage de la synthèse personnalisée générée par Peter
+  - Visualisation des synthèses publiques d'autres utilisateurs
+  - Système de vote (upvote) pour les synthèses
+  - Bouton vers le questionnaire de feedback
+  - Fichier: `client/src/components/SynthesisScreen.tsx`
+
+- **Flux applicatif enrichi** (commit 4a7913e)
+  - Nouveau parcours : Titre → Vidéo → Setup → Tutoriel → **Jeu → Synthèse** → Score
+  - Transition automatique entre les écrans
+  - Meilleure expérience pédagogique avec phase de réflexion (jeu)
+  - Fichier: `client/src/pages/Home.tsx`
+
+### Modifié - Conversation avec Peter
+
+- **Amélioration qualité vocale française** (commit b59e3ef)
+  - Passage au modèle `eleven_multilingual_v2` (ElevenLabs)
+  - Augmentation de la stabilité vocale : 0.5 → 0.65
+  - Ajout du `speaker_boost` pour plus de clarté
+  - Réduction de `optimize_streaming_latency` : 4 → 2
+  - Diction française plus naturelle et fluide
+  - Fichier: `server/routes.ts`
+
+- **Correction ordre de lecture audio** (commit b59e3ef)
+  - Fix de l'ordre de lecture des phrases streamées
+  - Tri par index pour garantir la séquence correcte
+  - Fonction `reset()` pour nettoyer la queue entre les tours
+  - Attente de la phrase attendue avant lecture
+  - Fichier: `client/src/hooks/useAudioQueue.ts`
+
+- **Contexte de conversation enrichi** (commit b59e3ef)
+  - Ajout du contexte pour le 7ème échange (dernière chance)
+  - Ajout du contexte pour le 8ème échange (au revoir personnalisé)
+  - Peter adapte son discours selon le nombre d'échanges
+  - Meilleure gestion de fin de conversation
+  - Fichier: `server/routes.ts`
+
+- **Refactorisation TutorialScreen** (commit 751b41e)
+  - Gestion plus robuste du flux conversationnel
+  - Meilleur suivi des indices trouvés
+  - Détection des mots-clés améliorée
+  - Fichier: `client/src/components/TutorialScreen.tsx`
+
+### Modifié - Questionnaire de Feedback
+
+- **Regroupement par chapitre** (commit e845fae)
+  - Questions groupées par catégorie au lieu de question par question
+  - Affichage du titre du chapitre en grand (3xl/4xl)
+  - 3 questions par page (Scénario, Gameplay, Feeling, etc.)
+  - Validation par chapitre complet
+  - Barre de progression mise à jour par chapitre
+  - Meilleure expérience utilisateur (moins de clics)
+  - Fichier: `client/src/components/FeedbackSurvey.tsx`
+
+### Corrigé
+
+- **Encodage de texte** (commit e9bd7b3)
+  - Correction des erreurs d'encodage sur plusieurs composants d'interface
+  - Caractères spéciaux français correctement affichés
+  - Accents et ponctuation corrigés
+
+### Dépendances
+
+- **Ajout de @dnd-kit** (commit 751b41e)
+  - `@dnd-kit/core` : Gestion du drag-and-drop
+  - `@dnd-kit/utilities` : Utilitaires CSS pour animations
+  - Support tactile et souris pour le jeu
+
+---
+
 ## [1.3.1] - 2025-11-29
 
 ### Modifié - Organisation du Repository
