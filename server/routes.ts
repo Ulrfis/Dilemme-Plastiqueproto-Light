@@ -336,7 +336,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('[TTS Stream API] Calling ElevenLabs streaming API...');
 
-      // Call ElevenLabs with stream optimization enabled
+      // Call ElevenLabs with optimized settings for French diction quality
+      // Note: We collect the full audio before playback, so we can reduce latency optimization
+      // for better quality without impacting perceived reactivity
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
         method: 'POST',
         headers: {
@@ -346,12 +348,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_turbo_v2_5', // Faster model for lower latency
+          model_id: 'eleven_multilingual_v2', // Better quality for French diction
           voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75
+            stability: 0.65, // Higher stability for clearer pronunciation
+            similarity_boost: 0.75,
+            style: 0.0, // Neutral style for clearer speech
+            use_speaker_boost: true // Enhance voice clarity
           },
-          optimize_streaming_latency: 4, // 0-4, max optimization for lowest latency
+          // Reduced from 4 to 2 for better audio quality
+          // (we wait for full audio anyway, so this doesn't affect perceived latency)
+          optimize_streaming_latency: 2,
         })
       });
 
@@ -471,10 +477,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_turbo_v2_5', // Faster model for lower latency
+          model_id: 'eleven_multilingual_v2', // Better quality for French diction
           voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75
+            stability: 0.65, // Higher stability for clearer pronunciation
+            similarity_boost: 0.75,
+            style: 0.0, // Neutral style for clearer speech
+            use_speaker_boost: true // Enhance voice clarity
           }
         })
       });
@@ -523,8 +531,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // This allows TTS to start generating audio while LLM is still responding
   app.post('/api/chat/stream', async (req, res) => {
     try {
-      console.log('[Chat Stream API] Request received:', { sessionId: req.body.sessionId, messageLength: req.body.userMessage?.length });
-      const { sessionId, userMessage } = req.body;
+      console.log('[Chat Stream API] Request received:', {
+        sessionId: req.body.sessionId,
+        messageLength: req.body.userMessage?.length,
+        exchangeCount: req.body.exchangeCount,
+        userName: req.body.userName
+      });
+      const { sessionId, userMessage, exchangeCount, userName } = req.body;
 
       if (!sessionId || !userMessage) {
         return res.status(400).json({ error: 'Missing sessionId or userMessage' });
@@ -555,6 +568,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('[Chat Stream API] Using OpenAI Assistant:', ASSISTANT_ID);
 
+      // Build exchange-specific instructions for final exchanges
+      let exchangeInstructions = '';
+      if (exchangeCount === 7) {
+        // 7th exchange: Peter must insist there's one more chance
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange (7/8). Tu dois absolument mentionner qu'il reste encore UN échange possible pour trouver les derniers indices. N'ouvre pas la conversation, mais encourage l'utilisateur à faire un dernier effort. Ne dis pas au revoir maintenant.]`;
+      } else if (exchangeCount >= 8) {
+        // 8th exchange: Peter must close the conversation with personalized goodbye
+        const userNameToUse = userName || 'mon ami';
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est le DERNIER échange (8/8). Tu dois terminer la conversation de manière chaleureuse. Salue l'utilisateur en utilisant son prénom "${userNameToUse}". Ensuite, invite-le à cliquer sur le bouton "Continuer" pour poursuivre l'expérience. Fais un bref récapitulatif des indices trouvés et remercie-le pour cette conversation.]`;
+      }
+
       // Reuse or create thread
       let threadId = session.threadId;
 
@@ -569,13 +593,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const contextPrompt = `Indices déjà trouvés: ${session.foundClues.join(', ') || 'aucun'}`;
         await openai.beta.threads.messages.create(threadId, {
           role: 'user',
-          content: `${contextPrompt}\n\n${userMessage}`
+          content: `${contextPrompt}${exchangeInstructions}\n\n${userMessage}`
         });
       } else {
         console.log('[Chat Stream API] Reusing existing thread:', threadId);
         await openai.beta.threads.messages.create(threadId, {
           role: 'user',
-          content: userMessage
+          content: `${userMessage}${exchangeInstructions}`
         });
       }
 

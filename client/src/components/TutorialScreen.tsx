@@ -340,8 +340,11 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     let fullResponse = '';
     const sentencesReceived: string[] = [];
 
+    // Reset the audio queue's expected index for this new response
+    audioQueue.reset();
+
     try {
-      // Send streaming chat message
+      // Send streaming chat message with exchange context
       await sendChatMessageStreaming(sessionId, userMessage, {
         onSentence: async (sentence, index) => {
           console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...');
@@ -450,6 +453,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           // Réinitialiser l'état pour permettre de réessayer
           recoverFromError();
         },
+      }, {
+        // Pass exchange context for Peter's behavior at end of conversation
+        exchangeCount: currentExchange,
+        userName: userName
       });
     } catch (error) {
       console.error('[TutorialScreen] Streaming failed:', error);
