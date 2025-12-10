@@ -253,7 +253,7 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
       <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full">
         <div className="text-center mb-6">
           <h2 className="text-2xl sm:text-3xl font-bold font-heading mb-2">
-            Compl\u00e8te la phrase, {userName} !
+            Complète la phrase, {userName} !
           </h2>
           <p className="text-muted-foreground text-sm sm:text-base">
             Clique sur un mot puis sur un espace vide, ou glisse les mots.
@@ -336,7 +336,7 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
               <div className="flex items-center justify-center gap-2 text-orange-700">
                 <XCircle className="w-6 h-6" />
                 <span className="font-semibold text-lg">
-                  {validationResult.errors} erreur{validationResult.errors > 1 ? 's' : ''} d\u00e9tect\u00e9e{validationResult.errors > 1 ? 's' : ''}
+                  {validationResult.errors} erreur{validationResult.errors > 1 ? 's' : ''} détectée{validationResult.errors > 1 ? 's' : ''}
                 </span>
               </div>
             )}
@@ -353,7 +353,7 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
                 className="w-full rounded-xl text-lg py-6"
                 data-testid="button-validate"
               >
-                Valider ma r\u00e9ponse
+                Valider ma réponse
               </Button>
 
               {validationResult && !isSuccess && (

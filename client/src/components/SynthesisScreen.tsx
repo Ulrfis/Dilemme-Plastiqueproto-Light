@@ -79,8 +79,8 @@ export default function SynthesisScreen({
                 return newText.slice(0, 1200);
               });
               toast({
-                title: "Transcription r\u00e9ussie",
-                description: "Votre message vocal a \u00e9t\u00e9 ajout\u00e9.",
+                title: "Transcription réussie",
+                description: "Votre message vocal a été ajouté.",
               });
             }
           } else {
@@ -105,7 +105,7 @@ export default function SynthesisScreen({
       console.error('Recording error:', error);
       toast({
         title: "Erreur d'enregistrement",
-        description: "Impossible d'acc\u00e9der au microphone.",
+        description: "Impossible d'accéder au microphone.",
         variant: "destructive",
       });
     }
@@ -130,8 +130,8 @@ export default function SynthesisScreen({
     
     if (!synthesis.trim()) {
       toast({
-        title: "Synth\u00e8se vide",
-        description: "\u00c9crivez votre phrase de synth\u00e8se avant de la partager.",
+        title: "Synthèse vide",
+        description: "Écrivez votre phrase de synthèse avant de la partager.",
         variant: "destructive",
       });
       return;
@@ -150,14 +150,14 @@ export default function SynthesisScreen({
       setHasSaved(true);
       queryClient.invalidateQueries({ queryKey: ['/api/sessions', sessionId] });
       toast({
-        title: "Synth\u00e8se partag\u00e9e!",
-        description: "Votre phrase a \u00e9t\u00e9 ajout\u00e9e \u00e0 la collection.",
+        title: "Synthèse partagée !",
+        description: "Votre phrase a été ajoutée à la collection.",
       });
     } catch (error) {
       console.error('Error saving synthesis:', error);
       toast({
         title: "Erreur",
-        description: "Impossible de sauvegarder votre synth\u00e8se.",
+        description: "Impossible de sauvegarder votre synthèse.",
         variant: "destructive",
       });
     } finally {
@@ -173,21 +173,21 @@ export default function SynthesisScreen({
             Bravo {userName} !
           </h2>
           <p className="text-muted-foreground">
-            Tu as d\u00e9couvert {foundClues.length} indices. Maintenant, raconte ce que tu as compris de l'\u0153uvre.
+            Tu as découvert {foundClues.length} indices. Maintenant, raconte ce que tu as compris de l'œuvre.
           </p>
         </div>
 
         <div className="bg-card border border-card-border rounded-2xl p-5 space-y-4">
           <div className="text-center">
-            <h3 className="font-semibold text-lg mb-1">Ta synth\u00e8se</h3>
+            <h3 className="font-semibold text-lg mb-1">Ta synthèse</h3>
             <p className="text-sm text-muted-foreground">
-              Dicte ou \u00e9cris une phrase qui r\u00e9sume ce que tu as d\u00e9couvert sur l'impact du plastique.
+              Dicte ou écris une phrase qui résume ce que tu as découvert sur l'impact du plastique.
             </p>
           </div>
           
           <div className="relative">
             <Textarea
-              placeholder="Ex: L'\u0153uvre montre comment le plastique menace notre sant\u00e9 et notre plan\u00e8te..."
+              placeholder="Ex: L'œuvre montre comment le plastique menace notre santé et notre planète..."
               value={synthesis}
               onChange={(e) => setSynthesis(e.target.value)}
               className="min-h-[120px] resize-none rounded-xl pr-14 text-base"
@@ -230,14 +230,14 @@ export default function SynthesisScreen({
           {isRecording && (
             <div className="flex items-center justify-center gap-2 text-sm text-destructive animate-pulse">
               <span className="w-2 h-2 bg-destructive rounded-full"></span>
-              Enregistrement en cours... Appuyez pour arr\u00eater
+              Enregistrement en cours... Appuyez pour arrêter
             </div>
           )}
           
           {!hasSaved && (
             <div className="flex justify-between items-center">
               <span className="text-xs text-muted-foreground">
-                {synthesis.length}/1200 caract\u00e8res
+                {synthesis.length}/1200 caractères
               </span>
               <Button
                 onClick={handleSaveSynthesis}
@@ -262,7 +262,7 @@ export default function SynthesisScreen({
           <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-primary" />
-              <p className="font-medium">Synth\u00e8se partag\u00e9e !</p>
+              <p className="font-medium">Synthèse partagée !</p>
             </div>
             {synthesis && (
               <blockquote className="text-sm text-foreground/90 leading-relaxed italic border-l-2 border-primary/30 pl-3">
@@ -296,7 +296,7 @@ export default function SynthesisScreen({
             data-testid="button-feedback"
           >
             <MessageCircle className="w-5 h-5" />
-            Donner mon avis sur l'exp\u00e9rience
+            Donner mon avis sur l'expérience
           </button>
         </div>
       </div>
