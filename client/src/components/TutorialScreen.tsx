@@ -6,6 +6,7 @@ import tutorialImage from "@assets/PlaceDesNations_Dilemme_1762432136623.png";
 import ConversationPanel from "./ConversationPanel";
 import SuccessFeedback from "./SuccessFeedback";
 import ZoomableImage from "./ZoomableImage";
+import InfoModal from "./InfoModal";
 import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
 import { useAudioQueue } from "@/hooks/useAudioQueue";
 import { sendChatMessage, textToSpeech, sendChatMessageStreaming, textToSpeechStreaming } from "@/lib/api";
@@ -26,7 +27,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [foundClues, setFoundClues] = useState<string[]>([]);
   const [showSuccess, setShowSuccess] = useState(false);
   const [newClues, setNewClues] = useState<string[]>([]);
-  const [showHelp, setShowHelp] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
   const [fallbackMode, setFallbackMode] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [textInput, setTextInput] = useState('');
@@ -575,23 +576,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           </div>
 
           <Button
-            size="icon"
             variant="ghost"
-            onClick={() => setShowHelp(!showHelp)}
-            className="w-9 h-9 sm:w-10 sm:h-10"
+            onClick={() => setShowInfoModal(true)}
+            className="flex items-center gap-1 px-2 h-9 sm:h-10"
             data-testid="button-help"
           >
+            <span className="text-xs sm:text-sm font-medium">Info</span>
             <HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" />
           </Button>
         </header>
-
-        {showHelp && (
-          <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-3 sm:px-4 py-2 sm:py-3 animate-slide-up border-b border-card-border z-20">
-            <p className="text-xs sm:text-sm">
-              Analysez l'image et parlez pour découvrir les {TOTAL_CLUES} indices cachés. Peter vous guidera!
-            </p>
-          </div>
-        )}
 
         {/* Image zoomable - 100% en horizontal */}
         <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '30vh', minHeight: '180px' }}>
@@ -731,25 +724,16 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               )}
 
               <Button
-                size="icon"
                 variant="ghost"
-                onClick={() => setShowHelp(!showHelp)}
-                className="w-10 h-10"
+                onClick={() => setShowInfoModal(true)}
+                className="flex items-center gap-1.5 px-3 h-10"
                 data-testid="button-help"
               >
+                <span className="text-sm font-medium">Info</span>
                 <HelpCircle className="w-5 h-5" />
               </Button>
             </div>
           </div>
-
-          {/* Help section (expandable) */}
-          {showHelp && (
-            <div className="flex-shrink-0 bg-muted/50 backdrop-blur px-4 py-3 animate-slide-up border-b border-card-border">
-              <p className="text-sm">
-                Analysez l'image et parlez pour découvrir les {TOTAL_CLUES} indices cachés. Peter vous guidera!
-              </p>
-            </div>
-          )}
 
           {/* Image section - maximized to fill remaining space */}
           <div className="flex-1 relative bg-white overflow-hidden">
@@ -762,6 +746,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       </div>
 
       {showSuccess && <SuccessFeedback clueNames={newClues} />}
+      <InfoModal open={showInfoModal} onOpenChange={setShowInfoModal} />
     </div>
   );
 }
