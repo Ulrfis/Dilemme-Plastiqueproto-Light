@@ -11,6 +11,7 @@ import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
 import { useAudioQueue } from "@/hooks/useAudioQueue";
 import { sendChatMessage, textToSpeech, sendChatMessageStreaming, textToSpeechStreaming } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import posthog from "posthog-js";
 
 interface Message {
   role: 'assistant' | 'user';
@@ -533,6 +534,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   };
 
   const handleFinish = () => {
+    posthog.capture("tutorial_completed", {
+      cluesFound: foundClues.length,
+      totalClues: TOTAL_CLUES,
+      exchangeCount: exchangeCount,
+      cluesList: foundClues,
+    });
     onComplete(foundClues.length, foundClues);
   };
 

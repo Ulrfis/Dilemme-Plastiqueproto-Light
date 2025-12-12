@@ -5,6 +5,8 @@ import { Mic, Square, Loader2, Send, Users, MessageCircle, CheckCircle2 } from "
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useMutation } from "@tanstack/react-query";
+import posthog from "posthog-js";
 
 interface SynthesisScreenProps {
   userName: string;
@@ -145,6 +147,11 @@ export default function SynthesisScreen({
     try {
       await apiRequest('POST', `/api/sessions/${sessionId}/synthesis`, { 
         finalSynthesis: synthesis.trim() 
+      });
+      
+      posthog.capture("synthesis_submitted", {
+        userName,
+        synthesisLength: synthesis.trim().length,
       });
       
       setHasSaved(true);

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import posthog from "posthog-js";
 
 interface WelcomeSetupProps {
   onStart: (name: string) => void;
@@ -16,6 +17,7 @@ export default function WelcomeSetup({ onStart }: WelcomeSetupProps) {
 
     if (trimmedName) {
       console.log('[WelcomeSetup] Starting tutorial with name:', trimmedName);
+      posthog.capture("user_session_started", { userName: trimmedName });
       onStart(trimmedName);
     } else {
       console.log('[WelcomeSetup] Name is empty, not starting');

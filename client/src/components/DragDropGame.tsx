@@ -14,6 +14,7 @@ import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, RotateCcw, ArrowRight } from "lucide-react";
+import posthog from "posthog-js";
 
 interface DragDropGameProps {
   userName: string;
@@ -371,7 +372,10 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
             </>
           ) : (
             <Button
-              onClick={onComplete}
+              onClick={() => {
+                posthog.capture("game_completed", { userName });
+                onComplete();
+              }}
               size="lg"
               className="w-full rounded-xl text-lg py-6"
               data-testid="button-continue"

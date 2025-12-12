@@ -1,4 +1,5 @@
 import { useState } from "react";
+import posthog from "posthog-js";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -183,6 +184,10 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
       return res.json();
     },
     onSuccess: () => {
+      posthog.capture("feedback_submitted", {
+        userName,
+        sessionId,
+      });
       setShowThankYou(true);
       setTimeout(() => {
         onComplete();
