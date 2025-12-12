@@ -1,8 +1,8 @@
 # Dilemme Plastique — Development Story
 
 > **Status**: 🟡 In Progress  
-> **Creator**: Dilemme Team  
-> **Started**: 2024-12-12  
+> **Creator**: Ulrich Fischer  
+> **Started**: 2024-11-12  
 > **Last Updated**: 2024-12-12  
 
 ---
