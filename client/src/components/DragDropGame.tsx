@@ -75,10 +75,10 @@ function DraggableWord({ id, text, isPlaced, isSelected, onSelect }: DraggableWo
       {...attributes}
       onClick={handleClick}
       className={`
-        px-4 py-3 rounded-full font-medium text-sm sm:text-base
+        px-3 py-2 rounded-full font-medium text-xs sm:text-sm
         transition-all duration-200 select-none
-        ${isPlaced 
-          ? 'bg-muted text-muted-foreground cursor-not-allowed line-through' 
+        ${isPlaced
+          ? 'bg-muted text-muted-foreground cursor-not-allowed line-through'
           : isSelected
             ? 'bg-primary text-primary-foreground ring-4 ring-primary/50 ring-offset-2 scale-105 shadow-lg cursor-pointer'
             : 'bg-primary text-primary-foreground cursor-grab active:cursor-grabbing shadow-md hover:shadow-lg hover:scale-102 active:scale-95'
@@ -117,12 +117,12 @@ function DroppableSlot({ id, placedWord, onRemove, onPlace, hasSelectedWord }: D
       onClick={handleClick}
       className={`
         inline-flex items-center justify-center
-        min-w-[120px] sm:min-w-[160px] min-h-[40px] px-3 py-2 mx-1
+        min-w-[90px] sm:min-w-[130px] min-h-[32px] px-2 py-1 mx-0.5
         rounded-lg border-2 border-dashed transition-all duration-200
-        ${isOver 
-          ? 'border-primary bg-primary/10 scale-105' 
-          : placedWord 
-            ? 'border-primary/50 bg-primary/5 cursor-pointer hover:bg-red-50 hover:border-red-300' 
+        ${isOver
+          ? 'border-primary bg-primary/10 scale-105'
+          : placedWord
+            ? 'border-primary/50 bg-primary/5 cursor-pointer hover:bg-red-50 hover:border-red-300'
             : hasSelectedWord
               ? 'border-primary bg-primary/10 cursor-pointer hover:bg-primary/20 animate-pulse'
               : 'border-muted-foreground/30 bg-muted/30'
@@ -131,10 +131,10 @@ function DroppableSlot({ id, placedWord, onRemove, onPlace, hasSelectedWord }: D
       data-testid={`droppable-${id}`}
     >
       {placedWord ? (
-        <span className="font-medium text-primary text-sm sm:text-base">{placedWord}</span>
+        <span className="font-medium text-primary text-xs sm:text-sm">{placedWord}</span>
       ) : (
-        <span className="text-muted-foreground text-xs sm:text-sm">
-          {hasSelectedWord ? 'Cliquez ici' : '___________'}
+        <span className="text-muted-foreground text-[10px] sm:text-xs">
+          {hasSelectedWord ? 'Cliquer ici' : '_______'}
         </span>
       )}
     </span>
@@ -249,13 +249,13 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
   const activeWord = activeId ? DRAGGABLE_WORDS.find(w => w.id === activeId) : null;
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-primary/5 via-background to-chart-2/5 px-4 py-6">
-      <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full">
-        <div className="text-center mb-6">
-          <h2 className="text-2xl sm:text-3xl font-bold font-heading mb-2">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-primary/5 via-background to-chart-2/5 px-3 py-3 overflow-hidden">
+      <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full min-h-0">
+        <div className="text-center mb-2">
+          <h2 className="text-xl sm:text-2xl font-bold font-heading mb-1">
             Complète la phrase, {userName} !
           </h2>
-          <p className="text-muted-foreground text-sm sm:text-base">
+          <p className="text-muted-foreground text-xs sm:text-sm">
             Clique sur un mot puis sur un espace vide, ou glisse les mots.
           </p>
         </div>
@@ -266,8 +266,8 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="bg-card border border-card-border rounded-2xl p-4 sm:p-6 mb-6 shadow-lg">
-            <p className="text-base sm:text-lg leading-relaxed text-foreground">
+          <div className="bg-card border border-card-border rounded-xl p-3 sm:p-4 mb-2 shadow-lg">
+            <p className="text-sm sm:text-base leading-relaxed text-foreground">
               {SENTENCE_PARTS.map((part) => {
                 if (part.correctAnswer === null) {
                   return <span key={part.id}>{part.text}</span>;
@@ -286,11 +286,11 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
             </p>
           </div>
 
-          <div className="bg-card border border-card-border rounded-2xl p-4 sm:p-6 mb-6">
-            <p className="text-sm text-muted-foreground mb-4 text-center">
+          <div className="bg-card border border-card-border rounded-xl p-3 sm:p-4 mb-2">
+            <p className="text-xs text-muted-foreground mb-2 text-center">
               Mots disponibles :
             </p>
-            <div className="flex flex-wrap gap-3 justify-center">
+            <div className="flex flex-wrap gap-2 justify-center">
               {DRAGGABLE_WORDS.map((word) => {
                 const isPlaced = placedWordTexts.includes(word.text);
                 return (
@@ -309,7 +309,7 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
 
           <DragOverlay>
             {activeWord ? (
-              <div className="px-4 py-3 rounded-full font-medium text-sm sm:text-base bg-primary text-primary-foreground shadow-xl ring-2 ring-primary ring-offset-2">
+              <div className="px-3 py-2 rounded-full font-medium text-xs sm:text-sm bg-primary text-primary-foreground shadow-xl ring-2 ring-primary ring-offset-2">
                 {activeWord.text}
               </div>
             ) : null}
@@ -317,11 +317,11 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
         </DndContext>
 
         {validationResult && (
-          <div 
+          <div
             className={`
-              rounded-2xl p-4 mb-6 text-center transition-all duration-300
-              ${isSuccess 
-                ? 'bg-green-50 border border-green-200' 
+              rounded-xl p-3 mb-2 text-center transition-all duration-300
+              ${isSuccess
+                ? 'bg-green-50 border border-green-200'
                 : 'bg-orange-50 border border-orange-200'
               }
             `}
@@ -329,13 +329,13 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
           >
             {isSuccess ? (
               <div className="flex items-center justify-center gap-2 text-green-700">
-                <CheckCircle2 className="w-6 h-6" />
-                <span className="font-semibold text-lg">Parfait ! Aucune erreur !</span>
+                <CheckCircle2 className="w-5 h-5" />
+                <span className="font-semibold text-base">Parfait ! Aucune erreur !</span>
               </div>
             ) : (
               <div className="flex items-center justify-center gap-2 text-orange-700">
-                <XCircle className="w-6 h-6" />
-                <span className="font-semibold text-lg">
+                <XCircle className="w-5 h-5" />
+                <span className="font-semibold text-base">
                   {validationResult.errors} erreur{validationResult.errors > 1 ? 's' : ''} détectée{validationResult.errors > 1 ? 's' : ''}
                 </span>
               </div>
@@ -343,14 +343,14 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
           </div>
         )}
 
-        <div className="flex flex-col gap-3 mt-auto">
+        <div className="flex flex-col gap-2 mt-auto pb-2">
           {!isSuccess ? (
             <>
               <Button
                 onClick={handleValidate}
                 disabled={!allSlotsFilled}
                 size="lg"
-                className="w-full rounded-xl text-lg py-6"
+                className="w-full rounded-xl text-base py-4"
                 data-testid="button-validate"
               >
                 Valider ma réponse
@@ -360,7 +360,7 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
                 <Button
                   onClick={handleReset}
                   variant="outline"
-                  size="lg"
+                  size="default"
                   className="w-full rounded-xl"
                   data-testid="button-reset"
                 >
@@ -373,7 +373,7 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
             <Button
               onClick={onComplete}
               size="lg"
-              className="w-full rounded-xl text-lg py-6"
+              className="w-full rounded-xl text-base py-4"
               data-testid="button-continue"
             >
               Continuer
