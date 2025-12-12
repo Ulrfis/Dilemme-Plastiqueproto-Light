@@ -6,7 +6,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useMutation } from "@tanstack/react-query";
-import posthog from "posthog-js";
+import { captureEvent } from "@/App";
 
 interface SynthesisScreenProps {
   userName: string;
@@ -149,7 +149,7 @@ export default function SynthesisScreen({
         finalSynthesis: synthesis.trim() 
       });
       
-      posthog.capture("synthesis_submitted", {
+      captureEvent("synthesis_submitted", {
         userName,
         synthesisLength: synthesis.trim().length,
       });
