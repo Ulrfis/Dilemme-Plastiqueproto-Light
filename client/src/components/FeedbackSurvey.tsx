@@ -101,26 +101,16 @@ for (const question of QUESTIONS) {
 
 // Rating slider component
 function RatingSlider({ value, onChange }: { value: number | undefined; onChange: (v: number) => void }) {
-  const labels = ['Pas du tout', '', '', '', '', 'Tout à fait'];
-  
   return (
-    <div className="w-full max-w-md mx-auto">
-      <div className="flex justify-between mb-2 text-xs text-muted-foreground">
-        <span>1</span>
-        <span>2</span>
-        <span>3</span>
-        <span>4</span>
-        <span>5</span>
-        <span>6</span>
-      </div>
-      <div className="flex gap-2">
+    <div className="w-full max-w-sm mx-auto">
+      <div className="flex gap-1.5">
         {[1, 2, 3, 4, 5, 6].map((num) => (
           <button
             key={num}
             onClick={() => onChange(num)}
-            className={`flex-1 h-14 rounded-xl text-lg font-bold transition-all duration-200 ${
+            className={`flex-1 h-10 rounded-lg text-sm font-bold transition-all duration-200 ${
               value === num
-                ? 'bg-primary text-primary-foreground scale-110 shadow-lg'
+                ? 'bg-primary text-primary-foreground scale-105 shadow-md'
                 : 'bg-secondary hover:bg-secondary/80 text-secondary-foreground'
             }`}
           >
@@ -128,9 +118,9 @@ function RatingSlider({ value, onChange }: { value: number | undefined; onChange
           </button>
         ))}
       </div>
-      <div className="flex justify-between mt-2 text-xs text-muted-foreground">
-        <span>{labels[0]}</span>
-        <span>{labels[5]}</span>
+      <div className="flex justify-between mt-1 text-[10px] text-muted-foreground">
+        <span>Pas du tout</span>
+        <span>Tout à fait</span>
       </div>
     </div>
   );
@@ -139,26 +129,26 @@ function RatingSlider({ value, onChange }: { value: number | undefined; onChange
 // Yes/No buttons
 function YesNoButtons({ value, onChange }: { value: boolean | undefined; onChange: (v: boolean) => void }) {
   return (
-    <div className="flex gap-4 justify-center">
+    <div className="flex gap-3 justify-center">
       <button
         onClick={() => onChange(true)}
-        className={`px-8 py-4 rounded-xl text-lg font-bold transition-all duration-200 flex items-center gap-2 ${
+        className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 flex items-center gap-1.5 ${
           value === true
-            ? 'bg-green-500 text-white scale-105 shadow-lg'
+            ? 'bg-green-500 text-white scale-105 shadow-md'
             : 'bg-secondary hover:bg-green-100 text-secondary-foreground'
         }`}
       >
-        <Check className="w-5 h-5" /> Oui
+        <Check className="w-4 h-4" /> Oui
       </button>
       <button
         onClick={() => onChange(false)}
-        className={`px-8 py-4 rounded-xl text-lg font-bold transition-all duration-200 flex items-center gap-2 ${
+        className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 flex items-center gap-1.5 ${
           value === false
-            ? 'bg-red-500 text-white scale-105 shadow-lg'
+            ? 'bg-red-500 text-white scale-105 shadow-md'
             : 'bg-secondary hover:bg-red-100 text-secondary-foreground'
         }`}
       >
-        <X className="w-5 h-5" /> Non
+        <X className="w-4 h-4" /> Non
       </button>
     </div>
   );
@@ -243,29 +233,29 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
   if (showThankYou) {
     return (
       <div className="fixed inset-0 bg-background z-50 flex items-center justify-center">
-        <div className="text-center p-8 animate-in fade-in zoom-in duration-500">
-          <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-green-500 flex items-center justify-center">
-            <Check className="w-12 h-12 text-white" />
+        <div className="text-center p-6 animate-in fade-in zoom-in duration-500">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500 flex items-center justify-center">
+            <Check className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-2xl font-bold mb-2">Merci pour ton avis ! 🙏</h2>
-          <p className="text-muted-foreground">Tes réponses nous aident à améliorer le jeu.</p>
+          <h2 className="text-xl font-bold mb-1">Merci pour ton avis !</h2>
+          <p className="text-sm text-muted-foreground">Tes réponses nous aident beaucoup.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-background z-50 flex flex-col">
+    <div className="fixed inset-0 bg-background z-50 flex flex-col h-screen overflow-hidden">
       {/* Header with progress */}
-      <div className="sticky top-0 bg-background border-b p-4">
+      <div className="flex-shrink-0 bg-background border-b px-3 py-2">
         <div className="max-w-3xl mx-auto">
-          <div className="flex items-center justify-between mb-2">
-            <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-              <X className="w-6 h-6" />
+          <div className="flex items-center justify-between mb-1.5">
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
+              <X className="w-5 h-5" />
             </button>
-            <span className="text-sm text-muted-foreground">{currentChapterIndex + 1} / {totalChapters}</span>
+            <span className="text-xs text-muted-foreground">{currentChapterIndex + 1} / {totalChapters}</span>
           </div>
-          <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
+          <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
             <div
               className="h-full bg-primary transition-all duration-300 ease-out"
               style={{ width: `${progress}%` }}
@@ -275,16 +265,16 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
       </div>
 
       {/* Question content */}
-      <div className="flex-1 p-6 overflow-y-auto">
+      <div className="flex-1 px-3 py-2 overflow-y-auto min-h-0">
         <div className="w-full max-w-3xl mx-auto animate-in fade-in slide-in-from-right-4 duration-300" key={currentChapterIndex}>
           {/* Chapter title */}
-          <h1 className="text-3xl md:text-4xl font-bold mb-8 text-center">{currentChapter.name}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold mb-3 text-center">{currentChapter.name}</h1>
 
           {/* Questions in this chapter */}
-          <div className="space-y-8">
+          <div className="space-y-3">
             {currentQuestions.map((question) => (
-              <div key={question.id} className="bg-card border rounded-xl p-6 shadow-sm">
-                <h2 className="text-lg md:text-xl font-semibold mb-6 text-left">{question.question}</h2>
+              <div key={question.id} className="bg-card border rounded-lg p-3 shadow-sm">
+                <h2 className="text-sm sm:text-base font-semibold mb-3 text-left">{question.question}</h2>
 
                 {question.type === 'rating' && (
                   <RatingSlider
@@ -296,35 +286,35 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
                 {question.type === 'text' && (
                   <Textarea
                     placeholder="Partage tes idées... (optionnel)"
-                    className="min-h-32 text-base"
+                    className="min-h-20 text-sm"
                     value={(feedbackData[question.field] as string) || ''}
                     onChange={(e) => updateField(question.field, e.target.value)}
                   />
                 )}
 
                 {(question.type === 'yesno' || question.type === 'yesno-email' || question.type === 'yesno-share') && (
-                  <div className="space-y-4">
+                  <div className="space-y-2">
                     <YesNoButtons
                       value={feedbackData[question.field] as boolean | undefined}
                       onChange={(v) => updateField(question.field, v)}
                     />
 
                     {question.type === 'yesno-email' && feedbackData.wantsUpdates === true && (
-                      <div className="mt-6 animate-in fade-in slide-in-from-bottom-2">
+                      <div className="mt-3 animate-in fade-in slide-in-from-bottom-2">
                         <Input
                           type="email"
                           placeholder="Ton email..."
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
-                          className="text-center text-base"
+                          className="text-center text-sm"
                         />
                       </div>
                     )}
 
                     {question.type === 'yesno-share' && feedbackData.wouldRecommend === true && (
-                      <div className="mt-6 animate-in fade-in slide-in-from-bottom-2">
-                        <Button onClick={handleShare} variant="outline" className="gap-2">
-                          <Share2 className="w-4 h-4" /> Partager le jeu
+                      <div className="mt-3 animate-in fade-in slide-in-from-bottom-2 text-center">
+                        <Button onClick={handleShare} variant="outline" size="sm" className="gap-1.5">
+                          <Share2 className="w-3.5 h-3.5" /> Partager
                           <ExternalLink className="w-3 h-3" />
                         </Button>
                       </div>
@@ -338,23 +328,25 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
       </div>
 
       {/* Navigation */}
-      <div className="sticky bottom-0 bg-background border-t p-4">
+      <div className="flex-shrink-0 bg-background border-t px-3 py-2">
         <div className="max-w-3xl mx-auto flex justify-between">
           <Button
             variant="ghost"
+            size="sm"
             onClick={handlePrev}
             disabled={currentChapterIndex === 0}
           >
-            <ChevronLeft className="w-4 h-4 mr-1" /> Précédent
+            <ChevronLeft className="w-4 h-4 mr-0.5" /> Précédent
           </Button>
           <Button
+            size="sm"
             onClick={handleNext}
             disabled={!canProceed() || submitMutation.isPending}
           >
             {currentChapterIndex === totalChapters - 1 ? (
               submitMutation.isPending ? 'Envoi...' : 'Terminer'
             ) : (
-              <>Suivant <ChevronRight className="w-4 h-4 ml-1" /></>
+              <>Suivant <ChevronRight className="w-4 h-4 ml-0.5" /></>
             )}
           </Button>
         </div>
