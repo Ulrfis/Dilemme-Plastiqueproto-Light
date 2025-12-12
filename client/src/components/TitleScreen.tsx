@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import logoImage from "@assets/PlaceDesNations_Dilemme_1762432136623.png";
 import { useMedia } from "@/contexts/MediaContext";
-import posthog from "posthog-js";
+import { captureEvent } from "@/App";
 
 interface TitleScreenProps {
   onStart: () => void;
@@ -12,7 +12,7 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
 
   const handleStart = async () => {
     console.log('[TitleScreen] Start button clicked - unlocking audio...');
-    posthog.capture("title_screen_started");
+    captureEvent("title_screen_started");
 
     // Déverrouiller l'audio avec le user gesture
     const unlocked = await unlockAudio();
