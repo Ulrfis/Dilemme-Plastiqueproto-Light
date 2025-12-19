@@ -35,7 +35,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [exchangeCount, setExchangeCount] = useState(0);
   const [conversationEnded, setConversationEnded] = useState(false);
-  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé.`);
+  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum 8 échanges pour y parvenir !`);
   
   const MAX_EXCHANGES = 8;
   const TOTAL_CLUES = 6;

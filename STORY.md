@@ -199,6 +199,16 @@ Implement complete user flow with screen-based navigation, session management, c
 
 ---
 
+### [2024-12-12] — Welcome Message Update 🔹
+
+**Intent**: Update Peter's initial greeting to include the constraint about maximum 8 exchanges within the welcome message itself for better user clarity.
+
+**Outcome**: Added "Tu as maximum 8 échanges pour y parvenir !" to the welcome message
+
+**Time**: ~2 minutes
+
+---
+
 ## Pulse Checks
 
 *Subjective snapshots. AI should prompt these every 3-5 features or at major moments.*
