@@ -280,6 +280,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch('/api/sessions/:id/feedback', async (req, res) => {
+    try {
+      const sessionId = req.params.id;
+      const partialFeedback = req.body;
+      
+      console.log('[API] Partial feedback update for session:', sessionId, 'data:', partialFeedback);
+      
+      const session = await storage.updatePartialFeedback(sessionId, partialFeedback);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      res.json({ success: true, session });
+    } catch (error) {
+      console.error('Error updating partial feedback:', error);
+      res.status(500).json({ error: 'Server error' });
+    }
+  });
+
   app.post('/api/speech-to-text', upload.single('audio'), async (req: Express.Request, res) => {
     try {
       if (!req.file) {

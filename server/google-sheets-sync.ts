@@ -220,37 +220,38 @@ const UNIFIED_HEADERS = [
   'scenarioObjectives',    // N
   'scenarioClueLink',      // O
   
-  // Questionnaire - Gameplay (16-18)
+  // Questionnaire - Gameplay (16-19)
   'gameplayExplanation',   // P
   'gameplaySimplicity',    // Q
   'gameplayBotResponses',  // R
+  'gameplayVoiceChat',     // S
   
-  // Questionnaire - Feeling (19-21)
-  'feelingOriginality',    // S
-  'feelingPleasant',       // T
-  'feelingInteresting',    // U
+  // Questionnaire - Feeling (20-22)
+  'feelingOriginality',    // T
+  'feelingPleasant',       // U
+  'feelingInteresting',    // V
   
-  // Questionnaire - Motivation (22-24)
-  'motivationContinue',    // V
-  'motivationGameplay',    // W
-  'motivationEcology',     // X
+  // Questionnaire - Motivation (23-25)
+  'motivationContinue',    // W
+  'motivationGameplay',    // X
+  'motivationEcology',     // Y
   
-  // Questionnaire - Interface (25-27)
-  'interfaceVisualBeauty', // Y
-  'interfaceVisualClarity', // Z
-  'interfaceVoiceChat',    // AA
+  // Questionnaire - Interface (26-28)
+  'interfaceVisualBeauty', // Z
+  'interfaceVisualClarity', // AA
+  'interfaceVoiceChat',    // AB
   
-  // Questionnaire - Note globale (28)
-  'overallRating',         // AB
+  // Questionnaire - Note globale (29)
+  'overallRating',         // AC
   
-  // Questionnaire - Texte (29)
-  'improvements',          // AC
+  // Questionnaire - Texte (30)
+  'improvements',          // AD
   
-  // Questionnaire - Oui/Non (30-33)
-  'wantsUpdates',          // AD
-  'updateEmail',           // AE
-  'wouldRecommend',        // AF
-  'wantsInSchool',         // AG
+  // Questionnaire - Oui/Non (31-34)
+  'wantsUpdates',          // AE
+  'updateEmail',           // AF
+  'wouldRecommend',        // AG
+  'wantsInSchool',         // AH
 ];
 
 export class GoogleSheetsSync {
@@ -266,7 +267,7 @@ export class GoogleSheetsSync {
 
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId: spreadsheetId,
-        range: `'${sheetName}'!A1:AG1`,
+        range: `'${sheetName}'!A1:AH1`,
       });
 
       const existingHeaders = response.data.values?.[0];
@@ -274,13 +275,13 @@ export class GoogleSheetsSync {
       if (!existingHeaders || existingHeaders.length === 0 || existingHeaders[0] !== 'userName') {
         await sheets.spreadsheets.values.update({
           spreadsheetId: spreadsheetId,
-          range: `'${sheetName}'!A1:AG1`,
+          range: `'${sheetName}'!A1:AH1`,
           valueInputOption: 'USER_ENTERED',
           requestBody: {
             values: [UNIFIED_HEADERS],
           },
         });
-        console.log('[GoogleSheets] ✅ Unified headers created (35 columns)');
+        console.log('[GoogleSheets] ✅ Unified headers created (34 columns)');
       }
 
       this.initialized = true;
@@ -314,6 +315,7 @@ export class GoogleSheetsSync {
       session.gameplayExplanation ?? '',
       session.gameplaySimplicity ?? '',
       session.gameplayBotResponses ?? '',
+      session.gameplayVoiceChat ?? '',
       
       // Questionnaire - Feeling
       session.feelingOriginality ?? '',
@@ -374,7 +376,7 @@ export class GoogleSheetsSync {
         // Insert new row
         await sheets.spreadsheets.values.append({
           spreadsheetId: spreadsheetId,
-          range: `'${sheetName}'!A:AG`,
+          range: `'${sheetName}'!A:AH`,
           valueInputOption: 'USER_ENTERED',
           requestBody: {
             values: [rowValues],
@@ -385,7 +387,7 @@ export class GoogleSheetsSync {
         // Update existing row
         await sheets.spreadsheets.values.update({
           spreadsheetId: spreadsheetId,
-          range: `'${sheetName}'!A${rowIndex}:AG${rowIndex}`,
+          range: `'${sheetName}'!A${rowIndex}:AH${rowIndex}`,
           valueInputOption: 'USER_ENTERED',
           requestBody: {
             values: [rowValues],

@@ -24,6 +24,7 @@ export interface IStorage {
   incrementUpvote(id: string): Promise<TutorialSession | undefined>;
   incrementMessageCount(sessionId: string): Promise<void>;
   saveFeedbackToSession(sessionId: string, feedback: FeedbackData): Promise<TutorialSession | undefined>;
+  updatePartialFeedback(sessionId: string, feedback: Partial<FeedbackData>): Promise<TutorialSession | undefined>;
   createFeedback(feedback: InsertFeedbackSurvey): Promise<FeedbackSurvey>;
   getFeedbackBySession(sessionId: string): Promise<FeedbackSurvey | undefined>;
 }
@@ -149,6 +150,7 @@ export class DatabaseStorage implements IStorage {
         gameplayExplanation: feedback.gameplayExplanation,
         gameplaySimplicity: feedback.gameplaySimplicity,
         gameplayBotResponses: feedback.gameplayBotResponses,
+        gameplayVoiceChat: feedback.gameplayVoiceChat,
         feelingOriginality: feedback.feelingOriginality,
         feelingPleasant: feedback.feelingPleasant,
         feelingInteresting: feedback.feelingInteresting,
@@ -166,6 +168,45 @@ export class DatabaseStorage implements IStorage {
         wantsInSchool: feedback.wantsInSchool,
         feedbackCompletedAt: new Date(),
       })
+      .where(eq(tutorialSessions.id, sessionId))
+      .returning();
+
+    if (session) {
+      googleSheetsSync.upsertSessionRow(session).catch(console.error);
+    }
+
+    return session || undefined;
+  }
+
+  async updatePartialFeedback(sessionId: string, feedback: Partial<FeedbackData>): Promise<TutorialSession | undefined> {
+    const updateData: any = {};
+    
+    if (feedback.gameplayExplanation !== undefined) updateData.gameplayExplanation = feedback.gameplayExplanation;
+    if (feedback.gameplaySimplicity !== undefined) updateData.gameplaySimplicity = feedback.gameplaySimplicity;
+    if (feedback.gameplayBotResponses !== undefined) updateData.gameplayBotResponses = feedback.gameplayBotResponses;
+    if (feedback.gameplayVoiceChat !== undefined) updateData.gameplayVoiceChat = feedback.gameplayVoiceChat;
+    if (feedback.feelingOriginality !== undefined) updateData.feelingOriginality = feedback.feelingOriginality;
+    if (feedback.feelingPleasant !== undefined) updateData.feelingPleasant = feedback.feelingPleasant;
+    if (feedback.feelingInteresting !== undefined) updateData.feelingInteresting = feedback.feelingInteresting;
+    if (feedback.motivationContinue !== undefined) updateData.motivationContinue = feedback.motivationContinue;
+    if (feedback.motivationGameplay !== undefined) updateData.motivationGameplay = feedback.motivationGameplay;
+    if (feedback.motivationEcology !== undefined) updateData.motivationEcology = feedback.motivationEcology;
+    if (feedback.overallRating !== undefined) updateData.overallRating = feedback.overallRating;
+    if (feedback.improvements !== undefined) updateData.improvements = feedback.improvements;
+    if (feedback.wantsUpdates !== undefined) updateData.wantsUpdates = feedback.wantsUpdates;
+    if (feedback.updateEmail !== undefined) updateData.updateEmail = feedback.updateEmail;
+    if (feedback.wouldRecommend !== undefined) updateData.wouldRecommend = feedback.wouldRecommend;
+    if (feedback.wantsInSchool !== undefined) updateData.wantsInSchool = feedback.wantsInSchool;
+
+    if (Object.keys(updateData).length === 0) {
+      return this.getSession(sessionId);
+    }
+
+    console.log('[Storage] Updating partial feedback for session:', sessionId, 'fields:', Object.keys(updateData));
+
+    const [session] = await db
+      .update(tutorialSessions)
+      .set(updateData)
       .where(eq(tutorialSessions.id, sessionId))
       .returning();
 

@@ -242,6 +242,41 @@ Remove Scénario page, start with Gameplay. Update text: "Il est simple de jouer
 
 ---
 
+### [2024-12-19] — Real-Time Feedback Sync to Google Sheets 🔷
+
+**Intent**: Capture partial questionnaire responses immediately in Google Sheets, even if users don't complete the full survey. Critical for capturing feedback from users who drop off mid-questionnaire.
+
+**Prompt(s)**: 
+```
+Send all questionnaire responses to Google Sheets immediately as they're answered, without waiting for final "Terminer" button click - need to capture partial responses.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- New API endpoint: `PATCH /api/sessions/:id/feedback` for partial updates
+- New storage method: `updatePartialFeedback()` that only updates provided fields
+- FeedbackSurvey component now sends each response immediately when selected
+- Text fields (improvements, email) use 1-second debounce to avoid excessive API calls
+- Rating selections and yes/no buttons trigger immediate sync
+- Added `gameplayVoiceChat` field to database schema and Google Sheets headers
+- Google Sheets columns updated: now 34 columns (A:AH)
+
+**Architecture**: 
+```
+User clicks rating → updateField() → sendPartialUpdate() → PATCH /api/sessions/:id/feedback
+                                                          → storage.updatePartialFeedback()
+                                                          → googleSheetsSync.upsertSessionRow()
+```
+
+**Surprise**: The unified session row approach (feedback stored in tutorialSessions table) makes partial updates seamless—no need for a separate feedback table sync
+
+**Friction**: None—existing architecture supported this cleanly
+
+**Time**: ~15 minutes
+
+---
+
 ## Pulse Checks
 
 *Subjective snapshots. AI should prompt these every 3-5 features or at major moments.*

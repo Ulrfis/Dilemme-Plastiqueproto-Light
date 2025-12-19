@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { captureEvent } from "@/App";
 import { apiRequest } from "@/lib/queryClient";
@@ -265,11 +265,32 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
   });
   const [email, setEmail] = useState('');
   const [showThankYou, setShowThankYou] = useState(false);
+  const textDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   const totalChapters = CHAPTERS.length;
   const progress = ((currentChapterIndex + 1) / totalChapters) * 100;
   const currentChapter = CHAPTERS[currentChapterIndex];
   const currentQuestions = currentChapter.questions;
+
+  const partialUpdateMutation = useMutation({
+    mutationFn: async (data: Partial<FeedbackData>) => {
+      console.log('[FeedbackSurvey] Sending partial update:', data);
+      const res = await apiRequest('PATCH', `/api/sessions/${sessionId}/feedback`, data);
+      return res.json();
+    },
+    onSuccess: (result) => {
+      console.log('[FeedbackSurvey] Partial update synced to Google Sheets');
+    },
+    onError: (error) => {
+      console.error('[FeedbackSurvey] Failed to sync partial update:', error);
+    },
+  });
+
+  const sendPartialUpdate = (field: keyof FeedbackData, value: any) => {
+    if (sessionId && sessionId !== 'anonymous') {
+      partialUpdateMutation.mutate({ [field]: value });
+    }
+  };
 
   const submitMutation = useMutation({
     mutationFn: async (data: FeedbackData) => {
@@ -290,7 +311,38 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
 
   const updateField = (field: keyof FeedbackData, value: any) => {
     setFeedbackData(prev => ({ ...prev, [field]: value }));
+    
+    if (field === 'improvements') {
+      if (textDebounceRef.current) {
+        clearTimeout(textDebounceRef.current);
+      }
+      textDebounceRef.current = setTimeout(() => {
+        sendPartialUpdate(field, value);
+      }, 1000);
+    } else {
+      sendPartialUpdate(field, value);
+    }
   };
+
+  const updateEmail = (newEmail: string) => {
+    setEmail(newEmail);
+    if (textDebounceRef.current) {
+      clearTimeout(textDebounceRef.current);
+    }
+    textDebounceRef.current = setTimeout(() => {
+      if (newEmail.trim()) {
+        sendPartialUpdate('updateEmail', newEmail);
+      }
+    }, 1000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (textDebounceRef.current) {
+        clearTimeout(textDebounceRef.current);
+      }
+    };
+  }, []);
 
   const handleNext = () => {
     if (currentChapterIndex < totalChapters - 1) {
@@ -427,7 +479,7 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
                             type="email"
                             placeholder="ton.email@example.com"
                             value={email}
-                            onChange={(e) => setEmail(e.target.value)}
+                            onChange={(e) => updateEmail(e.target.value)}
                             className="text-center text-sm bg-background border-primary/30 focus:border-primary"
                             data-testid="input-email"
                           />
