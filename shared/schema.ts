@@ -27,6 +27,7 @@ export const tutorialSessions = pgTable("tutorial_sessions", {
   gameplayExplanation: integer("gameplay_explanation"),
   gameplaySimplicity: integer("gameplay_simplicity"),
   gameplayBotResponses: integer("gameplay_bot_responses"),
+  gameplayVoiceChat: integer("gameplay_voice_chat"),
 
   // Questionnaire responses - Feeling (1-6)
   feelingOriginality: integer("feeling_originality"),
@@ -94,6 +95,7 @@ export interface FeedbackData {
   gameplayExplanation?: number;
   gameplaySimplicity?: number;
   gameplayBotResponses?: number;
+  gameplayVoiceChat?: number;
   feelingOriginality?: number;
   feelingPleasant?: number;
   feelingInteresting?: number;

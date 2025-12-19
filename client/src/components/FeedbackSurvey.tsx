@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { captureEvent } from "@/App";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ChevronLeft, ChevronRight, Check, X, Share2, ExternalLink } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X, Share2, ExternalLink, Mic, MicOff, Loader2 } from "lucide-react";
 
 interface FeedbackSurveyProps {
   sessionId: string;
@@ -17,21 +17,16 @@ interface FeedbackSurveyProps {
 interface FeedbackData {
   sessionId: string;
   userName?: string;
-  scenarioComprehension?: number;
-  scenarioObjectives?: number;
-  scenarioClueLink?: number;
   gameplayExplanation?: number;
   gameplaySimplicity?: number;
   gameplayBotResponses?: number;
+  gameplayVoiceChat?: number;
   feelingOriginality?: number;
   feelingPleasant?: number;
   feelingInteresting?: number;
   motivationContinue?: number;
   motivationGameplay?: number;
   motivationEcology?: number;
-  interfaceVisualBeauty?: number;
-  interfaceVisualClarity?: number;
-  interfaceVoiceChat?: number;
   overallRating?: number;
   improvements?: string;
   wantsUpdates?: boolean;
@@ -41,7 +36,7 @@ interface FeedbackData {
 }
 
 // Question types
-type QuestionType = 'rating' | 'text' | 'yesno' | 'yesno-email' | 'yesno-share';
+type QuestionType = 'rating' | 'text' | 'text-voice' | 'yesno' | 'yesno-email' | 'yesno-share';
 
 interface Question {
   id: string;
@@ -52,14 +47,11 @@ interface Question {
 }
 
 const QUESTIONS: Question[] = [
-  // Scénario
-  { id: 's1', category: 'Scénario', question: "L'histoire est facile à comprendre.", type: 'rating', field: 'scenarioComprehension' },
-  { id: 's2', category: 'Scénario', question: "Les objectifs sont clairs.", type: 'rating', field: 'scenarioObjectives' },
-  { id: 's3', category: 'Scénario', question: "Le lien entre les indices et la pollution plastique est bien mis en évidence.", type: 'rating', field: 'scenarioClueLink' },
-  // Gameplay
+  // Gameplay (start directly here, removed Scénario)
   { id: 'g1', category: 'Gameplay', question: "Le principe de jeu est bien expliqué.", type: 'rating', field: 'gameplayExplanation' },
-  { id: 'g2', category: 'Gameplay', question: "Il est simple de comprendre le principe.", type: 'rating', field: 'gameplaySimplicity' },
-  { id: 'g3', category: 'Gameplay', question: "Peter_bot répond intelligemment pour faire progresser l'enquête.", type: 'rating', field: 'gameplayBotResponses' },
+  { id: 'g2', category: 'Gameplay', question: "Il est simple de jouer.", type: 'rating', field: 'gameplaySimplicity' },
+  { id: 'g3', category: 'Gameplay', question: "Peter répond intelligemment pour faire progresser l'enquête.", type: 'rating', field: 'gameplayBotResponses' },
+  { id: 'g4', category: 'Gameplay', question: "La discussion vocale est agréable.", type: 'rating', field: 'gameplayVoiceChat' },
   // Feeling
   { id: 'f1', category: 'Feeling', question: "Le principe de jeu est original.", type: 'rating', field: 'feelingOriginality' },
   { id: 'f2', category: 'Feeling', question: "Le principe de jeu est plaisant.", type: 'rating', field: 'feelingPleasant' },
@@ -68,13 +60,9 @@ const QUESTIONS: Question[] = [
   { id: 'm1', category: 'Motivation', question: "Le tutoriel donne envie de continuer.", type: 'rating', field: 'motivationContinue' },
   { id: 'm2', category: 'Motivation', question: "Le principe de jeu est motivant.", type: 'rating', field: 'motivationGameplay' },
   { id: 'm3', category: 'Motivation', question: "Le thème écologique est motivant.", type: 'rating', field: 'motivationEcology' },
-  // Interface
-  { id: 'i1', category: 'Interface', question: "Le contenu visuel est joli.", type: 'rating', field: 'interfaceVisualBeauty' },
-  { id: 'i2', category: 'Interface', question: "Le contenu visuel est clair.", type: 'rating', field: 'interfaceVisualClarity' },
-  { id: 'i3', category: 'Interface', question: "La discussion vocale est agréable.", type: 'rating', field: 'interfaceVoiceChat' },
-  // Bilan et perspectives
-  { id: 'o1', category: "Bilan et perspectives", question: "Quelle note donnerais-tu à ce tutoriel ?", type: 'rating', field: 'overallRating' },
-  { id: 't1', category: "Bilan et perspectives", question: "Quelles améliorations verrais-tu ?", type: 'text', field: 'improvements' },
+  // Bilan et perspectives (removed Interface page)
+  { id: 'o1', category: "Bilan et perspectives", question: "Quelle note donnerais-tu à ce prototype ?", type: 'rating', field: 'overallRating' },
+  { id: 't1', category: "Bilan et perspectives", question: "Quelles améliorations verrais-tu ?", type: 'text-voice', field: 'improvements' },
   { id: 'y2', category: "Bilan et perspectives", question: "Recommanderais-tu ce jeu à un ami ?", type: 'yesno-share', field: 'wouldRecommend' },
   { id: 'y3', category: 'Bilan et perspectives', question: "Aimerais-tu que ce jeu soit utilisé à l'école ?", type: 'yesno', field: 'wantsInSchool' },
   { id: 'y1', category: 'Bilan et perspectives', question: "Veux-tu être au courant lors de la sortie du jeu ?", type: 'yesno-email', field: 'wantsUpdates' },
@@ -108,6 +96,7 @@ function RatingSlider({ value, onChange }: { value: number | undefined; onChange
           <button
             key={num}
             onClick={() => onChange(num)}
+            data-testid={`rating-button-${num}`}
             className={`flex-1 h-10 rounded-lg text-sm font-bold transition-all duration-200 ${
               value === num
                 ? 'bg-primary text-primary-foreground scale-105 shadow-md'
@@ -132,6 +121,7 @@ function YesNoButtons({ value, onChange }: { value: boolean | undefined; onChang
     <div className="flex gap-3 justify-center">
       <button
         onClick={() => onChange(true)}
+        data-testid="button-yes"
         className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 flex items-center gap-1.5 ${
           value === true
             ? 'bg-green-500 text-white scale-105 shadow-md'
@@ -142,6 +132,7 @@ function YesNoButtons({ value, onChange }: { value: boolean | undefined; onChang
       </button>
       <button
         onClick={() => onChange(false)}
+        data-testid="button-no"
         className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 flex items-center gap-1.5 ${
           value === false
             ? 'bg-red-500 text-white scale-105 shadow-md'
@@ -150,6 +141,118 @@ function YesNoButtons({ value, onChange }: { value: boolean | undefined; onChang
       >
         <X className="w-4 h-4" /> Non
       </button>
+    </div>
+  );
+}
+
+// Voice input component for text fields
+function VoiceTextInput({ 
+  value, 
+  onChange, 
+  placeholder 
+}: { 
+  value: string; 
+  onChange: (v: string) => void; 
+  placeholder: string;
+}) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        await transcribeAudio(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('[VoiceTextInput] Error starting recording:', error);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const transcribeAudio = async (audioBlob: Blob) => {
+    setIsTranscribing(true);
+    try {
+      const formData = new FormData();
+      formData.append('audio', audioBlob, 'audio.webm');
+
+      const response = await fetch('/api/speech-to-text', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.text) {
+          // Append to existing text or set new text
+          onChange(value ? `${value} ${data.text}` : data.text);
+        }
+      }
+    } catch (error) {
+      console.error('[VoiceTextInput] Transcription error:', error);
+    } finally {
+      setIsTranscribing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <Textarea
+          placeholder={placeholder}
+          className="min-h-20 text-sm pr-12"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          data-testid="input-improvements"
+        />
+        <button
+          type="button"
+          onClick={isRecording ? stopRecording : startRecording}
+          disabled={isTranscribing}
+          data-testid="button-voice-input"
+          className={`absolute right-2 top-2 p-2 rounded-full transition-all duration-200 ${
+            isRecording 
+              ? 'bg-red-500 text-white animate-pulse' 
+              : isTranscribing
+                ? 'bg-muted text-muted-foreground'
+                : 'bg-primary/10 text-primary hover:bg-primary/20'
+          }`}
+        >
+          {isTranscribing ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : isRecording ? (
+            <MicOff className="w-4 h-4" />
+          ) : (
+            <Mic className="w-4 h-4" />
+          )}
+        </button>
+      </div>
+      <p className="text-xs text-muted-foreground text-center">
+        {isRecording ? "Parle maintenant... Clique pour arrêter" : isTranscribing ? "Transcription en cours..." : "Clique sur le micro pour dicter"}
+      </p>
     </div>
   );
 }
@@ -211,18 +314,25 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
 
   const canProceed = () => {
     // Check if all questions in the current chapter are answered
-    return currentQuestions.every(question => {
+    const allAnswered = currentQuestions.every(question => {
       const value = feedbackData[question.field];
-      if (question.type === 'text') return true; // Optional
+      if (question.type === 'text' || question.type === 'text-voice') return true; // Optional
       if (question.type === 'yesno' || question.type === 'yesno-email' || question.type === 'yesno-share') {
         return value !== undefined;
       }
       return value !== undefined;
     });
+
+    // On last chapter, if user said yes to email updates, require email
+    if (currentChapterIndex === totalChapters - 1 && feedbackData.wantsUpdates === true) {
+      return allAnswered && email.trim().length > 0;
+    }
+
+    return allAnswered;
   };
 
   const handleShare = () => {
-    const url = 'https://proto-dilemme2.edugami.app/syntheses';
+    const url = 'https://proto-dilemme2.edugami.app/';
     if (navigator.share) {
       navigator.share({ title: 'Dilemme Plastique', url });
     } else {
@@ -250,7 +360,7 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
       <div className="flex-shrink-0 bg-background border-b px-3 py-2">
         <div className="max-w-3xl mx-auto">
           <div className="flex items-center justify-between mb-1.5">
-            <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1" data-testid="button-close-survey">
               <X className="w-5 h-5" />
             </button>
             <span className="text-xs text-muted-foreground">{currentChapterIndex + 1} / {totalChapters}</span>
@@ -264,7 +374,7 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
         </div>
       </div>
 
-      {/* Question content */}
+      {/* Question content - scrollable area that includes navigation */}
       <div className="flex-1 px-3 py-2 overflow-y-auto min-h-0">
         <div className="w-full max-w-3xl mx-auto animate-in fade-in slide-in-from-right-4 duration-300" key={currentChapterIndex}>
           {/* Chapter title */}
@@ -292,6 +402,14 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
                   />
                 )}
 
+                {question.type === 'text-voice' && (
+                  <VoiceTextInput
+                    value={(feedbackData[question.field] as string) || ''}
+                    onChange={(v) => updateField(question.field, v)}
+                    placeholder="Partage tes idées... (optionnel)"
+                  />
+                )}
+
                 {(question.type === 'yesno' || question.type === 'yesno-email' || question.type === 'yesno-share') && (
                   <div className="space-y-2">
                     <YesNoButtons
@@ -301,19 +419,30 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
 
                     {question.type === 'yesno-email' && feedbackData.wantsUpdates === true && (
                       <div className="mt-3 animate-in fade-in slide-in-from-bottom-2">
-                        <Input
-                          type="email"
-                          placeholder="Ton email..."
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          className="text-center text-sm"
-                        />
+                        <div className="bg-primary/10 border-2 border-primary rounded-lg p-3">
+                          <label className="block text-sm font-medium text-primary mb-2 text-center">
+                            Entre ton email pour être informé :
+                          </label>
+                          <Input
+                            type="email"
+                            placeholder="ton.email@example.com"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="text-center text-sm bg-background border-primary/30 focus:border-primary"
+                            data-testid="input-email"
+                          />
+                          {!email.trim() && (
+                            <p className="text-xs text-destructive mt-1 text-center">
+                              Email requis pour continuer
+                            </p>
+                          )}
+                        </div>
                       </div>
                     )}
 
                     {question.type === 'yesno-share' && feedbackData.wouldRecommend === true && (
                       <div className="mt-3 animate-in fade-in slide-in-from-bottom-2 text-center">
-                        <Button onClick={handleShare} variant="outline" size="sm" className="gap-1.5">
+                        <Button onClick={handleShare} variant="outline" size="sm" className="gap-1.5" data-testid="button-share">
                           <Share2 className="w-3.5 h-3.5" /> Partager
                           <ExternalLink className="w-3 h-3" />
                         </Button>
@@ -324,34 +453,35 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
               </div>
             ))}
           </div>
-        </div>
-      </div>
 
-      {/* Navigation */}
-      <div className="flex-shrink-0 bg-background border-t px-3 py-2">
-        <div className="max-w-3xl mx-auto flex justify-between">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handlePrev}
-            disabled={currentChapterIndex === 0}
-          >
-            <ChevronLeft className="w-4 h-4 mr-0.5" /> Précédent
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleNext}
-            disabled={!canProceed() || submitMutation.isPending}
-          >
-            {currentChapterIndex === totalChapters - 1 ? (
-              submitMutation.isPending ? 'Envoi...' : 'Terminer'
-            ) : (
-              <>Suivant <ChevronRight className="w-4 h-4 ml-0.5" /></>
-            )}
-          </Button>
+          {/* Navigation - placed directly below questions, not at bottom of screen */}
+          <div className="mt-4 pb-4">
+            <div className="flex justify-between">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handlePrev}
+                disabled={currentChapterIndex === 0}
+                data-testid="button-prev"
+              >
+                <ChevronLeft className="w-4 h-4 mr-0.5" /> Précédent
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleNext}
+                disabled={!canProceed() || submitMutation.isPending}
+                data-testid="button-next"
+              >
+                {currentChapterIndex === totalChapters - 1 ? (
+                  submitMutation.isPending ? 'Envoi...' : 'Terminer'
+                ) : (
+                  <>Suivant <ChevronRight className="w-4 h-4 ml-0.5" /></>
+                )}
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-

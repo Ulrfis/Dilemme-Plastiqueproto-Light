@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2024-12-12  
+> **Last Updated**: 2024-12-19  
 
 ---
 
@@ -206,6 +206,39 @@ Implement complete user flow with screen-based navigation, session management, c
 **Outcome**: Added "Tu as maximum 8 échanges pour y parvenir !" to the welcome message
 
 **Time**: ~2 minutes
+
+---
+
+### [2024-12-19] — Questionnaire Restructuring 🔷
+
+**Intent**: Major overhaul of feedback questionnaire based on user requirements for streamlined UX and better data collection.
+
+**Prompt(s)**: 
+```
+Remove Scénario page, start with Gameplay. Update text: "Il est simple de jouer.", "Peter répond intelligemment...". Add voice chat question to Gameplay. Remove Interface page. Change "tutoriel" to "prototype". Add voice dictation for improvements. Update share link. Make email field more visible with color. Disable Terminer if email required but not filled. Move navigation buttons below questions, not at screen bottom.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Removed "Scénario" page (3 questions)
+- Removed "Interface" page (3 questions)
+- Survey now: Gameplay → Feeling → Motivation → Bilan et perspectives
+- Added "La discussion vocale est agréable." to Gameplay
+- Changed "Il est simple de comprendre le principe." → "Il est simple de jouer."
+- Changed "Peter_bot répond..." → "Peter répond..."
+- Changed "tutoriel" → "prototype" in rating question
+- Added voice dictation (microphone button) for "Quelles améliorations verrais-tu ?"
+- Updated share link to https://proto-dilemme2.edugami.app/
+- Email field now highlighted with primary color when visible
+- "Terminer" button disabled if user said yes to email updates but hasn't entered email
+- Navigation buttons now positioned directly below questions (not fixed at screen bottom)
+
+**Surprise**: Voice dictation in the feedback form creates a nice symmetry with the voice-based tutorial interaction—feels cohesive
+
+**Friction**: None significant—clean refactor
+
+**Time**: ~20 minutes
 
 ---
 
