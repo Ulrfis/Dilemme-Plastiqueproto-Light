@@ -37,6 +37,18 @@ declare global {
   }
 }
 
+// Identify user in PostHog with their name
+export function identifyUser(userId: string, properties?: Record<string, unknown>) {
+  if (window.posthog) {
+    window.posthog.identify(userId, properties);
+    console.log(`[PostHog] ✅ Identified user: ${userId}`, properties);
+    return true;
+  } else {
+    console.warn(`[PostHog] ⚠️ Not loaded, skipping identify for: ${userId}`);
+    return false;
+  }
+}
+
 // Session tracking - initialize on load
 if (typeof window !== 'undefined') {
   window.dilemmeSessionStart = Date.now();
@@ -251,7 +263,14 @@ function WelcomePage() {
 
   const handleComplete = async (name: string) => {
     setUserName(name);
-    captureFeatureUsed('welcome_name_entered', { hasName: !!name });
+    
+    // Identify user in PostHog with their name before starting
+    identifyUser(name, { 
+      name: name,
+      signup_date: new Date().toISOString(),
+    });
+    
+    captureFeatureUsed('welcome_name_entered', { hasName: !!name, userName: name });
     
     try {
       const session = await createSession({
@@ -262,7 +281,7 @@ function WelcomePage() {
         completed: 0,
       });
       setSessionId(session.id);
-      captureFeatureUsed('session_created', { sessionId: session.id });
+      captureFeatureUsed('session_created', { sessionId: session.id, userName: name });
       setLocation('/tutorial');
     } catch (error) {
       console.error('Failed to create session:', error);
