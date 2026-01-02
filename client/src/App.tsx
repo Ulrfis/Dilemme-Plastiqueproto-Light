@@ -259,9 +259,16 @@ function VideoPage() {
 
 function WelcomePage() {
   const [, setLocation] = useLocation();
-  const { setUserName, setSessionId } = useSessionFlow();
+  const { setUserName, setSessionId, setAudioUnlocked, setMessages, setExchangeCount, setConversationEnded } = useSessionFlow();
 
   const handleComplete = async (name: string) => {
+    // CRITICAL: Reset audio and conversation state for new session
+    // This ensures Peter's welcome message will be spoken even if user had a previous session
+    setAudioUnlocked(false);
+    setMessages([]);
+    setExchangeCount(0);
+    setConversationEnded(false);
+    
     setUserName(name);
     
     // Identify user in PostHog with their name before starting
