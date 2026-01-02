@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -15,6 +15,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, RotateCcw, ArrowRight } from "lucide-react";
 import { captureEvent } from "@/App";
+import { useSessionFlow } from "@/contexts/SessionFlowContext";
 
 interface DragDropGameProps {
   userName: string;
@@ -143,10 +144,22 @@ function DroppableSlot({ id, placedWord, onRemove, onPlace, hasSelectedWord }: D
 }
 
 export default function DragDropGame({ userName, onComplete }: DragDropGameProps) {
-  const [placements, setPlacements] = useState<Record<string, string>>({});
-  const [validationResult, setValidationResult] = useState<{ errors: number; validated: boolean } | null>(null);
+  const sessionFlow = useSessionFlow();
+  
+  const [placements, setPlacementsLocal] = useState<Record<string, string>>(() => sessionFlow.dragDropPlacements);
+  const [validationResult, setValidationResult] = useState<{ errors: number; validated: boolean } | null>(() => 
+    sessionFlow.dragDropValidated ? { errors: 0, validated: true } : null
+  );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedWordId, setSelectedWordId] = useState<string | null>(null);
+  
+  const setPlacements = useCallback((placementsOrFn: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => {
+    setPlacementsLocal(prev => {
+      const newPlacements = typeof placementsOrFn === 'function' ? placementsOrFn(prev) : placementsOrFn;
+      sessionFlow.setDragDropPlacements(newPlacements);
+      return newPlacements;
+    });
+  }, [sessionFlow]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {

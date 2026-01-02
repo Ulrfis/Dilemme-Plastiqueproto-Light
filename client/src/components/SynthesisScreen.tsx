@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Mic, Square, Loader2, Send, Users, MessageCircle, CheckCircle2 } from "lucide-react";
@@ -7,6 +7,7 @@ import { Link } from "wouter";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useMutation } from "@tanstack/react-query";
 import { captureEvent } from "@/App";
+import { useSessionFlow } from "@/contexts/SessionFlowContext";
 
 interface SynthesisScreenProps {
   userName: string;
@@ -21,7 +22,9 @@ export default function SynthesisScreen({
   foundClues,
   onShowFeedback 
 }: SynthesisScreenProps) {
-  const [synthesis, setSynthesis] = useState('');
+  const sessionFlow = useSessionFlow();
+  
+  const [synthesis, setSynthesisLocal] = useState(() => sessionFlow.synthesis);
   const [isSaving, setIsSaving] = useState(false);
   const [hasSaved, setHasSaved] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -29,6 +32,14 @@ export default function SynthesisScreen({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const { toast } = useToast();
+  
+  const setSynthesis = useCallback((valueOrFn: string | ((prev: string) => string)) => {
+    setSynthesisLocal(prev => {
+      const newValue = typeof valueOrFn === 'function' ? valueOrFn(prev) : valueOrFn;
+      sessionFlow.setSynthesis(newValue);
+      return newValue;
+    });
+  }, [sessionFlow]);
 
   const startRecording = async () => {
     try {
