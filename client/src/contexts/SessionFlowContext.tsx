@@ -91,20 +91,26 @@ export function SessionFlowProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   const setUserName = useCallback((name: string) => {
-    setState(prev => {
-      const newState = { ...prev, userName: name };
-      saveToStorage(newState);
-      return newState;
-    });
+    // Save to storage FIRST (synchronously) before React state update
+    const currentStored = sessionStorage.getItem(STORAGE_KEY);
+    const currentState = currentStored ? JSON.parse(currentStored) : initialState;
+    const newState = { ...currentState, userName: name };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
+    console.log('[SessionFlow] userName saved synchronously:', name);
+    
+    setState(prev => ({ ...prev, userName: name }));
   }, []);
 
   const setSessionId = useCallback((id: string) => {
-    setState(prev => {
-      const newState = { ...prev, sessionId: id };
-      saveToStorage(newState);
-      console.log('[SessionFlow] Session ID set and saved:', id.substring(0, 8));
-      return newState;
-    });
+    // Save to storage FIRST (synchronously) before React state update
+    // This ensures sessionStorage has the value before any navigation
+    const currentStored = sessionStorage.getItem(STORAGE_KEY);
+    const currentState = currentStored ? JSON.parse(currentStored) : initialState;
+    const newState = { ...currentState, sessionId: id };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
+    console.log('[SessionFlow] sessionId saved synchronously:', id.substring(0, 8));
+    
+    setState(prev => ({ ...prev, sessionId: id }));
   }, []);
 
   const setFoundClues = useCallback((clues: string[]) => {
