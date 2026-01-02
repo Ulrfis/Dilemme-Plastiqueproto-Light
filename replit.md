@@ -22,13 +22,21 @@ Preferred communication style: Simple, everyday language.
 
 **Framework**: React 18 with TypeScript, built using Vite for optimal development and production performance.
 
-**Routing**: Wouter for lightweight client-side routing with two main routes:
-- `/`: Main application flow (title → video → welcome → tutorial → drag-drop game → synthesis → feedback)
+**Routing**: Wouter for lightweight client-side routing with multi-route navigation:
+- `/`: Title screen with start button
+- `/video`: Video introduction with skip option
+- `/welcome`: User name input and session creation
+- `/tutorial`: Main AI conversation interface with image analysis
+- `/game`: Drag-drop game for clue organization
+- `/synthesis`: User synthesis writing screen
+- `/feedback`: Feedback survey
+- `/complete`: Completion screen
 - `/syntheses`: Community page displaying user synthesis submissions with upvoting
 
 **State Management**: 
+- SessionFlowContext for centralized session state with sessionStorage persistence
 - TanStack Query v5 for server state synchronization and caching
-- Local React state for UI interactions and conversation flow
+- Hybrid session validation (React state + sessionStorage) to handle navigation race conditions
 - Custom hooks for complex stateful logic (voice recording, audio playback, streaming)
 
 **UI Architecture**:
