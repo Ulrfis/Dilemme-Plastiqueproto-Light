@@ -638,11 +638,11 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   const allCluesFound = foundClues.length >= TOTAL_CLUES;
 
-  const FinishButton = (
+  const FinishButton = foundClues.length >= 3 ? (
     <Button
       onClick={handleFinish}
       size="lg"
-      className={`transition-all duration-500 font-bold shadow-lg hover:scale-105 active:scale-95 whitespace-nowrap ${
+      className={`transition-all duration-500 font-bold shadow-lg hover:scale-105 active:scale-95 whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 ${
         allCluesFound 
           ? "bg-green-600 hover:bg-green-700 text-white px-8 py-6 text-xl min-h-[4rem] animate-pulse" 
           : "bg-primary/90 text-white px-6 py-5 text-lg"
@@ -652,7 +652,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       {allCluesFound && <CheckCircle2 className="mr-2 h-6 w-6" />}
       Poursuivre
     </Button>
-  );
+  ) : null;
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
