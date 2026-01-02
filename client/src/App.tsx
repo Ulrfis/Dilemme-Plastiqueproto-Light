@@ -27,23 +27,97 @@ declare global {
       reset: () => void;
       get_distinct_id: () => string;
       get_property: (key: string) => unknown;
+      debug: (enabled: boolean) => void;
       __loaded?: boolean;
       _i?: unknown[];
     };
     testPostHog?: () => void;
+    dilemmeSessionStart?: number;
+    dilemmeActionsCount?: number;
   }
+}
+
+// Session tracking - initialize on load
+if (typeof window !== 'undefined') {
+  window.dilemmeSessionStart = Date.now();
+  window.dilemmeActionsCount = 0;
 }
 
 // Helper function to safely capture PostHog events
 export function captureEvent(event: string, properties?: Record<string, unknown>) {
+  // Increment actions count for session tracking
+  if (window.dilemmeActionsCount !== undefined) {
+    window.dilemmeActionsCount++;
+  }
+  
   if (window.posthog) {
-    window.posthog.capture(event, properties);
+    window.posthog.capture(event, {
+      ...properties,
+      timestamp: new Date().toISOString(),
+    });
     console.log(`[PostHog] ✅ Captured event: ${event}`, properties);
     return true;
   } else {
     console.warn(`[PostHog] ⚠️ Not loaded, skipping event: ${event}`);
     return false;
   }
+}
+
+// Track specific feature usage
+export function captureFeatureUsed(featureName: string, additionalProps?: Record<string, unknown>) {
+  return captureEvent('feature_used', {
+    feature_name: featureName,
+    ...additionalProps,
+  });
+}
+
+// Track demo/tutorial completion
+export function captureDemoCompleted(properties?: Record<string, unknown>) {
+  const sessionDuration = window.dilemmeSessionStart 
+    ? (Date.now() - window.dilemmeSessionStart) / 1000 
+    : 0;
+  
+  return captureEvent('demo_completed', {
+    duration_seconds: sessionDuration,
+    actions_completed: window.dilemmeActionsCount || 0,
+    ...properties,
+  });
+}
+
+// Track demo abandonment
+export function captureDemoAbandoned(step: string, additionalProps?: Record<string, unknown>) {
+  const sessionDuration = window.dilemmeSessionStart 
+    ? (Date.now() - window.dilemmeSessionStart) / 1000 
+    : 0;
+  
+  return captureEvent('demo_abandoned', {
+    step,
+    time_spent: sessionDuration,
+    actions_completed: window.dilemmeActionsCount || 0,
+    ...additionalProps,
+  });
+}
+
+// Track session start
+export function captureSessionStarted() {
+  window.dilemmeSessionStart = Date.now();
+  window.dilemmeActionsCount = 0;
+  return captureEvent('session_started', {
+    url: window.location.href,
+  });
+}
+
+// Track session end
+export function captureSessionEnded(additionalProps?: Record<string, unknown>) {
+  const sessionDuration = window.dilemmeSessionStart 
+    ? (Date.now() - window.dilemmeSessionStart) / 1000 
+    : 0;
+  
+  return captureEvent('session_ended', {
+    duration_seconds: sessionDuration,
+    actions_completed: window.dilemmeActionsCount || 0,
+    ...additionalProps,
+  });
 }
 
 // PostHog verification function - call from browser console with window.testPostHog()
@@ -114,28 +188,61 @@ if (typeof window !== 'undefined') {
   };
 }
 
-// Initial PostHog check and app_loaded event (with delay to ensure PostHog is fully loaded)
+// Initial PostHog check and session tracking (with delay to ensure PostHog is fully loaded)
 if (typeof window !== 'undefined') {
   // Wait a bit for PostHog to fully initialize
   setTimeout(() => {
     const verification = verifyPostHog();
     if (verification.status === 'ok') {
+      // Capture app loaded and session started events
       captureEvent("app_loaded", {
-        timestamp: new Date().toISOString(),
         url: window.location.href
       });
+      captureSessionStarted();
     }
   }, 1000);
+  
+  // Track session end when user leaves or closes the page
+  window.addEventListener('beforeunload', () => {
+    captureSessionEnded({
+      exit_url: window.location.href,
+      exit_type: 'page_unload'
+    });
+  });
+  
+  // Also track visibility change for mobile (when app goes to background)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      captureEvent('app_backgrounded', {
+        duration_seconds: window.dilemmeSessionStart 
+          ? (Date.now() - window.dilemmeSessionStart) / 1000 
+          : 0,
+        actions_completed: window.dilemmeActionsCount || 0,
+      });
+    }
+  });
 }
 
 function TitlePage() {
   const [, setLocation] = useLocation();
-  return <TitleScreen onStart={() => setLocation('/video')} />;
+  
+  const handleStart = () => {
+    captureFeatureUsed('title_screen_start');
+    setLocation('/video');
+  };
+  
+  return <TitleScreen onStart={handleStart} />;
 }
 
 function VideoPage() {
   const [, setLocation] = useLocation();
-  return <VideoIntro onComplete={() => setLocation('/welcome')} />;
+  
+  const handleComplete = () => {
+    captureFeatureUsed('video_completed');
+    setLocation('/welcome');
+  };
+  
+  return <VideoIntro onComplete={handleComplete} />;
 }
 
 function WelcomePage() {
@@ -144,6 +251,8 @@ function WelcomePage() {
 
   const handleComplete = async (name: string) => {
     setUserName(name);
+    captureFeatureUsed('welcome_name_entered', { hasName: !!name });
+    
     try {
       const session = await createSession({
         userName: name,
@@ -153,9 +262,13 @@ function WelcomePage() {
         completed: 0,
       });
       setSessionId(session.id);
+      captureFeatureUsed('session_created', { sessionId: session.id });
       setLocation('/tutorial');
     } catch (error) {
       console.error('Failed to create session:', error);
+      captureEvent('session_creation_error', { 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      });
     }
   };
 
@@ -170,11 +283,16 @@ function TutorialPage() {
   const hasValidSession = sessionId || (storedSession && JSON.parse(storedSession).sessionId);
 
   if (!hasValidSession) {
+    captureDemoAbandoned('tutorial', { reason: 'no_valid_session' });
     return <Redirect to="/" />;
   }
 
   const handleComplete = (finalScore: number, clues: string[]) => {
     setFoundClues(clues);
+    captureFeatureUsed('tutorial_completed', {
+      cluesFound: clues.length,
+      score: finalScore,
+    });
     setLocation('/game');
   };
 
@@ -195,13 +313,19 @@ function GamePage() {
   const hasValidSession = userName || (storedSession && JSON.parse(storedSession).sessionId);
 
   if (!hasValidSession) {
+    captureDemoAbandoned('game', { reason: 'no_valid_session' });
     return <Redirect to="/" />;
   }
+
+  const handleComplete = () => {
+    captureFeatureUsed('game_completed');
+    setLocation('/synthesis');
+  };
 
   return (
     <DragDropGame
       userName={userName || (storedSession ? JSON.parse(storedSession).userName : '')}
-      onComplete={() => setLocation('/synthesis')}
+      onComplete={handleComplete}
     />
   );
 }
@@ -214,17 +338,23 @@ function SynthesisPage() {
   const hasValidSession = sessionId || (storedSession && JSON.parse(storedSession).sessionId);
 
   if (!hasValidSession) {
+    captureDemoAbandoned('synthesis', { reason: 'no_valid_session' });
     return <Redirect to="/" />;
   }
 
   const stored = storedSession ? JSON.parse(storedSession) : null;
+  
+  const handleShowFeedback = () => {
+    captureFeatureUsed('synthesis_completed');
+    setLocation('/feedback');
+  };
 
   return (
     <SynthesisScreen
       userName={userName || (stored?.userName || '')}
       sessionId={sessionId || (stored?.sessionId || '')}
       foundClues={foundClues.length > 0 ? foundClues : (stored?.foundClues || [])}
-      onShowFeedback={() => setLocation('/feedback')}
+      onShowFeedback={handleShowFeedback}
     />
   );
 }
@@ -237,6 +367,7 @@ function FeedbackPage() {
   const hasValidSession = sessionId || (storedSession && JSON.parse(storedSession).sessionId);
 
   if (!hasValidSession) {
+    captureDemoAbandoned('feedback', { reason: 'no_valid_session' });
     return <Redirect to="/" />;
   }
 
@@ -244,6 +375,7 @@ function FeedbackPage() {
 
   const handleComplete = () => {
     setFeedbackCompleted(true);
+    captureFeatureUsed('feedback_completed');
     setLocation('/complete');
   };
 
@@ -258,11 +390,20 @@ function FeedbackPage() {
 }
 
 function CompletePage() {
-  const { userName, resetSession } = useSessionFlow();
+  const { userName, resetSession, foundClues } = useSessionFlow();
   const [, setLocation] = useLocation();
+
+  // Track demo completion on mount
+  useEffect(() => {
+    captureDemoCompleted({
+      userName: userName || 'unknown',
+      cluesFound: foundClues?.length || 0,
+    });
+  }, [userName, foundClues]);
 
   const handleReplay = () => {
     resetSession();
+    captureSessionStarted(); // Start a new session
     setLocation('/');
   };
 
@@ -306,7 +447,11 @@ function App() {
     // Capture page view when app mounts
     captureEvent("page_view", {
       page: window.location.pathname,
-      timestamp: new Date().toISOString(),
+    });
+    
+    // Track feature usage for prototype demo
+    captureFeatureUsed('prototype_demo', {
+      initial_page: window.location.pathname,
     });
   }, []);
 
