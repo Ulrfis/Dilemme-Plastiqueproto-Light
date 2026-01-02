@@ -12,6 +12,7 @@ import { useAudioQueue } from "@/hooks/useAudioQueue";
 import { sendChatMessage, textToSpeech, sendChatMessageStreaming, textToSpeechStreaming } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { captureEvent } from "@/App";
+import { useSessionFlow } from "@/contexts/SessionFlowContext";
 
 interface Message {
   role: 'assistant' | 'user';
@@ -25,17 +26,50 @@ interface TutorialScreenProps {
 }
 
 export default function TutorialScreen({ sessionId, userName, onComplete }: TutorialScreenProps) {
-  const [foundClues, setFoundClues] = useState<string[]>([]);
+  const sessionFlow = useSessionFlow();
+  
+  const [foundClues, setFoundCluesLocal] = useState<string[]>(() => sessionFlow.foundClues);
   const [showSuccess, setShowSuccess] = useState(false);
   const [newClues, setNewClues] = useState<string[]>([]);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [fallbackMode, setFallbackMode] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessagesLocal] = useState<Message[]>(() => sessionFlow.messages);
   const [textInput, setTextInput] = useState('');
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [exchangeCount, setExchangeCount] = useState(0);
-  const [conversationEnded, setConversationEnded] = useState(false);
+  const [audioUnlocked, setAudioUnlockedLocal] = useState(() => sessionFlow.audioUnlocked);
+  const [exchangeCount, setExchangeCountLocal] = useState(() => sessionFlow.exchangeCount);
+  const [conversationEnded, setConversationEndedLocal] = useState(() => sessionFlow.conversationEnded);
   const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum 8 échanges pour y parvenir !`);
+  
+  const setFoundClues = (clues: string[]) => {
+    setFoundCluesLocal(clues);
+    sessionFlow.setFoundClues(clues);
+  };
+  
+  const setMessages = (messagesOrFn: Message[] | ((prev: Message[]) => Message[])) => {
+    setMessagesLocal(prev => {
+      const newMessages = typeof messagesOrFn === 'function' ? messagesOrFn(prev) : messagesOrFn;
+      sessionFlow.setMessages(newMessages);
+      return newMessages;
+    });
+  };
+  
+  const setAudioUnlocked = (unlocked: boolean) => {
+    setAudioUnlockedLocal(unlocked);
+    sessionFlow.setAudioUnlocked(unlocked);
+  };
+  
+  const setExchangeCount = (countOrFn: number | ((prev: number) => number)) => {
+    setExchangeCountLocal(prev => {
+      const newCount = typeof countOrFn === 'function' ? countOrFn(prev) : countOrFn;
+      sessionFlow.setExchangeCount(newCount);
+      return newCount;
+    });
+  };
+  
+  const setConversationEnded = (ended: boolean) => {
+    setConversationEndedLocal(ended);
+    sessionFlow.setConversationEnded(ended);
+  };
   
   const MAX_EXCHANGES = 8;
   const TOTAL_CLUES = 6;
@@ -88,16 +122,24 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     },
   });
 
+  // Vérifier si l'utilisateur revient avec une conversation existante
+  const isReturningUser = messages.length > 0;
+
   // Fonction pour déverrouiller l'audio et passer à l'écran conversationnel
   // L'audio de bienvenue sera joué automatiquement par le useEffect une fois sur l'écran conversationnel
   const handleUnlockAudio = () => {
     console.log('[TutorialScreen] Unlocking audio - transitioning to conversation screen');
 
-    // Ajouter le message de bienvenue à la conversation
-    setMessages([{
-      role: 'assistant',
-      content: welcomeMessage
-    }]);
+    // Si l'utilisateur revient avec des messages existants, ne pas rejouer le message de bienvenue
+    if (!isReturningUser) {
+      setMessages([{
+        role: 'assistant',
+        content: welcomeMessage
+      }]);
+    } else {
+      console.log('[TutorialScreen] Returning user - skipping welcome message, preserving existing conversation');
+      hasPlayedWelcome.current = true;
+    }
 
     // Marquer que l'audio est déverrouillé pour passer à l'écran conversationnel
     setAudioUnlocked(true);
@@ -124,9 +166,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   }, [checkMediaRecorderSupport, toast]);
 
   // Jouer le message de bienvenue automatiquement une seule fois quand on arrive sur l'écran conversationnel
+  // Ne pas jouer si l'utilisateur revient avec une conversation existante
   useEffect(() => {
     // Ne jouer que si l'audio est déverrouillé et qu'on n'a pas encore joué le message de bienvenue
-    if (audioUnlocked && !hasPlayedWelcome.current) {
+    if (audioUnlocked && !hasPlayedWelcome.current && !isReturningUser) {
       console.log('[TutorialScreen] Playing welcome message automatically');
       hasPlayedWelcome.current = true;
 
@@ -153,7 +196,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
       playWelcomeMessage();
     }
-  }, [audioUnlocked, welcomeMessage, playAudio, toast]);
+  }, [audioUnlocked, welcomeMessage, playAudio, toast, isReturningUser]);
 
   // Fonction helper pour appeler le TTS avec retry automatique
   const textToSpeechWithRetry = async (text: string, maxRetries = 2): Promise<Blob> => {
