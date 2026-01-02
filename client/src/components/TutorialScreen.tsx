@@ -593,12 +593,30 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     );
   }
 
+  const allCluesFound = foundClues.length >= TOTAL_CLUES;
+
+  const FinishButton = (
+    <Button
+      onClick={handleFinish}
+      size="lg"
+      className={`transition-all duration-500 font-bold shadow-lg hover:scale-105 active:scale-95 whitespace-nowrap ${
+        allCluesFound 
+          ? "bg-green-600 hover:bg-green-700 text-white px-8 py-6 text-xl min-h-[4rem] animate-pulse" 
+          : "bg-primary/90 text-white px-6 py-5 text-lg"
+      }`}
+      data-testid="button-finish"
+    >
+      {allCluesFound && <CheckCircle2 className="mr-2 h-6 w-6" />}
+      Poursuivre
+    </Button>
+  );
+
   return (
     <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
       {/* MOBILE LAYOUT - vertical stacking (default, shown on screens < lg) */}
       <div className="flex flex-col h-full lg:hidden">
         {/* Header fixe en haut avec compteur */}
-        <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between">
+        <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Badge
               variant="secondary"
@@ -610,15 +628,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             </Badge>
           </div>
 
-          <Button
-            variant="ghost"
-            onClick={() => setShowInfoModal(true)}
-            className="flex items-center gap-1 px-2 h-9 sm:h-10"
-            data-testid="button-help"
-          >
-            <span className="text-xs sm:text-sm font-medium">Info</span>
-            <HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            {FinishButton}
+            <Button
+              variant="ghost"
+              onClick={() => setShowInfoModal(true)}
+              className="flex items-center gap-1 px-2 h-9 sm:h-10"
+              data-testid="button-help"
+            >
+              <span className="text-xs sm:text-sm font-medium">Info</span>
+              <HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" />
+            </Button>
+          </div>
         </header>
 
         {/* Image zoomable - 100% en horizontal */}
@@ -650,17 +671,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               )}
             </div>
 
-            {(conversationEnded || foundClues.length >= 2) && (
+            <div className="flex items-center gap-2">
+              {FinishButton}
               <Button
-                onClick={handleFinish}
-                size="sm"
-                variant={conversationEnded ? "default" : "outline"}
-                className={`rounded-xl flex-shrink-0 text-xs sm:text-sm px-2 sm:px-3 ${conversationEnded ? 'animate-pulse' : ''}`}
-                data-testid="button-finish"
+                variant="ghost"
+                onClick={() => setShowInfoModal(true)}
+                className="flex items-center gap-1 px-2 h-9 sm:h-10"
+                data-testid="button-help"
               >
-                Poursuivre
+                <span className="text-xs sm:text-sm font-medium">Info</span>
+                <HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" />
               </Button>
-            )}
+            </div>
           </div>
         </div>
 
@@ -741,17 +763,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
             {/* Right section: Help button and Finish button */}
             <div className="flex items-center gap-2 flex-shrink-0">
-              {(conversationEnded || foundClues.length >= 2) && (
-                <Button
-                  onClick={handleFinish}
-                  size="sm"
-                  variant={conversationEnded ? "default" : "outline"}
-                  className={`rounded-xl ${conversationEnded ? 'animate-pulse' : ''}`}
-                  data-testid="button-finish"
-                >
-                  Poursuivre
-                </Button>
-              )}
+              {FinishButton}
 
               <Button
                 variant="ghost"
