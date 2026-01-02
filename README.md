@@ -2,7 +2,7 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
@@ -12,9 +12,26 @@
 
 ---
 
-## 🆕 Version Actuelle (v1.4.0 - December 10)
+## 🆕 Version Actuelle (v1.5.0 - January 2)
 
-### 🎮 Nouveau Jeu de Reconstruction de Phrase
+### 🔀 Navigation Multi-Routes avec Persistance Session
+
+- **Routes individuelles** : Chaque écran a maintenant sa propre URL (`/tutorial`, `/game`, `/synthesis`, etc.)
+- **Boutons back/forward** : Navigation avec l'historique du navigateur entièrement fonctionnelle
+- **Persistance de session** : Conversation, indices trouvés et progression sauvegardés automatiquement
+- **Retour intelligent** : Les utilisateurs retrouvent leur conversation en cours s'ils reviennent en arrière
+
+### Architecture Technique
+
+- **SessionFlowContext** : Contexte React centralisé avec sauvegarde sessionStorage
+- **Validation hybride** : Protection des routes via React state + sessionStorage direct
+- **Zéro perte de données** : Les race conditions de navigation sont gérées
+
+---
+
+## 🚀 Améliorations Précédentes (v1.4.0 - December 10)
+
+### 🎮 Jeu de Reconstruction de Phrase
 
 - **Jeu interactif post-tutoriel** : Après avoir trouvé les 4 indices, les élèves reconstituent une phrase clé sur le plastique
 - **Mode click-to-select/place** : Optimisé pour mobile, glisser-déposer ou simple clic

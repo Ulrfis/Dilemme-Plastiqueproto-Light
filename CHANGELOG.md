@@ -6,6 +6,68 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.5.0] - 2026-01-02
+
+### Ajouté - Navigation Multi-Routes avec Persistance Session
+
+- **SessionFlowContext** (commit 6a6e745)
+  - Nouveau contexte React centralisé pour l'état de session
+  - Gestion unifiée : messages, indices trouvés, score, placements drag-drop, synthèse
+  - Persistance automatique via sessionStorage (survit à la navigation)
+  - Sauvegarde synchrone pour sessionId/userName (évite les race conditions)
+  - Fichier: `client/src/contexts/SessionFlowContext.tsx`
+
+- **Navigation Wouter Multi-Routes** (commit 6a6e745)
+  - Refactorisation de la navigation useState vers wouter routes
+  - Routes individuelles : `/`, `/video`, `/welcome`, `/tutorial`, `/game`, `/synthesis`, `/feedback`, `/complete`
+  - Support complet des boutons back/forward du navigateur
+  - Historique de navigation fonctionnel
+  - Fichier: `client/src/App.tsx`
+
+- **Validation Hybride des Sessions** (commit 19b4722)
+  - Protection des routes sensibles (tutorial, game, synthesis, feedback)
+  - Double vérification : état React + sessionStorage direct
+  - Résolution des race conditions lors de la création de session
+  - Redirection vers `/` si pas de session valide
+  - Fichier: `client/src/App.tsx`
+
+### Modifié
+
+- **TutorialScreen** : Lecture/écriture des messages via SessionFlowContext
+- **DragDropGame** : Persistance des placements via SessionFlowContext  
+- **SynthesisScreen** : Persistance de la synthèse via SessionFlowContext
+- **replit.md** : Documentation mise à jour avec nouvelle architecture de routing
+
+### Architecture
+
+**Avant :**
+```
+App.tsx (useState navigation)
+└── currentScreen: 'title' | 'video' | 'welcome' | ... (en mémoire)
+```
+
+**Après :**
+```
+App.tsx (wouter routes)
+├── SessionFlowProvider (contexte + sessionStorage)
+│   ├── Route "/" → TitlePage
+│   ├── Route "/video" → VideoPage  
+│   ├── Route "/welcome" → WelcomePage
+│   ├── Route "/tutorial" → TutorialPage (protected)
+│   ├── Route "/game" → GamePage (protected)
+│   ├── Route "/synthesis" → SynthesisPage (protected)
+│   ├── Route "/feedback" → FeedbackPage (protected)
+│   └── Route "/complete" → CompletePage
+```
+
+### Tests
+
+- Test E2E Playwright validé : navigation back/forward avec persistance session
+- Conversation préservée lors du retour sur `/tutorial`
+- Indices et placements maintenus entre les écrans
+
+---
+
 ## [1.4.0] - 2025-12-10
 
 ### Ajouté - Jeu de Reconstruction de Phrase
@@ -360,4 +422,4 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 - Tous les commits "Published your App" sont des déploiements automatiques
 - Les dates sont au format UTC (temps universel)
-- Version actuelle : 1.3.1
+- Version actuelle : 1.5.0

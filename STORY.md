@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2024-12-19  
+> **Last Updated**: 2026-01-02  
 
 ---
 
@@ -389,6 +389,54 @@ Skip only via "Continuer" button at any time
 **Friction**: None - simple deletion
 
 **Time**: ~5 minutes
+
+---
+
+### [2026-01-02] — Multi-Route Navigation with Session Persistence 🔷
+
+**Intent**: Implement proper multi-route navigation using wouter so users can use browser back/forward buttons while preserving their session state (conversation, clues, game progress).
+
+**Prompt(s)**: 
+```
+Develop a multi-route navigation system with persistent session state for the "Dilemme Plastique" interactive experience. The application uses React and wouter for routing, with conversation exchanges, game state, and user progress preserved across browser navigation (back/forward buttons). Critical requirement: preserve existing STT/TTS mechanics without modification.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Created `SessionFlowContext` to centralize all shared state (messages, foundClues, exchangeCount, audioUnlocked, dragDropPlacements, synthesis)
+- Implemented sessionStorage persistence with automatic save/restore
+- Refactored App.tsx from single-page useState navigation to wouter multi-route system
+- Routes: `/`, `/video`, `/welcome`, `/tutorial`, `/game`, `/synthesis`, `/feedback`, `/complete`
+- Protected routes redirect to `/` if no valid session exists
+- Hybrid session validation (React state + sessionStorage) to handle navigation race conditions
+
+**Architecture**:
+```
+Before: App.tsx (useState navigation)
+└── currentScreen: 'title' | 'video' | 'welcome' | ... (memory only)
+
+After: App.tsx (wouter routes)
+├── SessionFlowProvider (context + sessionStorage)
+│   ├── Route "/" → TitlePage
+│   ├── Route "/video" → VideoPage  
+│   ├── Route "/welcome" → WelcomePage
+│   ├── Route "/tutorial" → TutorialPage (protected)
+│   ├── Route "/game" → GamePage (protected)
+│   ├── Route "/synthesis" → SynthesisPage (protected)
+│   ├── Route "/feedback" → FeedbackPage (protected)
+│   └── Route "/complete" → CompletePage
+```
+
+**Critical Fix**: Session ID and userName are saved synchronously to sessionStorage (not debounced) to prevent race conditions when navigating immediately after session creation.
+
+**Surprise**: The hybrid validation approach (checking both React state AND sessionStorage directly) elegantly solved the React state propagation delay issue
+
+**Friction**: Initial implementation had a race condition where TutorialPage would redirect to `/` because React state hadn't propagated yet after `setSessionId` was called
+
+**Resolution**: Protected routes now check sessionStorage directly in addition to React state, ensuring session validity even during state propagation delays
+
+**Time**: ~45 minutes
 
 ---
 
