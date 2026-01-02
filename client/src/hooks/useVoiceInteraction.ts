@@ -18,6 +18,7 @@ interface UseVoiceInteractionResult {
   checkMediaRecorderSupport: () => boolean;
   reset: () => void;
   recoverFromError: () => void;
+  initAudio: () => void;
 }
 
 export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVoiceInteractionResult {
@@ -683,6 +684,16 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     setAudioState('idle');
   }, [reset]);
 
+  // MOBILE FIX: Fonction d'initialisation audio à appeler SYNCHRONEMENT dans le contexte du geste utilisateur
+  // AVANT toute opération async (comme TTS API call) pour garantir que l'audio fonctionne sur iOS Safari
+  // NOTE: Ne PAS démarrer le keepalive ici - il sera démarré lors du recording ou playback
+  const initAudio = useCallback(() => {
+    console.log('[useVoiceInteraction] initAudio called - unlocking audio context and creating audio element');
+    initializeAudioElement();
+    unlockAudioContext();
+    // Le keepalive sera démarré lors de stopRecording ou playAudio, pas ici
+  }, [initializeAudioElement, unlockAudioContext]);
+
   return {
     audioState,
     transcription,
@@ -694,5 +705,6 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     checkMediaRecorderSupport,
     reset,
     recoverFromError,
+    initAudio,
   };
 }

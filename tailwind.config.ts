@@ -113,6 +113,10 @@ export default {
           "0%": { transform: "scale(0.8)", opacity: "0" },
           "100%": { transform: "scale(1)", opacity: "1" },
         },
+        "flash-3": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.5" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -121,6 +125,7 @@ export default {
         "bounce-subtle": "bounce-subtle 1s ease-in-out infinite",
         "slide-up": "slide-up 0.3s ease-out",
         "scale-in": "scale-in 0.2s ease-out",
+        "flash-3": "flash-3 0.5s ease-in-out 3",
       },
     },
   },

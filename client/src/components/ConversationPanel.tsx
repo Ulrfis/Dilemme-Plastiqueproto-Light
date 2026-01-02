@@ -1,5 +1,5 @@
-import { useEffect, useRef, useCallback } from "react";
-import { Mic, Square, Send, Loader2 } from "lucide-react";
+import { useEffect, useRef, useCallback, useState } from "react";
+import { Mic, Square, Send, Loader2, Keyboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +43,7 @@ export default function ConversationPanel({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [showTextInput, setShowTextInput] = useState(false);
 
   // Auto-scroll pour garder les deux derniers échanges visibles
   useEffect(() => {
@@ -153,7 +154,7 @@ export default function ConversationPanel({
           </div>
         )}
 
-        {/* Bulle d'input utilisateur avec bouton micro intégré */}
+        {/* Bulle d'input utilisateur avec bouton micro et clavier */}
         <div className="flex gap-1.5 sm:gap-2 items-end">
           {fallbackMode ? (
             <>
@@ -162,7 +163,6 @@ export default function ConversationPanel({
                 value={textInput}
                 onChange={(e) => onTextInputChange(e.target.value)}
                 onInput={(e) => {
-                  // Backup handler pour capturer les changements même si onChange ne se déclenche pas
                   const target = e.target as HTMLInputElement;
                   if (target.value !== textInput) {
                     onTextInputChange(target.value);
@@ -185,23 +185,71 @@ export default function ConversationPanel({
             </>
           ) : (
             <>
-              <div className="flex-1 bg-card/90 backdrop-blur-sm rounded-2xl px-3 sm:px-4 py-2 sm:py-3 min-h-[44px] sm:min-h-[48px] flex items-center">
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  {state === 'idle' && 'Appuyez sur le micro pour parler'}
-                  {state === 'recording' && 'Enregistrement en cours...'}
-                  {state === 'processing' && 'Traitement...'}
-                  {state === 'playing' && (
-                    <span>
-                      Peter vous répond... <span className="text-orange-500 font-medium hidden sm:inline">Appuyez sur le micro pour l'interrompre</span>
-                      <span className="text-orange-500 font-medium sm:hidden">Touchez le micro pour interrompre</span>
-                    </span>
-                  )}
-                  {state === 'error' && 'Erreur - Réessayez'}
-                </p>
-              </div>
+              {/* Bouton clavier pour basculer mode texte - TOUJOURS VISIBLE */}
+              <Button
+                onClick={() => setShowTextInput(!showTextInput)}
+                size="icon"
+                variant={showTextInput ? "secondary" : "outline"}
+                disabled={state === 'recording' || state === 'processing'}
+                className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex-shrink-0 touch-manipulation"
+                data-testid="button-toggle-text"
+              >
+                <Keyboard className="w-4 h-4 sm:w-5 sm:h-5" />
+              </Button>
 
-              {/* Bouton micro - TOUJOURS ACTIF, même pendant que Peter parle */}
-              {(state === 'idle' || state === 'playing') && (
+              {/* Zone de texte ou message d'état */}
+              {showTextInput && (state === 'idle' || state === 'playing') ? (
+                <>
+                  <Input
+                    ref={inputRef}
+                    value={textInput}
+                    onChange={(e) => onTextInputChange(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendText()}
+                    placeholder="Tapez votre message..."
+                    className="flex-1 rounded-2xl text-sm sm:text-base bg-card/90 backdrop-blur-sm"
+                    autoFocus
+                    data-testid="input-text-message"
+                  />
+                  <Button
+                    onClick={handleSendText}
+                    disabled={isButtonDisabled}
+                    size="icon"
+                    className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex-shrink-0"
+                    data-testid="button-send-text"
+                  >
+                    <Send className="w-4 h-4 sm:w-5 sm:h-5" />
+                  </Button>
+                </>
+              ) : (
+                <div className="flex-1 bg-card/90 backdrop-blur-sm rounded-2xl px-3 sm:px-4 py-2 sm:py-3 min-h-[40px] sm:min-h-[44px] flex items-center">
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    {state === 'idle' && (showTextInput ? 'Écrivez ou parlez' : 'Parlez ou tapez')}
+                    {state === 'recording' && 'Enregistrement...'}
+                    {state === 'processing' && 'Traitement...'}
+                    {state === 'playing' && (
+                      <span className="text-orange-500 font-medium">Peter parle...</span>
+                    )}
+                    {state === 'error' && 'Erreur'}
+                  </p>
+                </div>
+              )}
+
+              {/* Boutons d'action micro - visible en idle/playing, stop visible en recording */}
+              {state === 'recording' ? (
+                <Button
+                  onClick={onStopRecording}
+                  size="icon"
+                  variant="destructive"
+                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex-shrink-0 touch-manipulation"
+                  data-testid="button-stop-recording"
+                >
+                  <Square className="w-5 h-5 sm:w-6 sm:h-6" />
+                </Button>
+              ) : state === 'processing' ? (
+                <div className="w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center">
+                  <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                </div>
+              ) : (
                 <div className="relative flex-shrink-0">
                   <Button
                     onClick={onStartRecording}
@@ -215,29 +263,13 @@ export default function ConversationPanel({
                   >
                     <Mic className="w-5 h-5 sm:w-6 sm:h-6" />
                   </Button>
-                  {state === 'idle' && (
+                  {state === 'idle' && !showTextInput && (
                     <div className="absolute inset-0 rounded-2xl border-2 border-primary/30 animate-pulse-ring pointer-events-none" />
                   )}
                   {state === 'playing' && (
                     <div className="absolute inset-0 rounded-2xl border-2 border-orange-400 animate-pulse pointer-events-none" />
                   )}
                 </div>
-              )}
-
-              {state === 'recording' && (
-                <Button
-                  onClick={onStopRecording}
-                  size="icon"
-                  variant="destructive"
-                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl flex-shrink-0 touch-manipulation"
-                  data-testid="button-stop-recording"
-                >
-                  <Square className="w-4 h-4 sm:w-5 sm:h-5" />
-                </Button>
-              )}
-
-              {state === 'processing' && (
-                <div className="w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0" />
               )}
             </>
           )}

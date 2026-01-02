@@ -96,6 +96,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     checkMediaRecorderSupport,
     recoverFromError,
     reset,
+    initAudio,
   } = useVoiceInteraction({
     // Notifier quand l'audio commence pour tracking
     onAudioStart: () => {
@@ -126,9 +127,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const isReturningUser = messages.length > 0;
 
   // Fonction pour déverrouiller l'audio et passer à l'écran conversationnel
-  // L'audio de bienvenue sera joué automatiquement par le useEffect une fois sur l'écran conversationnel
-  const handleUnlockAudio = () => {
+  // L'audio de bienvenue sera joué IMMÉDIATEMENT dans le contexte du geste utilisateur (clic)
+  const handleUnlockAudio = async () => {
     console.log('[TutorialScreen] Unlocking audio - transitioning to conversation screen');
+
+    // MOBILE FIX CRITIQUE: Initialiser l'audio SYNCHRONEMENT dans le contexte du geste utilisateur
+    // AVANT toute opération async (comme le TTS API call) pour garantir le fonctionnement sur iOS Safari
+    // Si on attend le retour du TTS avant d'initialiser l'audio, le contexte du geste utilisateur est perdu
+    initAudio();
+    console.log('[TutorialScreen] Audio initialized synchronously in user gesture context');
 
     // Si l'utilisateur revient avec des messages existants, ne pas rejouer le message de bienvenue
     if (!isReturningUser) {
@@ -136,6 +143,25 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         role: 'assistant',
         content: welcomeMessage
       }]);
+      
+      // MOBILE FIX: Jouer le TTS IMMÉDIATEMENT dans le contexte du clic utilisateur
+      // L'audio context et l'élément audio sont déjà initialisés au-dessus
+      hasPlayedWelcome.current = true;
+      
+      try {
+        console.log('[TutorialScreen] Playing welcome message immediately in user gesture context');
+        const audioBlob = await textToSpeechWithRetry(welcomeMessage);
+        console.log('[TutorialScreen] Welcome message TTS generated, playing...');
+        await playAudio(audioBlob);
+        console.log('[TutorialScreen] Welcome audio played successfully');
+      } catch (error) {
+        console.error('[TutorialScreen] Failed to play welcome audio:', error);
+        toast({
+          title: "Mode texte activé",
+          description: "Peter s'affiche en texte uniquement.",
+          variant: "default",
+        });
+      }
     } else {
       console.log('[TutorialScreen] Returning user - skipping welcome message, preserving existing conversation');
       hasPlayedWelcome.current = true;
@@ -165,38 +191,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     }
   }, [checkMediaRecorderSupport, toast]);
 
-  // Jouer le message de bienvenue automatiquement une seule fois quand on arrive sur l'écran conversationnel
-  // Ne pas jouer si l'utilisateur revient avec une conversation existante
-  useEffect(() => {
-    // Ne jouer que si l'audio est déverrouillé et qu'on n'a pas encore joué le message de bienvenue
-    if (audioUnlocked && !hasPlayedWelcome.current && !isReturningUser) {
-      console.log('[TutorialScreen] Playing welcome message automatically');
-      hasPlayedWelcome.current = true;
-
-      const playWelcomeMessage = async () => {
-        try {
-          // Générer le TTS pour le message de bienvenue
-          const audioBlob = await textToSpeechWithRetry(welcomeMessage);
-          console.log('[TutorialScreen] Welcome message TTS generated');
-
-          // Jouer l'audio
-          await playAudio(audioBlob);
-          console.log('[TutorialScreen] Welcome audio played successfully');
-        } catch (error) {
-          console.error('[TutorialScreen] Failed to play welcome audio:', error);
-
-          // En cas d'erreur, le message est déjà affiché en texte, donc rien de plus à faire
-          toast({
-            title: "Mode texte activé",
-            description: "Peter s'affiche en texte uniquement.",
-            variant: "default",
-          });
-        }
-      };
-
-      playWelcomeMessage();
-    }
-  }, [audioUnlocked, welcomeMessage, playAudio, toast, isReturningUser]);
+  // Note: Le message de bienvenue est maintenant joué directement dans handleUnlockAudio
+  // pour garantir qu'il fonctionne sur mobile (dans le contexte du clic utilisateur)
 
   // Fonction helper pour appeler le TTS avec retry automatique
   const textToSpeechWithRetry = async (text: string, maxRetries = 2): Promise<Blob> => {
@@ -638,18 +634,20 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   const allCluesFound = foundClues.length >= TOTAL_CLUES;
 
+  // Animation CSS pour flash limité à 3 fois
+  const flashAnimation = allCluesFound ? "animate-flash-3" : "";
+  
   const FinishButton = foundClues.length >= 3 ? (
     <Button
       onClick={handleFinish}
-      size="lg"
-      className={`transition-all duration-500 font-bold shadow-lg hover:scale-105 active:scale-95 whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 ${
+      className={`transition-all duration-500 font-semibold shadow-lg hover:scale-105 active:scale-95 whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 ${
         allCluesFound 
-          ? "bg-green-600 hover:bg-green-700 text-white px-8 py-6 text-xl min-h-[4rem] animate-pulse" 
-          : "bg-primary/90 text-white px-6 py-5 text-lg"
+          ? `bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-2 text-sm sm:text-base ${flashAnimation}` 
+          : "bg-primary/90 text-white px-3 sm:px-4 py-2 text-sm sm:text-base"
       }`}
       data-testid="button-finish"
     >
-      {allCluesFound && <CheckCircle2 className="mr-2 h-6 w-6" />}
+      {allCluesFound && <CheckCircle2 className="mr-1 h-4 w-4 sm:mr-2 sm:h-5 sm:w-5" />}
       Poursuivre
     </Button>
   ) : null;
@@ -693,39 +691,24 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           />
         </div>
 
-        {/* Zone fixe pour les indices trouvés - toujours présente */}
+        {/* Zone fixe pour les indices trouvés - sans le bouton Poursuivre (qui est dans le header) */}
         <div className="px-3 sm:px-4 py-2 bg-background border-b border-card-border flex-shrink-0 min-h-[50px] sm:min-h-[60px] flex items-center">
-          <div className="flex items-center justify-between gap-2 w-full">
-            <div className="flex flex-wrap gap-1.5 sm:gap-2 flex-1">
-              {foundClues.length > 0 ? (
-                foundClues.map((clue, index) => (
-                  <Badge
-                    key={index}
-                    variant="default"
-                    className="animate-scale-in text-xs sm:text-sm"
-                    data-testid={`badge-clue-${index}`}
-                  >
-                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                    {clue}
-                  </Badge>
-                ))
-              ) : (
-                <p className="text-xs sm:text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              {FinishButton}
-              <Button
-                variant="ghost"
-                onClick={() => setShowInfoModal(true)}
-                className="flex items-center gap-1 px-2 h-9 sm:h-10"
-                data-testid="button-help"
-              >
-                <span className="text-xs sm:text-sm font-medium">Info</span>
-                <HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" />
-              </Button>
-            </div>
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 w-full">
+            {foundClues.length > 0 ? (
+              foundClues.map((clue, index) => (
+                <Badge
+                  key={index}
+                  variant="default"
+                  className="animate-scale-in text-xs sm:text-sm"
+                  data-testid={`badge-clue-${index}`}
+                >
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  {clue}
+                </Badge>
+              ))
+            ) : (
+              <p className="text-xs sm:text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
+            )}
           </div>
         </div>
 
