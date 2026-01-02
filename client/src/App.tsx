@@ -1,12 +1,21 @@
 import { useEffect } from "react";
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import Home from "@/pages/Home";
+import { SessionFlowProvider, useSessionFlow } from "@/contexts/SessionFlowContext";
+import { MediaProvider } from "@/contexts/MediaContext";
+import TitleScreen from "@/components/TitleScreen";
+import VideoIntro from "@/components/VideoIntro";
+import WelcomeSetup from "@/components/WelcomeSetup";
+import TutorialScreen from "@/components/TutorialScreen";
+import DragDropGame from "@/components/DragDropGame";
+import SynthesisScreen from "@/components/SynthesisScreen";
+import FeedbackSurvey from "@/components/FeedbackSurvey";
 import Syntheses from "@/pages/Syntheses";
 import NotFound from "@/pages/not-found";
+import { createSession } from "@/lib/api";
 
 // PostHog is initialized via web snippet in index.html
 // Use window.posthog for tracking - do NOT re-initialize here
@@ -119,13 +128,160 @@ if (typeof window !== 'undefined') {
   }, 1000);
 }
 
+function TitlePage() {
+  const [, setLocation] = useLocation();
+  return <TitleScreen onStart={() => setLocation('/video')} />;
+}
+
+function VideoPage() {
+  const [, setLocation] = useLocation();
+  return <VideoIntro onComplete={() => setLocation('/welcome')} />;
+}
+
+function WelcomePage() {
+  const [, setLocation] = useLocation();
+  const { setUserName, setSessionId } = useSessionFlow();
+
+  const handleComplete = async (name: string) => {
+    setUserName(name);
+    try {
+      const session = await createSession({
+        userName: name,
+        foundClues: [],
+        score: 0,
+        audioMode: 'voice',
+        completed: 0,
+      });
+      setSessionId(session.id);
+      setLocation('/tutorial');
+    } catch (error) {
+      console.error('Failed to create session:', error);
+    }
+  };
+
+  return <WelcomeSetup onStart={handleComplete} />;
+}
+
+function TutorialPage() {
+  const [, setLocation] = useLocation();
+  const { sessionId, userName, hasSession, setFoundClues } = useSessionFlow();
+
+  if (!hasSession) {
+    return <Redirect to="/" />;
+  }
+
+  const handleComplete = (finalScore: number, clues: string[]) => {
+    setFoundClues(clues);
+    setLocation('/game');
+  };
+
+  return (
+    <TutorialScreen
+      sessionId={sessionId}
+      userName={userName}
+      onComplete={handleComplete}
+    />
+  );
+}
+
+function GamePage() {
+  const [, setLocation] = useLocation();
+  const { userName, hasSession } = useSessionFlow();
+
+  if (!hasSession) {
+    return <Redirect to="/" />;
+  }
+
+  return (
+    <DragDropGame
+      userName={userName}
+      onComplete={() => setLocation('/synthesis')}
+    />
+  );
+}
+
+function SynthesisPage() {
+  const [, setLocation] = useLocation();
+  const { userName, sessionId, foundClues, hasSession } = useSessionFlow();
+
+  if (!hasSession) {
+    return <Redirect to="/" />;
+  }
+
+  return (
+    <SynthesisScreen
+      userName={userName}
+      sessionId={sessionId}
+      foundClues={foundClues}
+      onShowFeedback={() => setLocation('/feedback')}
+    />
+  );
+}
+
+function FeedbackPage() {
+  const [, setLocation] = useLocation();
+  const { sessionId, userName, hasSession, setFeedbackCompleted } = useSessionFlow();
+
+  if (!hasSession) {
+    return <Redirect to="/" />;
+  }
+
+  const handleComplete = () => {
+    setFeedbackCompleted(true);
+    setLocation('/complete');
+  };
+
+  return (
+    <FeedbackSurvey
+      sessionId={sessionId}
+      userName={userName}
+      onClose={() => setLocation('/synthesis')}
+      onComplete={handleComplete}
+    />
+  );
+}
+
+function CompletePage() {
+  const { userName, resetSession } = useSessionFlow();
+  const [, setLocation] = useLocation();
+
+  const handleReplay = () => {
+    resetSession();
+    setLocation('/');
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center px-4 py-8 bg-gradient-to-br from-primary/5 via-background to-chart-2/5">
+      <div className="w-full max-w-md space-y-6 text-center animate-scale-in">
+        <div className="text-6xl mb-4">🎉</div>
+        <h2 className="text-3xl font-bold font-heading">Merci {userName || 'participant'} !</h2>
+        <p className="text-muted-foreground text-lg">
+          Tu as terminé l'expérience Dilemme Plastique.
+        </p>
+        <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
+          <p className="text-green-700 font-medium">Merci pour ta participation !</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route path="/syntheses" component={Syntheses} />
-      <Route component={NotFound} />
-    </Switch>
+    <MediaProvider>
+      <Switch>
+        <Route path="/" component={TitlePage} />
+        <Route path="/video" component={VideoPage} />
+        <Route path="/welcome" component={WelcomePage} />
+        <Route path="/tutorial" component={TutorialPage} />
+        <Route path="/game" component={GamePage} />
+        <Route path="/synthesis" component={SynthesisPage} />
+        <Route path="/feedback" component={FeedbackPage} />
+        <Route path="/complete" component={CompletePage} />
+        <Route path="/syntheses" component={Syntheses} />
+        <Route component={NotFound} />
+      </Switch>
+    </MediaProvider>
   );
 }
 
@@ -141,8 +297,10 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Toaster />
-        <Router />
+        <SessionFlowProvider>
+          <Toaster />
+          <Router />
+        </SessionFlowProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );
