@@ -91,11 +91,20 @@ export function SessionFlowProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   const setUserName = useCallback((name: string) => {
-    setState(prev => ({ ...prev, userName: name }));
+    setState(prev => {
+      const newState = { ...prev, userName: name };
+      saveToStorage(newState);
+      return newState;
+    });
   }, []);
 
   const setSessionId = useCallback((id: string) => {
-    setState(prev => ({ ...prev, sessionId: id }));
+    setState(prev => {
+      const newState = { ...prev, sessionId: id };
+      saveToStorage(newState);
+      console.log('[SessionFlow] Session ID set and saved:', id.substring(0, 8));
+      return newState;
+    });
   }, []);
 
   const setFoundClues = useCallback((clues: string[]) => {

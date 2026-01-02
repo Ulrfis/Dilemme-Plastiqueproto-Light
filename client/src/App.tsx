@@ -164,9 +164,12 @@ function WelcomePage() {
 
 function TutorialPage() {
   const [, setLocation] = useLocation();
-  const { sessionId, userName, hasSession, setFoundClues } = useSessionFlow();
+  const { sessionId, userName, setFoundClues } = useSessionFlow();
 
-  if (!hasSession) {
+  const storedSession = sessionStorage.getItem('dilemme_session_flow');
+  const hasValidSession = sessionId || (storedSession && JSON.parse(storedSession).sessionId);
+
+  if (!hasValidSession) {
     return <Redirect to="/" />;
   }
 
@@ -177,8 +180,8 @@ function TutorialPage() {
 
   return (
     <TutorialScreen
-      sessionId={sessionId}
-      userName={userName}
+      sessionId={sessionId || (storedSession ? JSON.parse(storedSession).sessionId : '')}
+      userName={userName || (storedSession ? JSON.parse(storedSession).userName : '')}
       onComplete={handleComplete}
     />
   );
@@ -186,15 +189,18 @@ function TutorialPage() {
 
 function GamePage() {
   const [, setLocation] = useLocation();
-  const { userName, hasSession } = useSessionFlow();
+  const { userName } = useSessionFlow();
 
-  if (!hasSession) {
+  const storedSession = sessionStorage.getItem('dilemme_session_flow');
+  const hasValidSession = userName || (storedSession && JSON.parse(storedSession).sessionId);
+
+  if (!hasValidSession) {
     return <Redirect to="/" />;
   }
 
   return (
     <DragDropGame
-      userName={userName}
+      userName={userName || (storedSession ? JSON.parse(storedSession).userName : '')}
       onComplete={() => setLocation('/synthesis')}
     />
   );
@@ -202,17 +208,22 @@ function GamePage() {
 
 function SynthesisPage() {
   const [, setLocation] = useLocation();
-  const { userName, sessionId, foundClues, hasSession } = useSessionFlow();
+  const { userName, sessionId, foundClues } = useSessionFlow();
 
-  if (!hasSession) {
+  const storedSession = sessionStorage.getItem('dilemme_session_flow');
+  const hasValidSession = sessionId || (storedSession && JSON.parse(storedSession).sessionId);
+
+  if (!hasValidSession) {
     return <Redirect to="/" />;
   }
 
+  const stored = storedSession ? JSON.parse(storedSession) : null;
+
   return (
     <SynthesisScreen
-      userName={userName}
-      sessionId={sessionId}
-      foundClues={foundClues}
+      userName={userName || (stored?.userName || '')}
+      sessionId={sessionId || (stored?.sessionId || '')}
+      foundClues={foundClues.length > 0 ? foundClues : (stored?.foundClues || [])}
       onShowFeedback={() => setLocation('/feedback')}
     />
   );
@@ -220,11 +231,16 @@ function SynthesisPage() {
 
 function FeedbackPage() {
   const [, setLocation] = useLocation();
-  const { sessionId, userName, hasSession, setFeedbackCompleted } = useSessionFlow();
+  const { sessionId, userName, setFeedbackCompleted } = useSessionFlow();
 
-  if (!hasSession) {
+  const storedSession = sessionStorage.getItem('dilemme_session_flow');
+  const hasValidSession = sessionId || (storedSession && JSON.parse(storedSession).sessionId);
+
+  if (!hasValidSession) {
     return <Redirect to="/" />;
   }
+
+  const stored = storedSession ? JSON.parse(storedSession) : null;
 
   const handleComplete = () => {
     setFeedbackCompleted(true);
@@ -233,8 +249,8 @@ function FeedbackPage() {
 
   return (
     <FeedbackSurvey
-      sessionId={sessionId}
-      userName={userName}
+      sessionId={sessionId || (stored?.sessionId || '')}
+      userName={userName || (stored?.userName || '')}
       onClose={() => setLocation('/synthesis')}
       onComplete={handleComplete}
     />
