@@ -12,7 +12,16 @@
 
 ---
 
-## 🆕 Version Actuelle (v1.5.0 - January 2)
+## 🆕 Version Actuelle (v1.6.0 - January 2)
+
+### 📊 Tracking PostHog Enrichi
+- **Identification Utilisateur** : Identification automatique des élèves par leur nom via `posthog.identify()`.
+- **Tracking Complet** : Suivi des événements d'initialisation, d'utilisation des fonctionnalités, et de complétion/abandon.
+- **Analyse d'Engagement** : Mesure précise de la progression et des points de friction dans le parcours utilisateur.
+
+---
+
+## 🚀 Améliorations Précédentes (v1.5.0 - January 2)
 
 ### 🔀 Navigation Multi-Routes avec Persistance Session
 

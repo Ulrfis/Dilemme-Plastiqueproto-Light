@@ -183,6 +183,28 @@ Implement complete user flow with screen-based navigation, session management, c
 
 ---
 
+### [2026-01-02] — Enhanced PostHog Analytics & User Identification 🔷
+
+**Intent**: Implement deep analytics tracking and user identification to better understand how students interact with the prototype and where they might get stuck.
+
+**Outcome**:
+- Integrated `posthog.identify()` on user name entry to link all session actions to a specific identity.
+- Added comprehensive lifecycle tracking: session starts/ends, app backgrounding, and explicit completion/abandonment points.
+- Enriched all "feature used" events with user names and relevant metadata.
+- Implemented automatic "abandonment" detection when users reach protected pages without a valid session.
+
+**Architecture**:
+```
+WelcomeSetup → onStart(name) → identifyUser(name) → posthog.identify(name, { properties })
+                             → captureFeatureUsed('welcome_name_entered', { userName: name })
+```
+
+**Surprise**: Identifying users by name makes the PostHog dashboard much more readable and actionable for teachers/researchers.
+
+**Time**: ~15 minutes
+
+---
+
 ## Pivots & Breakages
 
 *Major direction changes, things that broke badly, abandoned approaches. This is where story gold lives.*

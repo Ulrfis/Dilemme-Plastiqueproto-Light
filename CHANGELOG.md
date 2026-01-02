@@ -6,6 +6,23 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.6.0] - 2026-01-02
+
+### Ajouté - Tracking PostHog Enrichi et Identification Utilisateur
+
+- **Identification Utilisateur** (commit b792c57)
+  - Appel à `posthog.identify()` dès que l'utilisateur entre son nom.
+  - Ajout de propriétés personnalisées (`name`, `signup_date`).
+  - Fichier: `client/src/App.tsx`
+
+- **Tracking d'Événements Avancé** (commit 3d8b862)
+  - Nouveaux événements : `session_started`, `session_ended`, `app_backgrounded`, `demo_abandoned`, `demo_completed`.
+  - Enrichissement des événements existants avec le nom de l'utilisateur et des métadonnées contextuelles.
+  - Système de détection d'abandon automatique sur les pages protégées.
+  - Fichier: `client/src/App.tsx`
+
+---
+
 ## [1.5.0] - 2026-01-02
 
 ### Ajouté - Navigation Multi-Routes avec Persistance Session
