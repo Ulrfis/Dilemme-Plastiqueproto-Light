@@ -190,18 +190,8 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     };
   }, []);
 
-  useEffect(() => {
-    const totalDuration = 120000;
-    const autoSkipTimer = setTimeout(() => {
-      console.log("[VideoIntro] Auto-skip triggered after timeout");
-      if (!videoEnded) {
-        setVideoEnded(true);
-        onComplete();
-      }
-    }, totalDuration);
-
-    return () => clearTimeout(autoSkipTimer);
-  }, [onComplete, videoEnded]);
+  // Auto-skip timer removed - only the "Continuer" button should allow skipping
+  // The video should play its entire duration naturally
 
   const playVideo = () => {
     const video = videoRef.current;

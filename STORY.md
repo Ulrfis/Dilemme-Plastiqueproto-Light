@@ -356,6 +356,42 @@ After:  sentence #2 TTS fails (3x) → skipIndex(2) → queue plays #3, #4, #5
 
 ---
 
+### [2026-01-02] — Video Playlist Bug Fix: Second Video Plays to Completion 🔷
+
+**Intent**: Fix bug where the second video stops after a few seconds and auto-advances to the next screen. Only the "Continuer" button should allow skipping.
+
+**Prompt(s)**: 
+```
+Il y a un bug lors de la lecture de la deuxième vidéo: après quelques secondes, la vidéo s'arrête et on passe à l'écran d'après !
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Root cause identified: A 120-second auto-skip timer was set on component mount and never reset when the second video started
+- Timer fired mid-playback of second video, causing premature skip
+- Solution: Removed the auto-skip timer entirely per user requirement
+- Now only the "Continuer" button can skip videos
+
+**Root Cause Analysis**:
+```
+Before:
+mount → setTimeout(120s, onComplete) → video 1 plays (60s) → video 2 starts (0s) 
+→ 60s more passes → timer fires at 120s → onComplete() mid-video-2!
+
+After:
+mount → video 1 plays → video 1 ends → video 2 plays → video 2 ends → onComplete()
+Skip only via "Continuer" button at any time
+```
+
+**Surprise**: The safety timer was intended to prevent infinite hang but became the bug itself
+
+**Friction**: None - simple deletion
+
+**Time**: ~5 minutes
+
+---
+
 ## Pulse Checks
 
 *Subjective snapshots. AI should prompt these every 3-5 features or at major moments.*
