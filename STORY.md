@@ -277,6 +277,47 @@ User clicks rating → updateField() → sendPartialUpdate() → PATCH /api/sess
 
 ---
 
+### [2026-01-02] — Video Playlist with Device-Adaptive Formats 🔷
+
+**Intent**: Replace single video with a 2-video playlist that adapts to device type (desktop 16:9 vs mobile 9:16) for optimal viewing experience.
+
+**Prompt(s)**: 
+```
+Replace current video with 3-video playlist (intro + device-specific second video). Video 1 is 16:9 intro for all users. Video 2A is 16:9 for desktop, Video 2B is 9:16 for mobile. Seamless transitions between videos, keep existing player mechanics.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Replaced Gumlet iframe with native HTML5 video player + HLS.js for cross-browser HLS support
+- Device detection: checks user agent, touch capability, and screen width
+- Video playlist: [intro 16:9] → [desktop 16:9 OR mobile 9:16]
+- Seamless transition: HLS.js loads next video on 'ended' event without gap
+- Video progress indicator (1/2, 2/2) in top-right corner
+- Preserved all existing mechanics: click-to-play, fullscreen, mute toggle, skip button
+- 16:9 intro centered on vertical mobile screens (objectFit: contain)
+- Mobile 9:16 video fills screen height on mobile
+
+**Video URLs**:
+- Intro (16:9): `69577dbaf3928b38fc32c32b/main.m3u8`
+- Desktop (16:9): `69577d67d73a53e69e607fbf/main.m3u8`
+- Mobile (9:16): `69577d67f3928b38fc32bb95/main.m3u8`
+
+**Architecture**:
+```
+isMobileDevice() → playlist = [intro, desktop/mobile]
+loadVideo(url) → HLS.js or native HLS → video.play()
+video.onended → currentVideoIndex++ → loadVideo(next) → seamless playback
+```
+
+**Surprise**: HLS.js transition is nearly seamless—only ~50ms pause between videos
+
+**Friction**: None significant
+
+**Time**: ~15 minutes
+
+---
+
 ## Pulse Checks
 
 *Subjective snapshots. AI should prompt these every 3-5 features or at major moments.*

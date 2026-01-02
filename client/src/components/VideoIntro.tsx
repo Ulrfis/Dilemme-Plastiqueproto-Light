@@ -1,213 +1,272 @@
 import { Button } from "@/components/ui/button";
 import { ChevronRight, Volume2, VolumeX, Play } from "lucide-react";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { useMedia } from "@/contexts/MediaContext";
+import Hls from "hls.js";
 
 interface VideoIntroProps {
   onComplete: () => void;
 }
 
+const VIDEO_URLS = {
+  intro: "https://video.gumlet.io/653feb38beac1fa13f8fa8e5/69577dbaf3928b38fc32c32b/main.m3u8",
+  desktop: "https://video.gumlet.io/653feb38beac1fa13f8fa8e5/69577d67d73a53e69e607fbf/main.m3u8",
+  mobile: "https://video.gumlet.io/653feb38beac1fa13f8fa8e5/69577d67f3928b38fc32bb95/main.m3u8",
+};
+
+function isMobileDevice(): boolean {
+  if (typeof window === "undefined") return false;
+  const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
+  const mobileRegex = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i;
+  const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+  const isSmallScreen = window.innerWidth <= 768;
+  return mobileRegex.test(userAgent.toLowerCase()) || (isTouchDevice && isSmallScreen);
+}
+
 export default function VideoIntro({ onComplete }: VideoIntroProps) {
   const { audioUnlocked } = useMedia();
-  const videoId = "6916ff7ddf9720847e0868f0";
-
-  console.log('[VideoIntro] Component mounted - audioUnlocked:', audioUnlocked);
-
-  // CHANGEMENT: Pas d'autoplay - l'utilisateur doit cliquer sur play
-  // La vidéo démarre toujours avec le son activé (comme YouTube)
-  const embedUrl = `https://play.gumlet.io/embed/${videoId}?autoplay=false&preload=true&muted=false&loop=false`;
-
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [videoEnded, setVideoEnded] = useState(false);
-  const [isMuted, setIsMuted] = useState(false); // Son activé par défaut
-  const [isPlaying, setIsPlaying] = useState(false); // État de lecture
-  const [iframeLoaded, setIframeLoaded] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false); // État plein écran
+  const hlsRef = useRef<Hls | null>(null);
 
-  // Tenter le plein écran en mode paysage au chargement
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [videoEnded, setVideoEnded] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isMobile] = useState(() => isMobileDevice());
+  const [showPlayButton, setShowPlayButton] = useState(true);
+
+  const playlist = [
+    VIDEO_URLS.intro,
+    isMobile ? VIDEO_URLS.mobile : VIDEO_URLS.desktop,
+  ];
+
+  console.log("[VideoIntro] Component mounted - isMobile:", isMobile, "playlist:", playlist);
+
+  const loadVideo = useCallback((url: string) => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    console.log("[VideoIntro] Loading video:", url);
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        startLevel: -1,
+      });
+      hlsRef.current = hls;
+
+      hls.loadSource(url);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.log("[VideoIntro] HLS manifest parsed, ready to play");
+        if (isPlaying) {
+          video.play().catch((e) => console.log("[VideoIntro] Auto-play prevented:", e));
+        }
+      });
+
+      hls.on(Hls.Events.ERROR, (event, data) => {
+        console.error("[VideoIntro] HLS error:", data);
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              console.log("[VideoIntro] Network error, trying to recover...");
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              console.log("[VideoIntro] Media error, trying to recover...");
+              hls.recoverMediaError();
+              break;
+            default:
+              console.error("[VideoIntro] Unrecoverable error");
+              hls.destroy();
+              break;
+          }
+        }
+      });
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = url;
+      video.addEventListener("loadedmetadata", () => {
+        console.log("[VideoIntro] Native HLS loaded");
+        if (isPlaying) {
+          video.play().catch((e) => console.log("[VideoIntro] Auto-play prevented:", e));
+        }
+      });
+    }
+  }, [isPlaying]);
+
+  useEffect(() => {
+    loadVideo(playlist[currentVideoIndex]);
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+      }
+    };
+  }, [currentVideoIndex]);
+
+  const handleVideoEnded = useCallback(() => {
+    console.log("[VideoIntro] Video ended, index:", currentVideoIndex);
+    
+    if (currentVideoIndex < playlist.length - 1) {
+      console.log("[VideoIntro] Transitioning to next video");
+      setCurrentVideoIndex((prev) => prev + 1);
+      
+      setTimeout(() => {
+        const video = videoRef.current;
+        if (video) {
+          loadVideo(playlist[currentVideoIndex + 1]);
+          video.play().catch((e) => console.log("[VideoIntro] Play error:", e));
+        }
+      }, 50);
+    } else {
+      console.log("[VideoIntro] Playlist complete");
+      if (!videoEnded) {
+        setVideoEnded(true);
+        onComplete();
+      }
+    }
+  }, [currentVideoIndex, playlist, videoEnded, onComplete, loadVideo]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.addEventListener("ended", handleVideoEnded);
+    video.addEventListener("play", () => setIsPlaying(true));
+    video.addEventListener("pause", () => setIsPlaying(false));
+
+    return () => {
+      video.removeEventListener("ended", handleVideoEnded);
+      video.removeEventListener("play", () => setIsPlaying(true));
+      video.removeEventListener("pause", () => setIsPlaying(false));
+    };
+  }, [handleVideoEnded]);
+
   useEffect(() => {
     const attemptFullscreenLandscape = async () => {
       try {
-        // Demander le plein écran sur le conteneur
         if (containerRef.current && document.fullscreenEnabled) {
           await containerRef.current.requestFullscreen();
-          console.log('[VideoIntro] Fullscreen activated');
-          
-          // Tenter de verrouiller en mode paysage (si disponible)
-          if (screen.orientation && 'lock' in screen.orientation) {
+          console.log("[VideoIntro] Fullscreen activated");
+
+          if (screen.orientation && "lock" in screen.orientation) {
             try {
-              await (screen.orientation.lock as any)('landscape');
-              console.log('[VideoIntro] Screen locked to landscape');
+              await (screen.orientation.lock as any)("landscape");
+              console.log("[VideoIntro] Screen locked to landscape");
             } catch (err) {
-              console.log('[VideoIntro] Could not lock orientation:', err);
+              console.log("[VideoIntro] Could not lock orientation:", err);
             }
           }
         }
       } catch (error) {
-        console.log('[VideoIntro] Fullscreen not available or denied:', error);
+        console.log("[VideoIntro] Fullscreen not available or denied:", error);
       }
     };
 
-    // Petit délai pour laisser le composant se monter
     const timer = setTimeout(attemptFullscreenLandscape, 100);
-    
     return () => clearTimeout(timer);
   }, []);
 
-  // Tracker le changement d'état plein écran
   useEffect(() => {
     const handleFullscreenChange = () => {
       const isCurrentlyFullscreen = !!document.fullscreenElement;
-      console.log('[VideoIntro] Fullscreen state changed:', isCurrentlyFullscreen);
+      console.log("[VideoIntro] Fullscreen state changed:", isCurrentlyFullscreen);
       setIsFullscreen(isCurrentlyFullscreen);
     };
 
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    
-    // Vérifier l'état initial
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
     setIsFullscreen(!!document.fullscreenElement);
-    
+
     return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
   }, []);
 
-  // Fonction pour démarrer la lecture de la vidéo (appelée par le bouton Play)
-  const playVideo = () => {
-    if (iframeRef.current?.contentWindow) {
-      console.log('[VideoIntro] User clicked Play - starting video with sound');
-
-      // Envoyer plusieurs formats de commande play
-      iframeRef.current.contentWindow.postMessage({ method: 'play' }, '*');
-      iframeRef.current.contentWindow.postMessage({ event: 'command', func: 'play' }, '*');
-      iframeRef.current.contentWindow.postMessage('play', '*');
-
-      // S'assurer que le son est activé
-      setTimeout(() => {
-        if (iframeRef.current?.contentWindow) {
-          iframeRef.current.contentWindow.postMessage({ method: 'unmute' }, '*');
-          iframeRef.current.contentWindow.postMessage({ event: 'command', func: 'unmute' }, '*');
-        }
-      }, 100);
-
-      setIsPlaying(true);
-      setIsMuted(false);
-      console.log('[VideoIntro] Play and unmute commands sent');
-    }
-  };
-
-  // Fonction pour activer/désactiver le son avec retry pour fiabilité
-  const toggleMute = () => {
-    if (iframeRef.current) {
-      const newMutedState = !isMuted;
-      const command = isMuted ? 'unmute' : 'mute';
-
-      console.log(`[VideoIntro] Toggling sound: ${command}`);
-
-      // Envoyer plusieurs formats de commandes pour maximiser la compatibilité
-      const sendCommand = () => {
-        if (iframeRef.current?.contentWindow) {
-          // Format 1: { method: 'unmute' }
-          iframeRef.current.contentWindow.postMessage({ method: command }, '*');
-          // Format 2: { event: 'command', func: 'unmute' }
-          iframeRef.current.contentWindow.postMessage({ event: 'command', func: command }, '*');
-          // Format 3: Direct command
-          iframeRef.current.contentWindow.postMessage(command, '*');
-        }
-      };
-
-      // Envoyer immédiatement
-      sendCommand();
-
-      // Retry après 100ms et 300ms pour s'assurer que ça passe
-      setTimeout(sendCommand, 100);
-      setTimeout(sendCommand, 300);
-
-      setIsMuted(newMutedState);
-
-      console.log(`[VideoIntro] Sound ${command} command sent, new state: muted=${newMutedState}`);
-    }
-  };
-
   useEffect(() => {
-    // Écouter les événements de la vidéo via postMessage
-    const handleMessage = (event: MessageEvent) => {
-      console.log('[VideoIntro] PostMessage received:', event.data);
-
-      // Détecter quand le player est prêt
-      if (event.data && (event.data.event === 'ready' || event.data.type === 'ready')) {
-        console.log('[VideoIntro] Player is ready');
-        setIframeLoaded(true);
-      }
-
-      // Détecter quand la vidéo commence à jouer
-      if (event.data && (event.data.event === 'play' || event.data.event === 'playing' ||
-                        event.data.type === 'play' || event.data.type === 'playing')) {
-        console.log('[VideoIntro] Video started playing');
-        setIsPlaying(true);
-      }
-
-      // Détecter quand la vidéo est en pause
-      if (event.data && (event.data.event === 'pause' || event.data.type === 'pause')) {
-        console.log('[VideoIntro] Video paused');
-        setIsPlaying(false);
-      }
-
-      // Gumlet peut envoyer différents formats d'événements pour la fin
-      if (event.data) {
-        // Format 1: { event: 'ended' } ou { event: 'end' }
-        if (event.data.event === 'ended' || event.data.event === 'end') {
-          console.log('[VideoIntro] Video ended via postMessage (event)');
-          if (!videoEnded) {
-            setVideoEnded(true);
-            onComplete();
-          }
-        }
-
-        // Format 2: { type: 'ended' } ou { type: 'end' }
-        if (event.data.type === 'ended' || event.data.type === 'end') {
-          console.log('[VideoIntro] Video ended via postMessage (type)');
-          if (!videoEnded) {
-            setVideoEnded(true);
-            onComplete();
-          }
-        }
-
-        // Format 3: Vérifier d'autres variantes possibles
-        if (event.data.method === 'ended' || event.data.method === 'end') {
-          console.log('[VideoIntro] Video ended via postMessage (method)');
-          if (!videoEnded) {
-            setVideoEnded(true);
-            onComplete();
-          }
-        }
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-
-    // Timer automatique de sécurité - passe à l'écran suivant après 90 secondes
-    // (durée augmentée pour laisser la vidéo se terminer naturellement)
-    const videoDuration = 90000;
+    const totalDuration = 120000;
     const autoSkipTimer = setTimeout(() => {
-      console.log('[VideoIntro] Auto-skip triggered by timer after 90s - video should have ended');
+      console.log("[VideoIntro] Auto-skip triggered after timeout");
       if (!videoEnded) {
-        console.log('[VideoIntro] Forcing video completion and advancing to next screen');
         setVideoEnded(true);
         onComplete();
       }
-    }, videoDuration);
+    }, totalDuration);
 
-    return () => {
-      window.removeEventListener('message', handleMessage);
-      clearTimeout(autoSkipTimer);
-    };
+    return () => clearTimeout(autoSkipTimer);
   }, [onComplete, videoEnded]);
 
+  const playVideo = () => {
+    const video = videoRef.current;
+    if (video) {
+      console.log("[VideoIntro] User clicked Play");
+      video.muted = false;
+      setIsMuted(false);
+      video.play()
+        .then(() => {
+          console.log("[VideoIntro] Video playing with sound");
+          setIsPlaying(true);
+          setShowPlayButton(false);
+        })
+        .catch((e) => {
+          console.log("[VideoIntro] Play failed, trying muted:", e);
+          video.muted = true;
+          setIsMuted(true);
+          video.play()
+            .then(() => {
+              setIsPlaying(true);
+              setShowPlayButton(false);
+            })
+            .catch((e2) => console.error("[VideoIntro] Muted play also failed:", e2));
+        });
+    }
+  };
+
+  const toggleMute = () => {
+    const video = videoRef.current;
+    if (video) {
+      const newMutedState = !isMuted;
+      video.muted = newMutedState;
+      setIsMuted(newMutedState);
+      console.log("[VideoIntro] Mute toggled:", newMutedState);
+    }
+  };
+
+  const getVideoStyle = () => {
+    if (currentVideoIndex === 0) {
+      return {
+        width: "100%",
+        height: "auto",
+        maxHeight: "100%",
+        objectFit: "contain" as const,
+      };
+    }
+    
+    if (isMobile) {
+      return {
+        width: "auto",
+        height: "100%",
+        maxWidth: "100%",
+        objectFit: "contain" as const,
+      };
+    }
+    
+    return {
+      width: "100%",
+      height: "100%",
+      objectFit: "cover" as const,
+    };
+  };
+
   return (
-    <div ref={containerRef} className="fixed inset-0 bg-black z-50 overflow-hidden">
-      {/* Styles pour mobile - Assurer 100vh réel et pas de scroll */}
+    <div ref={containerRef} className="fixed inset-0 bg-black z-50 overflow-hidden flex items-center justify-center">
       <style>{`
         @media screen and (max-width: 768px) {
           body {
@@ -222,34 +281,28 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         }
       `}</style>
 
-      {/* Player Gumlet en plein écran avec autoplay */}
-      <iframe
-        ref={iframeRef}
-        src={embedUrl}
-        title="Vidéo d'introduction"
-        className="absolute inset-0 w-full h-full border-0"
-        style={{
-          width: '100%',
-          height: '100%',
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          border: 'none',
-          display: 'block',
-        }}
-        frameBorder="0"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-        allowFullScreen
-        onLoad={() => {
-          console.log('[VideoIntro] Iframe loaded');
-          // Fallback si le postMessage "ready" n'arrive pas
-          setTimeout(() => setIframeLoaded(true), 1000);
-        }}
+      <video
+        ref={videoRef}
+        className="block"
+        style={getVideoStyle()}
+        playsInline
+        webkit-playsinline="true"
         data-testid="video-intro"
       />
 
+      {showPlayButton && !isPlaying && (
+        <div className="absolute inset-0 flex items-center justify-center z-10">
+          <Button
+            onClick={playVideo}
+            size="lg"
+            className="h-20 w-20 sm:h-24 sm:w-24 rounded-full bg-primary/90 backdrop-blur-md border-2 border-white/20 text-white hover:bg-primary hover:scale-110 transition-all duration-200 shadow-2xl"
+            data-testid="button-play"
+          >
+            <Play className="w-10 h-10 sm:w-12 sm:h-12 ml-1" fill="white" />
+          </Button>
+        </div>
+      )}
 
-      {/* Indicateur de son en haut à gauche */}
       <div className="absolute top-4 left-4 z-20">
         <Button
           onClick={toggleMute}
@@ -266,17 +319,21 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         </Button>
       </div>
 
-      {/* Indication pour pivoter en mode paysage - EN BAS de l'écran - Masquée en plein écran */}
-      {!isFullscreen && (
+      {currentVideoIndex === 0 && !isFullscreen && (
         <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full text-white text-sm sm:text-base font-semibold shadow-lg border-2 border-white/20">
-          📱 Mode paysage fortement recommandé
+          Mode paysage fortement recommandé
         </div>
       )}
 
-      {/* Bouton skip sur le CÔTÉ DROIT - Toujours visible */}
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+        <div className="bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full text-white text-xs font-medium">
+          {currentVideoIndex + 1} / {playlist.length}
+        </div>
+      </div>
+
       <Button
         onClick={() => {
-          console.log('[VideoIntro] Skip button clicked');
+          console.log("[VideoIntro] Skip button clicked");
           if (!videoEnded) {
             setVideoEnded(true);
             onComplete();
@@ -284,10 +341,10 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         }}
         size="lg"
         style={{
-          position: 'fixed',
-          top: '50%',
-          right: '1rem',
-          transform: 'translateY(-50%)',
+          position: "fixed",
+          top: "50%",
+          right: "1rem",
+          transform: "translateY(-50%)",
           zIndex: 30,
         }}
         className="h-14 w-14 sm:h-16 sm:w-auto sm:px-6 sm:right-8 rounded-2xl bg-primary/90 backdrop-blur-md border-2 border-white/10 text-white hover:bg-primary hover:scale-105 transition-all duration-200 shadow-2xl flex items-center justify-center"
