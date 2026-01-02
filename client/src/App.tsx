@@ -4,6 +4,7 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 import { SessionFlowProvider, useSessionFlow } from "@/contexts/SessionFlowContext";
 import { MediaProvider } from "@/contexts/MediaContext";
 import TitleScreen from "@/components/TitleScreen";
@@ -430,19 +431,66 @@ function CompletePage() {
   const handleReplay = () => {
     resetSession();
     captureSessionStarted(); // Start a new session
-    setLocation('/');
+    window.location.href = '/'; // Full refresh to ensure clean state
+  };
+
+  const handleShare = async () => {
+    const shareUrl = "https://proto-dilemme2.edugami.app/";
+    const shareData = {
+      title: "Dilemme Plastique",
+      text: "Découvrez l'impact du plastique sur la santé avec cette expérience interactive !",
+      url: shareUrl,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        captureFeatureUsed('share_experience', { method: 'native' });
+      } else {
+        await navigator.clipboard.writeText(shareUrl);
+        captureFeatureUsed('share_experience', { method: 'clipboard' });
+        alert("Lien copié dans le presse-papier !");
+      }
+    } catch (err) {
+      console.error("Error sharing:", err);
+    }
   };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-8 bg-gradient-to-br from-primary/5 via-background to-chart-2/5">
-      <div className="w-full max-w-md space-y-6 text-center animate-scale-in">
+      <div className="w-full max-w-md space-y-8 text-center animate-scale-in">
         <div className="text-6xl mb-4">🎉</div>
-        <h2 className="text-3xl font-bold font-heading">Merci {userName || 'participant'} !</h2>
-        <p className="text-muted-foreground text-lg">
-          Tu as terminé l'expérience Dilemme Plastique.
-        </p>
-        <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
-          <p className="text-green-700 font-medium">Merci pour ta participation !</p>
+        <div className="space-y-2">
+          <h2 className="text-3xl font-bold font-heading">Merci {userName || 'participant'} !</h2>
+          <p className="text-muted-foreground text-lg">
+            Tu as terminé l'expérience Dilemme Plastique.
+          </p>
+        </div>
+
+        <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+          <p className="text-green-700 dark:text-green-400 font-medium">Merci pour ta participation !</p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 pt-4">
+          <Button 
+            onClick={handleShare}
+            variant="default"
+            size="lg"
+            className="w-full rounded-2xl py-6 text-lg font-semibold shadow-md"
+            data-testid="button-share"
+          >
+            Partager l'expérience
+          </Button>
+
+          <Button 
+            onClick={handleReplay}
+            variant="outline"
+            size="lg"
+            className="w-full rounded-2xl py-6 text-lg font-semibold"
+            data-testid="button-replay"
+          >
+            Recommencer l'expérience
+          </Button>
         </div>
       </div>
     </div>
