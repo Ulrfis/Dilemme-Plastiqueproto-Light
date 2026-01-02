@@ -18,6 +18,7 @@ interface UseAudioQueueOptions {
 
 interface UseAudioQueueResult {
   enqueue: (blob: Blob, sentence: string, index: number) => void;
+  skipIndex: (index: number) => void; // Skip a failed sentence and advance expected index
   clear: () => void;
   reset: () => void; // Reset the expected index for a new response
   isPlaying: boolean;
@@ -158,8 +159,23 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
     nextExpectedIndexRef.current = 1;
   }, []);
 
+  // Skip a sentence that failed TTS generation - advance expected index and try to process queue
+  const skipIndex = useCallback((index: number) => {
+    console.log('[AudioQueue] Skipping failed sentence #' + index);
+    // Only advance if this is the expected index
+    if (index === nextExpectedIndexRef.current) {
+      nextExpectedIndexRef.current = index + 1;
+      console.log('[AudioQueue] Advanced expected index to #' + nextExpectedIndexRef.current);
+      // Try to process queue in case next sentence is already queued
+      if (!isProcessingRef.current && queueRef.current.length > 0) {
+        processQueue();
+      }
+    }
+  }, [processQueue]);
+
   return {
     enqueue,
+    skipIndex,
     clear,
     reset,
     isPlaying,

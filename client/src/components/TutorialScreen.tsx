@@ -372,20 +372,41 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           // Use streaming endpoint for faster generation, but wait for complete audio
           // CRITICAL: Track this promise to ensure all sentences are queued before completion
           const ttsPromise = (async () => {
-            try {
-              console.log('[TutorialScreen] Generating TTS for sentence #' + index);
+            const maxRetries = 3;
+            let lastError: Error | null = null;
+            
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+              try {
+                console.log('[TutorialScreen] Generating TTS for sentence #' + index + ' (attempt ' + (attempt + 1) + '/' + maxRetries + ')');
 
-              // textToSpeechStreaming uses the faster streaming endpoint
-              // but returns the complete audio blob to avoid playback cuts
-              const audioBlob = await textToSpeechStreaming(sentence);
-              console.log('[TutorialScreen] TTS complete for sentence #' + index + ', size:', audioBlob.size);
+                // textToSpeechStreaming uses the faster streaming endpoint
+                // but returns the complete audio blob to avoid playback cuts
+                const audioBlob = await textToSpeechStreaming(sentence);
+                
+                // Validate the audio blob
+                if (!audioBlob || audioBlob.size < 100) {
+                  throw new Error('Empty or invalid audio blob received');
+                }
+                
+                console.log('[TutorialScreen] TTS complete for sentence #' + index + ', size:', audioBlob.size);
 
-              // Add complete audio to queue for sequential playback
-              audioQueue.enqueue(audioBlob, sentence, index);
-            } catch (ttsError) {
-              console.error('[TutorialScreen] TTS failed for sentence #' + index + ':', ttsError);
-              // Continue processing other sentences even if one fails
+                // Add complete audio to queue for sequential playback
+                audioQueue.enqueue(audioBlob, sentence, index);
+                return; // Success - exit the retry loop
+              } catch (ttsError) {
+                lastError = ttsError instanceof Error ? ttsError : new Error(String(ttsError));
+                console.warn('[TutorialScreen] TTS attempt ' + (attempt + 1) + ' failed for sentence #' + index + ':', ttsError);
+                
+                // Wait before retrying (exponential backoff)
+                if (attempt < maxRetries - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+                }
+              }
             }
+            
+            // All retries failed - skip this sentence to unblock the queue
+            console.error('[TutorialScreen] TTS failed for sentence #' + index + ' after ' + maxRetries + ' attempts:', lastError);
+            audioQueue.skipIndex(index);
           })();
 
           pendingTTSRequests.push(ttsPromise);

@@ -318,6 +318,44 @@ video.onended → currentVideoIndex++ → loadVideo(next) → seamless playback
 
 ---
 
+### [2026-01-02] — TTS Reliability Fix: Ensure All Sentences Are Spoken 🔷
+
+**Intent**: Fix bug where Peter sometimes doesn't read all displayed text. Some sentences were being silently skipped due to TTS failures.
+
+**Prompt(s)**: 
+```
+Il arrive que Peter ne dise pas toutes les phrases qui sont affichées en texte. Il faut assurer qu'Elevenlabs stream TOUTES les phrases écrites.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Root cause identified: When TTS generation failed for a sentence, the audio queue would wait forever for that sentence index
+- Added retry logic with exponential backoff (3 attempts with 500ms, 1000ms, 1500ms delays)
+- Added blob validation: reject audio blobs < 100 bytes
+- Added `skipIndex()` function to audio queue to handle permanently failed sentences
+- When all retries fail, skipIndex advances the expected index so subsequent sentences can play
+
+**Architecture**:
+```
+TTS attempt 1 fails → wait 500ms → attempt 2 fails → wait 1000ms → attempt 3 fails
+→ audioQueue.skipIndex(index) → nextExpectedIndex++ → queue continues processing
+```
+
+**Root Cause Analysis**:
+```
+Before: sentence #2 TTS fails → queue waits for #2 forever → #3, #4, #5 never play
+After:  sentence #2 TTS fails (3x) → skipIndex(2) → queue plays #3, #4, #5
+```
+
+**Surprise**: The audio queue's strict ordering (to ensure correct playback sequence) became a liability when combined with network failures
+
+**Friction**: None - clean fix with backward-compatible API
+
+**Time**: ~10 minutes
+
+---
+
 ## Pulse Checks
 
 *Subjective snapshots. AI should prompt these every 3-5 features or at major moments.*
