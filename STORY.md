@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-01-02  
+> **Last Updated**: 2026-02-04  
 
 ---
 
@@ -459,6 +459,26 @@ After: App.tsx (wouter routes)
 **Resolution**: Protected routes now check sessionStorage directly in addition to React state, ensuring session validity even during state propagation delays
 
 **Time**: ~45 minutes
+
+---
+
+### [2026-02-04] — Instant Start & Session Hygiene 🔷
+
+**Intent**: Supprimer la friction d'entrée et garantir des sessions neuves et traçables.
+
+**Outcome**:
+- Écran « Prêt à commencer » retiré : audio auto-déverrouillé et message de bienvenue joué dès l'arrivée sur le tutoriel.
+- Reset robuste : bouton « Nouvelle session » (desktop + mobile) qui purge tout l'état, appelle `posthog.reset()` et force un refresh propre.
+- Paramètre `?fresh=1` pour QA afin d'ignorer tout état sessionStorage au premier rendu.
+- Messages de conversation keyés par ID stable + auto-scroll “sticky bottom” qui évite les sauts si l'utilisateur scrolle l'historique.
+- Mise en page mobile allégée : image réduite (~26vh) pour plus d'espace de chat.
+- Écran final enrichi : partage natif (fallback copie lien) et “Recommencer” avec refresh complet.
+
+**Surprise**: Ajouter des IDs stables a éliminé la majorité des sauts de scroll sans toucher aux animations.
+
+**Friction**: Nécessité de re-keyer l'état stocké en sessionStorage pour éviter les collisions d'IDs existants.
+
+**Time**: ~35 minutes
 
 ---
 

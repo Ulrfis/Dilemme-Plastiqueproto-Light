@@ -6,6 +6,23 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.6.1] - 2026-02-04
+
+### Modifié - Démarrage et Sessions
+- Suppression de l'écran « Prêt à commencer » : l'audio se déverrouille automatiquement et le message de bienvenue joue dès l'arrivée sur le tutoriel (commit 6793585).
+- `resetSession` étendu avec purge complète de l'état + `posthog.reset()` et flag `?fresh=1` pour forcer une session neuve côté QA (commit 4c15386).
+- Bouton « Nouvelle session » ajouté (desktop + mobile) pour repartir proprement (commit 4c15386).
+
+### Amélioré - Stabilité de la Conversation
+- Messages désormais keyés par ID unique pour éviter les sauts de scroll et collisions (commit 4c15386).
+- Auto-scroll intelligent : ne recolle au bas que si l'utilisateur est proche du pied de conversation, bulles avec `min-height` pour limiter les jumps (commit 4c15386).
+- Zone image réduite (~26vh) pour offrir plus d'espace de chat sur mobile (commit 4c15386).
+
+### Ajouté - Écran de Fin
+- Bouton « Partager l'expérience » (Web Share API + fallback copie lien) et bouton « Recommencer l'expérience » avec refresh complet pour état propre (commit 0461556).
+
+---
+
 ## [1.6.0] - 2026-01-02
 
 ### Ajouté - Tracking PostHog Enrichi et Identification Utilisateur

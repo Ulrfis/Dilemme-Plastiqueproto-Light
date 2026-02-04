@@ -2,7 +2,7 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.1-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
@@ -12,7 +12,24 @@
 
 ---
 
-## 🆕 Version Actuelle (v1.6.0 - January 2)
+## 🆕 Version Actuelle (v1.6.1 - February 4)
+
+### 🟢 Démarrage Immédiat & Sessions Propres
+- **Plus d'écran « Prêt à commencer »** : l'audio est déverrouillé et le message de bienvenue joue automatiquement en arrivant sur le tutoriel.
+- **Reset fiable** : bouton « Nouvelle session » (desktop + mobile), purge complète de l'état + `posthog.reset()` et paramètre `?fresh=1` pour forcer une session neuve.
+
+### 📱 Conversation Plus Stable
+- **Messages à ID stables** : évite les sauts de scroll et les collisions de clés.
+- **Auto-scroll intelligent** : ne recolle au bas que si l'utilisateur est proche du pied de conversation, bulles avec `min-height` pour limiter les jumps.
+- **Vue mobile respirable** : image réduite à ~26vh, zone de chat plus grande.
+
+### 🎉 Écran Final Enrichi
+- **Partager l'expérience** : bouton de partage natif (fallback copie lien) vers l'URL publique.
+- **Rejouer proprement** : bouton « Recommencer l'expérience » qui fait un refresh complet pour repartir à zéro.
+
+---
+
+## 🚀 Améliorations Précédentes (v1.6.0 - January 2)
 
 ### 📊 Tracking PostHog Enrichi
 - **Identification Utilisateur** : Identification automatique des élèves par leur nom via `posthog.identify()`.
