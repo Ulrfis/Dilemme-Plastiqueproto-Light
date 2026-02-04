@@ -15,6 +15,7 @@ import { captureEvent } from "@/App";
 import { useSessionFlow } from "@/contexts/SessionFlowContext";
 
 interface Message {
+  id?: string;
   role: 'assistant' | 'user';
   content: string;
 }
@@ -27,13 +28,29 @@ interface TutorialScreenProps {
 
 export default function TutorialScreen({ sessionId, userName, onComplete }: TutorialScreenProps) {
   const sessionFlow = useSessionFlow();
-  
+
+  const generateId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  };
+
+  const withIds = (messages: Message[]) =>
+    messages.map(m => m.id ? m : { ...m, id: generateId() });
+
+  const makeMessage = (role: Message['role'], content: string, id?: string): Message => ({
+    id: id || generateId(),
+    role,
+    content,
+  });
+
   const [foundClues, setFoundCluesLocal] = useState<string[]>(() => sessionFlow.foundClues);
   const [showSuccess, setShowSuccess] = useState(false);
   const [newClues, setNewClues] = useState<string[]>([]);
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [fallbackMode, setFallbackMode] = useState(false);
-  const [messages, setMessagesLocal] = useState<Message[]>(() => sessionFlow.messages);
+  const [messages, setMessagesLocal] = useState<Message[]>(() => withIds(sessionFlow.messages));
   const [textInput, setTextInput] = useState('');
   const [audioUnlocked, setAudioUnlockedLocal] = useState(() => sessionFlow.audioUnlocked);
   const [exchangeCount, setExchangeCountLocal] = useState(() => sessionFlow.exchangeCount);
@@ -47,9 +64,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   
   const setMessages = (messagesOrFn: Message[] | ((prev: Message[]) => Message[])) => {
     setMessagesLocal(prev => {
-      const newMessages = typeof messagesOrFn === 'function' ? messagesOrFn(prev) : messagesOrFn;
-      sessionFlow.setMessages(newMessages);
-      return newMessages;
+      const next = typeof messagesOrFn === 'function' ? messagesOrFn(prev) : messagesOrFn;
+      const normalized = withIds(next);
+      sessionFlow.setMessages(normalized);
+      return normalized;
     });
   };
   
@@ -139,10 +157,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     // Si l'utilisateur revient avec des messages existants, ne pas rejouer le message de bienvenue
     if (!isReturningUser) {
-      setMessages([{
-        role: 'assistant',
-        content: welcomeMessage
-      }]);
+      setMessages([makeMessage('assistant', welcomeMessage)]);
       
       // MOBILE FIX: Jouer le TTS IMMÉDIATEMENT dans le contexte du clic utilisateur
       // L'audio context et l'élément audio sont déjà initialisés au-dessus
@@ -150,6 +165,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       
       try {
         console.log('[TutorialScreen] Playing welcome message immediately in user gesture context');
+
+        // Pré-chauffage TTS: lancer un call ultra court en arrière-plan pour remplir les caches CDN
+        textToSpeechStreaming("...").catch(() => {});
+
         const audioBlob = await textToSpeechWithRetry(welcomeMessage);
         console.log('[TutorialScreen] Welcome message TTS generated, playing...');
         await playAudio(audioBlob);
@@ -339,7 +358,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       setExchangeCount(newExchangeCount);
       
       // Ajouter le message utilisateur
-      setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+      setMessages(prev => [...prev, makeMessage('user', userMessage)]);
 
       // PHASE 2 OPTIMIZATION: Use streaming pipeline for better latency
       if (useStreaming.current) {
@@ -400,10 +419,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             const lastMessage = prev[prev.length - 1];
             if (lastMessage && lastMessage.role === 'assistant') {
               // Update existing message
-              return [...prev.slice(0, -1), { role: 'assistant', content: fullResponse.trim() }];
+              return [...prev.slice(0, -1), { ...lastMessage, content: fullResponse.trim() }];
             } else {
               // Add new assistant message
-              return [...prev, { role: 'assistant', content: fullResponse.trim() }];
+              return [...prev, makeMessage('assistant', fullResponse.trim())];
             }
           });
 
@@ -475,9 +494,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           setMessages(prev => {
             const lastMessage = prev[prev.length - 1];
             if (lastMessage && lastMessage.role === 'assistant') {
-              return [...prev.slice(0, -1), { role: 'assistant', content: finalResponse }];
+              return [...prev.slice(0, -1), { ...lastMessage, content: finalResponse }];
             } else {
-              return [...prev, { role: 'assistant', content: finalResponse }];
+              return [...prev, makeMessage('assistant', finalResponse)];
             }
           });
 
@@ -564,7 +583,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     // Afficher le message IMMEDIATEMENT
     console.log('[TutorialScreen] Adding assistant message immediately');
-    setMessages(prev => [...prev, { role: 'assistant', content: result.response }]);
+    setMessages(prev => [...prev, makeMessage('assistant', result.response)]);
 
     // Generate TTS and play
     try {
@@ -672,6 +691,19 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           <div className="flex items-center gap-2">
             {FinishButton}
             <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                sessionFlow.resetSession();
+                captureEvent('session_manual_reset');
+                window.location.replace('/?fresh=1');
+              }}
+              className="px-3 h-9 sm:h-10"
+              data-testid="button-reset-session-mobile"
+            >
+              Nouvelle session
+            </Button>
+            <Button
               variant="ghost"
               onClick={() => setShowInfoModal(true)}
               className="flex items-center gap-1 px-2 h-9 sm:h-10"
@@ -684,7 +716,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         </header>
 
         {/* Image zoomable - 100% en horizontal */}
-        <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '30vh', minHeight: '180px' }}>
+        <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '26vh', minHeight: '180px' }}>
           <ZoomableImage
             src={tutorialImage}
             alt="Image à analyser"
@@ -790,6 +822,19 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             {/* Right section: Help button and Finish button */}
             <div className="flex items-center gap-2 flex-shrink-0">
               {FinishButton}
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  sessionFlow.resetSession();
+                  captureEvent('session_manual_reset');
+                  window.location.replace('/?fresh=1');
+                }}
+                className="px-3 h-10"
+                data-testid="button-reset-session-desktop"
+              >
+                Nouvelle session
+              </Button>
 
               <Button
                 variant="ghost"

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 
 interface Message {
+  id?: string;
   role: 'assistant' | 'user';
   content: string;
 }
@@ -53,8 +54,25 @@ const initialState: SessionFlowState = {
 
 const SessionFlowContext = createContext<SessionFlowContextType | null>(null);
 
+function generateId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `msg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function loadFromStorage(): SessionFlowState {
   try {
+    // Permettre aux testeurs de forcer une session neuve via ?fresh=1
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('fresh')) {
+        console.log('[SessionFlow] Fresh flag detected, skipping stored session');
+        sessionStorage.removeItem(STORAGE_KEY);
+        return initialState;
+      }
+    }
+
     const stored = sessionStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
@@ -64,7 +82,12 @@ function loadFromStorage(): SessionFlowState {
         messagesCount: parsed.messages?.length || 0,
         foundClues: parsed.foundClues?.length || 0
       });
-      return { ...initialState, ...parsed };
+      // Re-générer des IDs manquants pour les messages afin d'éviter les key collisions
+      const messagesWithIds = (parsed.messages || []).map((m: Message) => ({
+        ...m,
+        id: m.id || generateId(),
+      }));
+      return { ...initialState, ...parsed, messages: messagesWithIds };
     }
   } catch (e) {
     console.error('[SessionFlow] Failed to load from storage:', e);
@@ -156,9 +179,19 @@ export function SessionFlowProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const resetSession = useCallback(() => {
-    console.log('[SessionFlow] Resetting session');
+    console.log('[SessionFlow] Resetting session (full)');
     sessionStorage.removeItem(STORAGE_KEY);
     setState(initialState);
+
+    // S'assurer qu'une nouvelle session PostHog démarre proprement
+    if (typeof window !== 'undefined' && (window as any).posthog?.reset) {
+      try {
+        (window as any).posthog.reset();
+        console.log('[SessionFlow] PostHog reset called');
+      } catch (err) {
+        console.warn('[SessionFlow] PostHog reset failed:', err);
+      }
+    }
   }, []);
 
   const hasSession = Boolean(state.sessionId);

@@ -7,6 +7,7 @@ import peterImage from "@assets/Peter Avatar_1763217836125.jpg";
 import type { AudioState } from "@/hooks/useVoiceInteraction";
 
 interface Message {
+  id?: string;
   role: 'assistant' | 'user';
   content: string;
 }
@@ -44,13 +45,29 @@ export default function ConversationPanel({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [showTextInput, setShowTextInput] = useState(false);
+  const [isNearBottom, setIsNearBottom] = useState(true);
 
   // Auto-scroll pour garder les deux derniers échanges visibles
   useEffect(() => {
-    if (messagesEndRef.current) {
+    if (messagesEndRef.current && isNearBottom) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, isNearBottom]);
+
+  // Suivre la position de scroll pour éviter les sauts si l'utilisateur consulte l'historique
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      setIsNearBottom(distanceToBottom < 60);
+    };
+
+    handleScroll();
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const handleSendText = useCallback(() => {
     // Lire la valeur directement depuis le DOM en plus du state React
@@ -79,7 +96,7 @@ export default function ConversationPanel({
         {messages.map((message, index) => {
           return (
             <div
-              key={index}
+              key={message.id || index}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-slide-up`}
             >
               {message.role === 'assistant' && (
@@ -89,7 +106,9 @@ export default function ConversationPanel({
                     alt="Peter"
                     className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex-shrink-0"
                   />
-                  <div className="bg-card/90 backdrop-blur-sm rounded-2xl rounded-tl-none px-3 sm:px-4 py-2 sm:py-3 shadow-lg">
+                  <div
+                    className="bg-card/90 backdrop-blur-sm rounded-2xl rounded-tl-none px-3 sm:px-4 py-2 sm:py-3 shadow-lg min-h-[48px]"
+                  >
                     <p className="text-xs sm:text-sm text-left">
                       {message.content}
                     </p>
