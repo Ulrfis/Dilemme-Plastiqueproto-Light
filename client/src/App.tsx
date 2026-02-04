@@ -265,7 +265,7 @@ function WelcomePage() {
   const handleComplete = async (name: string) => {
     // CRITICAL: Reset audio and conversation state for new session
     // This ensures Peter's welcome message will be spoken even if user had a previous session
-    setAudioUnlocked(false);
+    setAudioUnlocked(true); // autorise la lecture immédiate sur l'écran suivant
     setMessages([]);
     setExchangeCount(0);
     setConversationEnded(false);

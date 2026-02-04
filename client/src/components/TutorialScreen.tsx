@@ -145,34 +145,22 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const isReturningUser = messages.length > 0;
 
   // Fonction pour déverrouiller l'audio et passer à l'écran conversationnel
-  // L'audio de bienvenue sera joué IMMÉDIATEMENT dans le contexte du geste utilisateur (clic)
+  // Désormais déclenchée automatiquement à l'arrivée sur l'écran (l'UX “Prêt à commencer ?” est retirée)
   const handleUnlockAudio = async () => {
-    console.log('[TutorialScreen] Unlocking audio - transitioning to conversation screen');
+    console.log('[TutorialScreen] Auto unlocking audio - entering conversation');
 
-    // MOBILE FIX CRITIQUE: Initialiser l'audio SYNCHRONEMENT dans le contexte du geste utilisateur
-    // AVANT toute opération async (comme le TTS API call) pour garantir le fonctionnement sur iOS Safari
-    // Si on attend le retour du TTS avant d'initialiser l'audio, le contexte du geste utilisateur est perdu
     initAudio();
-    console.log('[TutorialScreen] Audio initialized synchronously in user gesture context');
 
-    // Si l'utilisateur revient avec des messages existants, ne pas rejouer le message de bienvenue
-    if (!isReturningUser) {
+    if (!isReturningUser && !hasPlayedWelcome.current) {
       setMessages([makeMessage('assistant', welcomeMessage)]);
-      
-      // MOBILE FIX: Jouer le TTS IMMÉDIATEMENT dans le contexte du clic utilisateur
-      // L'audio context et l'élément audio sont déjà initialisés au-dessus
       hasPlayedWelcome.current = true;
       
       try {
-        console.log('[TutorialScreen] Playing welcome message immediately in user gesture context');
-
         // Pré-chauffage TTS: lancer un call ultra court en arrière-plan pour remplir les caches CDN
         textToSpeechStreaming("...").catch(() => {});
 
         const audioBlob = await textToSpeechWithRetry(welcomeMessage);
-        console.log('[TutorialScreen] Welcome message TTS generated, playing...');
         await playAudio(audioBlob);
-        console.log('[TutorialScreen] Welcome audio played successfully');
       } catch (error) {
         console.error('[TutorialScreen] Failed to play welcome audio:', error);
         toast({
@@ -182,11 +170,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         });
       }
     } else {
-      console.log('[TutorialScreen] Returning user - skipping welcome message, preserving existing conversation');
       hasPlayedWelcome.current = true;
     }
 
-    // Marquer que l'audio est déverrouillé pour passer à l'écran conversationnel
     setAudioUnlocked(true);
   };
 
@@ -622,34 +608,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     onComplete(foundClues.length, foundClues);
   };
 
-  // Afficher le bouton de déverrouillage audio si l'audio n'est pas encore déverrouillé
-  if (!audioUnlocked) {
-    return (
-      <div className="fixed inset-0 flex flex-col items-center justify-center bg-background px-4">
-        <div className="max-w-md w-full space-y-6 text-center">
-          <div className="space-y-3">
-            <h2 className="text-2xl font-bold">Prêt à commencer ?</h2>
-            <p className="text-muted-foreground">
-              Cliquez sur le bouton ci-dessous pour écouter Peter vous accueillir et commencer le tutoriel.
-            </p>
-          </div>
-          
-          <Button
-            onClick={handleUnlockAudio}
-            size="lg"
-            className="w-full max-w-sm rounded-2xl text-lg py-6"
-            data-testid="button-unlock-audio"
-          >
-            🎧 Écouter Peter
-          </Button>
-          
-          <p className="text-sm text-muted-foreground">
-            Pour une meilleure expérience, activez le son de votre appareil.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  // Auto-démarrage audio dès le montage (le clic précédent “Démarrer le tutoriel” suffit comme geste utilisateur)
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoStartedRef.current) {
+      autoStartedRef.current = true;
+      handleUnlockAudio();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const allCluesFound = foundClues.length >= TOTAL_CLUES;
 
