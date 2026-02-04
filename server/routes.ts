@@ -7,7 +7,74 @@ import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
 
-const upload = multer({ storage: multer.memoryStorage() });
+const AUDIO_MIME_WHITELIST = new Set([
+  "audio/webm",
+  "audio/ogg",
+  "audio/wav",
+  "audio/mpeg",
+  "audio/mp3",
+]);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2 MB max to limiter le DoS
+  },
+  fileFilter: (_req, file, cb) => {
+    if (AUDIO_MIME_WHITELIST.has(file.mimetype)) {
+      return cb(null, true);
+    }
+    return cb(new Error(`Unsupported file type: ${file.mimetype}`));
+  },
+});
+
+type RateEntry = { count: number; resetAt: number };
+function createRateLimiter(maxRequests: number, windowMs: number) {
+  const buckets = new Map<string, RateEntry>();
+  return function rateLimiter(req: any, res: any, next: any) {
+    const key = req.ip || req.headers["x-forwarded-for"] || "unknown";
+    const now = Date.now();
+    const entry = buckets.get(key) || { count: 0, resetAt: now + windowMs };
+
+    if (now > entry.resetAt) {
+      entry.count = 0;
+      entry.resetAt = now + windowMs;
+    }
+
+    entry.count += 1;
+    buckets.set(key, entry);
+
+    if (entry.count > maxRequests) {
+      const retryAfter = Math.max(0, Math.ceil((entry.resetAt - now) / 1000));
+      res.set("Retry-After", retryAfter.toString());
+      return res.status(429).json({ error: "Rate limit exceeded" });
+    }
+
+    next();
+  };
+}
+
+const generalLimiter = createRateLimiter(200, 15 * 60 * 1000); // 200 req / 15 min / IP
+const ttsLimiter = createRateLimiter(60, 15 * 60 * 1000); // plus strict pour endpoints coûteux
+const sttLimiter = createRateLimiter(60, 15 * 60 * 1000);
+
+function requireAdmin(req: any, res: any): boolean {
+  // En développement, on laisse passer pour faciliter le debug
+  if (process.env.NODE_ENV === 'development') return true;
+
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) {
+    // Si aucun token défini, ne pas exposer l'endpoint
+    res.status(404).json({ error: 'Not found' });
+    return false;
+  }
+
+  if (req.headers['x-admin-token'] !== adminToken) {
+    res.status(403).json({ error: 'Forbidden' });
+    return false;
+  }
+  return true;
+}
 
 // PHASE 1 OPTIMIZATION: TTS Response Cache
 // Cache TTS audio by text hash to avoid regenerating identical responses
@@ -64,9 +131,13 @@ function detectClues(text: string, alreadyFound: string[]): string[] {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Rate-limit global API
+  app.use('/api', generalLimiter);
 
   // Endpoint de diagnostic pour vérifier les services AI
   app.get('/api/health/ai', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
     const results: Record<string, { status: string; message: string }> = {
       openai: { status: 'unknown', message: '' },
       assistant: { status: 'unknown', message: '' },
@@ -109,6 +180,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Endpoint de diagnostic pour Google Sheets
   app.get('/api/health/sheets', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
     const result: { status: string; message: string; details?: any } = {
       status: 'unknown',
       message: '',
@@ -191,6 +264,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Endpoint de TEST complet pour Google Sheets (essaie vraiment d'écrire)
   app.get('/api/health/sheets/test', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
     try {
       const { testGoogleSheetsConnection } = await import('./google-sheets-sync');
       const result = await testGoogleSheetsConnection();
@@ -298,7 +373,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/speech-to-text', upload.single('audio'), async (req: Express.Request, res) => {
+  app.post('/api/speech-to-text', sttLimiter, upload.single('audio'), async (req: Express.Request, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: 'No audio file provided' });
@@ -322,7 +397,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // PHASE 2 OPTIMIZATION: Streaming TTS endpoint
   // Uses ElevenLabs streaming to send audio chunks as they're generated
-  app.post('/api/text-to-speech/stream', async (req, res) => {
+  app.post('/api/text-to-speech/stream', ttsLimiter, async (req, res) => {
     try {
       console.log('[TTS Stream API] Request received:', { textLength: req.body.text?.length });
       const { text } = req.body;
@@ -454,7 +529,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/text-to-speech', async (req, res) => {
+  app.post('/api/text-to-speech', ttsLimiter, async (req, res) => {
     try {
       console.log('[TTS API] Request received:', { textLength: req.body.text?.length });
       const { text } = req.body;
