@@ -157,7 +157,7 @@ export default function ScoreScreen({
     return "Continuez vos efforts!";
   };
 
-  const allClues = ['Déchets plastiques', 'ADN', 'Traité plastique', 'Algues', 'Homme', 'Femme'];
+  const allClues = ['Déchets plastiques', 'ADN', 'Traité plastique', 'Végétation', 'Homme', 'Femme'];
 
   const handleSaveSynthesis = async () => {
     if (!sessionId) {
