@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { getSessionFlowStorageKey, readStoredSessionFlow } from "@/lib/sessionFlowStorage";
 
 interface Message {
   id?: string;
@@ -36,7 +37,7 @@ interface SessionFlowContextType extends SessionFlowState {
   hasSession: boolean;
 }
 
-const STORAGE_KEY = 'dilemme_session_flow';
+const STORAGE_KEY = getSessionFlowStorageKey();
 
 const initialState: SessionFlowState = {
   userName: '',
@@ -73,9 +74,8 @@ function loadFromStorage(): SessionFlowState {
       }
     }
 
-    const stored = sessionStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
+    const parsed = readStoredSessionFlow();
+    if (parsed) {
       console.log('[SessionFlow] Loaded state from storage:', { 
         userName: parsed.userName, 
         sessionId: parsed.sessionId?.substring(0, 8),
@@ -115,8 +115,7 @@ export function SessionFlowProvider({ children }: { children: ReactNode }) {
 
   const setUserName = useCallback((name: string) => {
     // Save to storage FIRST (synchronously) before React state update
-    const currentStored = sessionStorage.getItem(STORAGE_KEY);
-    const currentState = currentStored ? JSON.parse(currentStored) : initialState;
+    const currentState = readStoredSessionFlow() ?? initialState;
     const newState = { ...currentState, userName: name };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
     console.log('[SessionFlow] userName saved synchronously:', name);
@@ -127,8 +126,7 @@ export function SessionFlowProvider({ children }: { children: ReactNode }) {
   const setSessionId = useCallback((id: string) => {
     // Save to storage FIRST (synchronously) before React state update
     // This ensures sessionStorage has the value before any navigation
-    const currentStored = sessionStorage.getItem(STORAGE_KEY);
-    const currentState = currentStored ? JSON.parse(currentStored) : initialState;
+    const currentState = readStoredSessionFlow() ?? initialState;
     const newState = { ...currentState, sessionId: id };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
     console.log('[SessionFlow] sessionId saved synchronously:', id.substring(0, 8));

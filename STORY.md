@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-02-04  
+> **Last Updated**: 2026-02-16  
 
 ---
 
@@ -482,6 +482,44 @@ After: App.tsx (wouter routes)
 
 ---
 
+### [2026-02-16] — Cross-Device Reliability Pass (Desktop + Smartphone) 🔷
+
+**Intent**: Renforcer la stabilité runtime et l'expérience perçue sur desktop/mobile sans toucher à la mécanique existante (conversation, scoring, routes, règles d'échanges).
+
+**Prompt(s)**:
+```
+Il faut analyser en détail ce projet et vérifier qu'il fonctionnera bien autant sur desktop que sur smartphone; voir aussi pour améliorer latence et expérience utilisateur - sans rien casser à la mécanique et usage actuel !
+```
+
+**Tool**: Codex (GPT-5 coding agent)
+
+**Outcome**:
+- Ajout d'un accès sessionStorage sécurisé (`readStoredSessionFlow`) avec purge automatique des payloads invalides.
+- Refactor des routes protégées pour supprimer les `JSON.parse` répétés et réduire les points de crash.
+- Stabilisation du cycle de vie analytics: timers/listeners globaux déplacés dans des `useEffect` avec cleanup.
+- Correction des listeners vidéo (`play/pause`) dans `VideoIntro` et nettoyage de `loadedmetadata` natif.
+- Protection anti double-soumission sur l'écran prénom (`isSubmitting` + feedback "Démarrage...").
+- Ajustements mobile de layout/viewport (`viewport-fit=cover`, `100dvh`) pour réduire les sauts visuels.
+- Micro-optimisation conversation (`loading="lazy"`, `decoding="async"` sur avatars).
+- `posthog.debug(true)` limité au local (`localhost`, `127.0.0.1`).
+
+**Architecture Delta**:
+```
+Avant:
+Routes -> sessionStorage.getItem(...) + JSON.parse(...) dans plusieurs pages
+
+Après:
+Routes -> readStoredSessionFlow() unique + fallback robuste + nettoyage payload corrompu
+```
+
+**Surprise**: Les principaux risques n'étaient pas des bugs métier, mais des détails de cycle de vie (listeners/timers/storage parsing) qui se révèlent surtout en usage mobile réel.
+
+**Friction**: Validation outillée partielle dans l'environnement de travail (`tsc`/`vite` indisponibles), donc audit principalement statique + correctifs à faible risque.
+
+**Time**: ~45 minutes
+
+---
+
 ## Pulse Checks
 
 *Subjective snapshots. AI should prompt these every 3-5 features or at major moments.*
@@ -507,6 +545,7 @@ After: App.tsx (wouter routes)
 - [2024-12-12]: Sometimes the simplest solution (web snippet) outperforms the "proper" programmatic approach. Ship the thing that's easier to maintain.
 - [2024-12-12]: Variant matching in AI detection creates pedagogical flexibility—let students express ideas in their own language, don't force exact matches.
 - [2024-12-12]: Dual-mode interfaces (drag + click) are more accessible AND feel better on mobile than we expected.
+- [2026-02-16]: Une passe "fiabilité" sans changement fonctionnel peut améliorer fortement l'expérience perçue (moins de crashes, moins de glitches) en ciblant storage, listeners et viewport.
 
 ---
 

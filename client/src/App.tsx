@@ -17,6 +17,7 @@ import FeedbackSurvey from "@/components/FeedbackSurvey";
 import Syntheses from "@/pages/Syntheses";
 import NotFound from "@/pages/not-found";
 import { createSession } from "@/lib/api";
+import { readStoredSessionFlow } from "@/lib/sessionFlowStorage";
 
 // PostHog is initialized via web snippet in index.html
 // Use window.posthog for tracking - do NOT re-initialize here
@@ -50,14 +51,20 @@ export function identifyUser(userId: string, properties?: Record<string, unknown
   }
 }
 
-// Session tracking - initialize on load
-if (typeof window !== 'undefined') {
-  window.dilemmeSessionStart = Date.now();
-  window.dilemmeActionsCount = 0;
+function ensureSessionTracking() {
+  if (typeof window === "undefined") return;
+  if (window.dilemmeSessionStart === undefined) {
+    window.dilemmeSessionStart = Date.now();
+  }
+  if (window.dilemmeActionsCount === undefined) {
+    window.dilemmeActionsCount = 0;
+  }
 }
 
 // Helper function to safely capture PostHog events
 export function captureEvent(event: string, properties?: Record<string, unknown>) {
+  ensureSessionTracking();
+
   // Increment actions count for session tracking
   if (window.dilemmeActionsCount !== undefined) {
     window.dilemmeActionsCount++;
@@ -201,41 +208,6 @@ if (typeof window !== 'undefined') {
   };
 }
 
-// Initial PostHog check and session tracking (with delay to ensure PostHog is fully loaded)
-if (typeof window !== 'undefined') {
-  // Wait a bit for PostHog to fully initialize
-  setTimeout(() => {
-    const verification = verifyPostHog();
-    if (verification.status === 'ok') {
-      // Capture app loaded and session started events
-      captureEvent("app_loaded", {
-        url: window.location.href
-      });
-      captureSessionStarted();
-    }
-  }, 1000);
-  
-  // Track session end when user leaves or closes the page
-  window.addEventListener('beforeunload', () => {
-    captureSessionEnded({
-      exit_url: window.location.href,
-      exit_type: 'page_unload'
-    });
-  });
-  
-  // Also track visibility change for mobile (when app goes to background)
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      captureEvent('app_backgrounded', {
-        duration_seconds: window.dilemmeSessionStart 
-          ? (Date.now() - window.dilemmeSessionStart) / 1000 
-          : 0,
-        actions_completed: window.dilemmeActionsCount || 0,
-      });
-    }
-  });
-}
-
 function TitlePage() {
   const [, setLocation] = useLocation();
   
@@ -305,9 +277,8 @@ function WelcomePage() {
 function TutorialPage() {
   const [, setLocation] = useLocation();
   const { sessionId, userName, setFoundClues } = useSessionFlow();
-
-  const storedSession = sessionStorage.getItem('dilemme_session_flow');
-  const hasValidSession = sessionId || (storedSession && JSON.parse(storedSession).sessionId);
+  const stored = readStoredSessionFlow();
+  const hasValidSession = sessionId || stored?.sessionId;
 
   if (!hasValidSession) {
     captureDemoAbandoned('tutorial', { reason: 'no_valid_session' });
@@ -325,8 +296,8 @@ function TutorialPage() {
 
   return (
     <TutorialScreen
-      sessionId={sessionId || (storedSession ? JSON.parse(storedSession).sessionId : '')}
-      userName={userName || (storedSession ? JSON.parse(storedSession).userName : '')}
+      sessionId={sessionId || stored?.sessionId || ''}
+      userName={userName || stored?.userName || ''}
       onComplete={handleComplete}
     />
   );
@@ -335,9 +306,8 @@ function TutorialPage() {
 function GamePage() {
   const [, setLocation] = useLocation();
   const { userName } = useSessionFlow();
-
-  const storedSession = sessionStorage.getItem('dilemme_session_flow');
-  const hasValidSession = userName || (storedSession && JSON.parse(storedSession).sessionId);
+  const stored = readStoredSessionFlow();
+  const hasValidSession = userName || stored?.sessionId;
 
   if (!hasValidSession) {
     captureDemoAbandoned('game', { reason: 'no_valid_session' });
@@ -351,7 +321,7 @@ function GamePage() {
 
   return (
     <DragDropGame
-      userName={userName || (storedSession ? JSON.parse(storedSession).userName : '')}
+      userName={userName || stored?.userName || ''}
       onComplete={handleComplete}
     />
   );
@@ -360,17 +330,14 @@ function GamePage() {
 function SynthesisPage() {
   const [, setLocation] = useLocation();
   const { userName, sessionId, foundClues } = useSessionFlow();
-
-  const storedSession = sessionStorage.getItem('dilemme_session_flow');
-  const hasValidSession = sessionId || (storedSession && JSON.parse(storedSession).sessionId);
+  const stored = readStoredSessionFlow();
+  const hasValidSession = sessionId || stored?.sessionId;
 
   if (!hasValidSession) {
     captureDemoAbandoned('synthesis', { reason: 'no_valid_session' });
     return <Redirect to="/" />;
   }
 
-  const stored = storedSession ? JSON.parse(storedSession) : null;
-  
   const handleShowFeedback = () => {
     captureFeatureUsed('synthesis_completed');
     setLocation('/feedback');
@@ -389,16 +356,13 @@ function SynthesisPage() {
 function FeedbackPage() {
   const [, setLocation] = useLocation();
   const { sessionId, userName, setFeedbackCompleted } = useSessionFlow();
-
-  const storedSession = sessionStorage.getItem('dilemme_session_flow');
-  const hasValidSession = sessionId || (storedSession && JSON.parse(storedSession).sessionId);
+  const stored = readStoredSessionFlow();
+  const hasValidSession = sessionId || stored?.sessionId;
 
   if (!hasValidSession) {
     captureDemoAbandoned('feedback', { reason: 'no_valid_session' });
     return <Redirect to="/" />;
   }
-
-  const stored = storedSession ? JSON.parse(storedSession) : null;
 
   const handleComplete = () => {
     setFeedbackCompleted(true);
@@ -518,6 +482,18 @@ function Router() {
 
 function App() {
   useEffect(() => {
+    ensureSessionTracking();
+
+    const posthogInitTimer = window.setTimeout(() => {
+      const verification = verifyPostHog();
+      if (verification.status === "ok") {
+        captureEvent("app_loaded", {
+          url: window.location.href,
+        });
+        captureSessionStarted();
+      }
+    }, 1000);
+
     // Capture page view when app mounts
     captureEvent("page_view", {
       page: window.location.pathname,
@@ -527,6 +503,38 @@ function App() {
     captureFeatureUsed('prototype_demo', {
       initial_page: window.location.pathname,
     });
+
+    return () => {
+      window.clearTimeout(posthogInitTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      captureSessionEnded({
+        exit_url: window.location.href,
+        exit_type: "page_unload",
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        captureEvent("app_backgrounded", {
+          duration_seconds: window.dilemmeSessionStart
+            ? (Date.now() - window.dilemmeSessionStart) / 1000
+            : 0,
+          actions_completed: window.dilemmeActionsCount || 0,
+        });
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, []);
 
   return (

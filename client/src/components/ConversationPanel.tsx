@@ -104,6 +104,8 @@ export default function ConversationPanel({
                   <img
                     src={peterImage}
                     alt="Peter"
+                    loading="lazy"
+                    decoding="async"
                     className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex-shrink-0"
                   />
                   <div
@@ -162,6 +164,8 @@ export default function ConversationPanel({
             <img
               src={peterImage}
               alt="Peter parle"
+              loading="lazy"
+              decoding="async"
               className="w-10 h-10 sm:w-12 sm:h-12 rounded-full animate-bounce-subtle"
             />
           </div>

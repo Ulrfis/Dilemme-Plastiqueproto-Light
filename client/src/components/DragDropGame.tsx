@@ -263,7 +263,7 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
   const activeWord = activeId ? DRAGGABLE_WORDS.find(w => w.id === activeId) : null;
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-primary/5 via-background to-chart-2/5 px-3 py-3 overflow-hidden">
+    <div className="h-screen h-[100dvh] flex flex-col bg-gradient-to-br from-primary/5 via-background to-chart-2/5 px-3 py-3 overflow-hidden">
       <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full min-h-0">
         <div className="text-center mb-2">
           <h2 className="text-xl sm:text-2xl font-bold font-heading mb-1">

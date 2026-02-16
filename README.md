@@ -2,7 +2,7 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-1.6.1-blue.svg)
+![Version](https://img.shields.io/badge/version-1.6.2-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
@@ -12,7 +12,26 @@
 
 ---
 
-## 🆕 Version Actuelle (v1.6.1 - February 4)
+## 🆕 Version Actuelle (v1.6.2 - February 16)
+
+### 🛡️ Robustesse Sans Changer la Mécanique
+- **Lecture session sécurisée** : ajout d'un helper unique pour lire `sessionStorage` sans crash si payload corrompu, avec nettoyage automatique des données invalides.
+- **Routes protégées durcies** : suppression des `JSON.parse` répétés dans le routing et fallback cohérent React state + storage.
+- **Effets globaux stabilisés** : écouteurs `beforeunload` / `visibilitychange` et timer d'init analytics déplacés dans des `useEffect` avec cleanup.
+
+### 📱 Desktop + Smartphone: Stabilité UI
+- **Viewport modernisé** : `viewport-fit=cover` pour mieux gérer les safe areas sur iOS/Android.
+- **Hauteur mobile fiable** : usage de `100dvh` pour limiter les sauts de layout avec la barre navigateur mobile.
+- **Vidéo intro fiabilisée** : correction du nettoyage des listeners `play/pause`, `onloadedmetadata` natif, playlist mémorisée.
+
+### ⚡ Latence Perçue & UX
+- **Démarrage protégé contre double tap/click** : état `Démarrage...` sur l'écran prénom pour éviter doubles créations de session.
+- **Rendu conversation optimisé** : avatars en `loading="lazy"` + `decoding="async"`.
+- **Analytics allégé hors dev** : `posthog.debug(true)` activé seulement en local (`localhost` / `127.0.0.1`).
+
+---
+
+## 🚀 Améliorations Précédentes (v1.6.1 - February 4)
 
 ### 🟢 Démarrage Immédiat & Sessions Propres
 - **Plus d'écran « Prêt à commencer »** : l'audio est déverrouillé et le message de bienvenue joue automatiquement en arrivant sur le tutoriel.

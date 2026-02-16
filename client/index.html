@@ -2,7 +2,7 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Dilemme - Application éducative d'analyse d'images guidée par intelligence artificielle avec interaction vocale" />
     <meta name="theme-color" content="#8b5cf6" />
     <link rel="icon" type="image/jpeg" href="/favicon.jpg" />
@@ -47,8 +47,10 @@
             });
         }
     });
-    // Enable debug mode for development
-    posthog.debug(true);
+    // Enable debug mode only on local development
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      posthog.debug(true);
+    }
     </script>
 
     <title>Dilemme - Analyse d'Images IA</title>

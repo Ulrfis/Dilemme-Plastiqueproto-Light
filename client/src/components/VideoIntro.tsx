@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { ChevronRight, Volume2, VolumeX, Play } from "lucide-react";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { useMedia } from "@/contexts/MediaContext";
 import Hls from "hls.js";
 
@@ -37,10 +37,10 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   const [isMobile] = useState(() => isMobileDevice());
   const [showPlayButton, setShowPlayButton] = useState(true);
 
-  const playlist = [
+  const playlist = useMemo(() => [
     VIDEO_URLS.intro,
     isMobile ? VIDEO_URLS.mobile : VIDEO_URLS.desktop,
-  ];
+  ], [isMobile]);
 
   console.log("[VideoIntro] Component mounted - isMobile:", isMobile, "playlist:", playlist);
 
@@ -94,12 +94,12 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = url;
-      video.addEventListener("loadedmetadata", () => {
+      video.onloadedmetadata = () => {
         console.log("[VideoIntro] Native HLS loaded");
         if (isPlaying) {
           video.play().catch((e) => console.log("[VideoIntro] Auto-play prevented:", e));
         }
-      });
+      };
     }
   }, [isPlaying]);
 
@@ -110,7 +110,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         hlsRef.current.destroy();
       }
     };
-  }, [currentVideoIndex]);
+  }, [currentVideoIndex, loadVideo, playlist]);
 
   const handleVideoEnded = useCallback(() => {
     console.log("[VideoIntro] Video ended, index:", currentVideoIndex);
@@ -139,14 +139,17 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     const video = videoRef.current;
     if (!video) return;
 
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+
     video.addEventListener("ended", handleVideoEnded);
-    video.addEventListener("play", () => setIsPlaying(true));
-    video.addEventListener("pause", () => setIsPlaying(false));
+    video.addEventListener("play", handlePlay);
+    video.addEventListener("pause", handlePause);
 
     return () => {
       video.removeEventListener("ended", handleVideoEnded);
-      video.removeEventListener("play", () => setIsPlaying(true));
-      video.removeEventListener("pause", () => setIsPlaying(false));
+      video.removeEventListener("play", handlePlay);
+      video.removeEventListener("pause", handlePause);
     };
   }, [handleVideoEnded]);
 

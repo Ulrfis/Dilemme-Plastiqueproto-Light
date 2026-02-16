@@ -6,6 +6,34 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.6.2] - 2026-02-16
+
+### Modifié - Résilience Session et Navigation
+- Ajout d'un helper `readStoredSessionFlow()` pour centraliser la lecture de `sessionStorage` et éviter les crashs liés à un `JSON.parse` invalide.
+- Nettoyage automatique du payload corrompu dans le storage pour repartir sur un état sain.
+- Routes protégées (`tutorial`, `game`, `synthesis`, `feedback`) refactorisées pour réutiliser la lecture sûre du storage au lieu de parses répétés.
+- Fichiers: `client/src/lib/sessionFlowStorage.ts`, `client/src/App.tsx`, `client/src/contexts/SessionFlowContext.tsx`
+
+### Corrigé - Stabilité Vidéo Intro
+- Correction du cleanup des listeners vidéo `play/pause` (handlers stables) pour éviter l'empilement d'écouteurs.
+- Passage de l'écoute `loadedmetadata` native HLS vers `video.onloadedmetadata` pour éviter les listeners orphelins.
+- Playlist mémorisée via `useMemo` pour limiter les rechargements involontaires.
+- Fichier: `client/src/components/VideoIntro.tsx`
+
+### Amélioré - UX Mobile/Desktop et Latence Perçue
+- Meta viewport modernisée (`viewport-fit=cover`) pour meilleure gestion des safe areas mobiles.
+- Ajout de `100dvh` pour réduire les sauts de layout sur mobile (barres navigateur dynamiques).
+- Protection anti double-soumission au démarrage (`isSubmitting`) + feedback visuel "Démarrage...".
+- Avatars de conversation en chargement/décodage asynchrones (`loading="lazy"`, `decoding="async"`).
+- Fichiers: `client/index.html`, `client/src/index.css`, `client/src/components/DragDropGame.tsx`, `client/src/components/WelcomeSetup.tsx`, `client/src/components/ConversationPanel.tsx`
+
+### Modifié - Analytics
+- `posthog.debug(true)` activé uniquement en local (`localhost`, `127.0.0.1`) pour réduire le bruit et l'overhead en environnement distant.
+- Initialisation analytics et listeners globaux déplacés dans des `useEffect` avec cleanup pour éviter les duplications en HMR/navigation.
+- Fichiers: `client/index.html`, `client/src/App.tsx`
+
+---
+
 ## [1.6.1] - 2026-02-04
 
 ### Modifié - Démarrage et Sessions

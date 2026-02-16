@@ -1,37 +1,45 @@
-import { useState } from "react";
+import { useState, type TouchEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { captureEvent } from "@/App";
 
 interface WelcomeSetupProps {
-  onStart: (name: string) => void;
+  onStart: (name: string) => void | Promise<void>;
 }
 
 export default function WelcomeSetup({ onStart }: WelcomeSetupProps) {
   const [name, setName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleStart = () => {
+  const handleStart = async () => {
+    if (isSubmitting) return;
+
     console.log('[WelcomeSetup] handleStart called with name:', name);
     const trimmedName = name.trim();
 
     if (trimmedName) {
       console.log('[WelcomeSetup] Starting tutorial with name:', trimmedName);
       captureEvent("user_session_started", { userName: trimmedName });
-      onStart(trimmedName);
+      setIsSubmitting(true);
+      try {
+        await onStart(trimmedName);
+      } finally {
+        setIsSubmitting(false);
+      }
     } else {
       console.log('[WelcomeSetup] Name is empty, not starting');
     }
   };
 
   // Handler spécifique pour les événements tactiles sur mobile
-  const handleTouchEnd = (e: React.TouchEvent) => {
+  const handleTouchEnd = (e: TouchEvent) => {
     e.preventDefault();
     console.log('[WelcomeSetup] Touch event triggered');
-    handleStart();
+    void handleStart();
   };
 
-  const isButtonDisabled = !name.trim();
+  const isButtonDisabled = !name.trim() || isSubmitting;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-8">
@@ -51,6 +59,7 @@ export default function WelcomeSetup({ onStart }: WelcomeSetupProps) {
               type="text"
               placeholder="Ton prénom..."
               value={name}
+              disabled={isSubmitting}
               onChange={(e) => {
                 console.log('[WelcomeSetup] Name changed:', e.target.value);
                 setName(e.target.value);
@@ -58,7 +67,7 @@ export default function WelcomeSetup({ onStart }: WelcomeSetupProps) {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   console.log('[WelcomeSetup] Enter key pressed');
-                  handleStart();
+                  void handleStart();
                 }
               }}
               className="text-lg rounded-xl"
@@ -72,7 +81,7 @@ export default function WelcomeSetup({ onStart }: WelcomeSetupProps) {
             onClick={(e) => {
               e.preventDefault();
               console.log('[WelcomeSetup] Click event triggered');
-              handleStart();
+              void handleStart();
             }}
             onTouchEnd={!isButtonDisabled ? handleTouchEnd : undefined}
             disabled={isButtonDisabled}
@@ -81,7 +90,7 @@ export default function WelcomeSetup({ onStart }: WelcomeSetupProps) {
             data-testid="button-start-tutorial"
             type="button"
           >
-            Démarrer le tutoriel
+            {isSubmitting ? "Démarrage..." : "Démarrer le tutoriel"}
           </Button>
         </div>
       </div>
