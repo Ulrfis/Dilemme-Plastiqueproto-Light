@@ -105,7 +105,7 @@ const TARGET_CLUES = [
   { keyword: "Déchets plastiques", variants: ["déchets plastiques", "dechets plastiques", "plastique", "pollution plastique", "déchets", "ordures plastiques"] },
   { keyword: "ADN", variants: ["adn", "acide désoxyribonucléique", "génétique", "double hélice", "hélice adn"] },
   { keyword: "Traité plastique", variants: ["traité plastique", "traite plastique", "traité", "accord plastique", "convention plastique"] },
-  { keyword: "Algues", variants: ["algues", "algue", "végétation marine", "plantes marines", "végétaux marins"] },
+  { keyword: "Végétation", variants: ["végétation", "végétaux", "algues", "algue", "végétation marine", "plantes marines", "végétaux marins", "plantes", "verdure"] },
   { keyword: "Homme", variants: ["homme", "penseur", "rodin", "sculpture homme", "figure masculine", "personnage masculin"] },
   { keyword: "Femme", variants: ["femme", "figure féminine", "personnage féminin", "sculpture femme", "mère", "terre-mère"] }
 ];

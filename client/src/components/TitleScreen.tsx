@@ -2,6 +2,8 @@ import { Button } from "@/components/ui/button";
 import logoImage from "@assets/PlaceDesNations_Dilemme_1762432136623.png";
 import { useMedia } from "@/contexts/MediaContext";
 import { captureEvent } from "@/App";
+import { useSessionFlow } from "@/contexts/SessionFlowContext";
+import { RefreshCw } from "lucide-react";
 
 interface TitleScreenProps {
   onStart: () => void;
@@ -9,6 +11,7 @@ interface TitleScreenProps {
 
 export default function TitleScreen({ onStart }: TitleScreenProps) {
   const { unlockAudio } = useMedia();
+  const { resetSession } = useSessionFlow();
 
   const handleStart = async () => {
     console.log('[TitleScreen] Start button clicked - unlocking audio...');
@@ -25,6 +28,13 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
 
     // Naviguer vers l'écran vidéo
     onStart();
+  };
+
+  const handleNewSession = () => {
+    if (confirm("Voulez-vous vraiment recommencer l'expérience ? Cela effacera votre progression actuelle.")) {
+      resetSession();
+      window.location.reload();
+    }
   };
 
   return (
@@ -44,14 +54,32 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
           </p>
         </div>
 
-        <Button
-          onClick={handleStart}
-          size="lg"
-          className="w-full max-w-sm rounded-2xl text-lg py-6"
-          data-testid="button-start"
-        >
-          Commencer
-        </Button>
+        <div className="flex flex-col items-center space-y-6 w-full max-w-sm">
+          <Button
+            onClick={handleStart}
+            size="lg"
+            className="w-full rounded-2xl text-lg py-6"
+            data-testid="button-start"
+          >
+            Commencer
+          </Button>
+
+          <div className="w-full space-y-3 pt-4 border-t border-primary/10">
+            <p className="text-sm text-muted-foreground text-center px-4">
+              Si vous avez déjà commencé et souhaitez repartir de zéro :
+            </p>
+            <Button
+              onClick={handleNewSession}
+              variant="outline"
+              size="lg"
+              className="w-full rounded-2xl py-6 flex items-center justify-center gap-2"
+              data-testid="button-new-session-home"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Nouvelle Session
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

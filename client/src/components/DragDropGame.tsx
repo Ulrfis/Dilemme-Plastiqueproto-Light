@@ -37,7 +37,7 @@ const DRAGGABLE_WORDS = [
   { id: "word1", text: "les déchets plastiques" },
   { id: "word2", text: "ADN" },
   { id: "word3", text: "le traité plastique" },
-  { id: "word4", text: "les algues" },
+  { id: "word4", text: "la végétation" },
   { id: "word5", text: "L'homme" },
   { id: "word6", text: "La femme" },
 ];
