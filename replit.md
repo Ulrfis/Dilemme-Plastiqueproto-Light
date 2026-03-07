@@ -84,8 +84,9 @@ Preferred communication style: Simple, everyday language.
 - **Organization**: `org-z0AK8zYLTeapGaiDZFQ5co2N`
 
 **ElevenLabs Integration**:
-- **Text-to-Speech**: Voice ID `CBP9p4KAWPqrMHTDtWPR` (Peter mai 2025 FR)
+- **Text-to-Speech**: Voice ID `R8IjtpeRZsjoJfq1wwj3` (Peter - nouveau workspace)
 - **Model**: eleven_multilingual_v2
+- **API Key**: Updated to new workspace (`sk_22fdaffb...`)
 - **Caching Strategy**: MD5 hash-based TTS response caching (max 100 entries) for repeated phrases
 
 **Streaming Architecture (Phase 2 Optimization)**:
@@ -159,7 +160,8 @@ Preferred communication style: Simple, everyday language.
 2. **ElevenLabs** (`api.elevenlabs.io`)
    - Purpose: Text-to-Speech voice synthesis
    - Authentication: API key via `ELEVENLABS_API_KEY` environment variable
-   - Voice: Peter (ID: `CBP9p4KAWPqrMHTDtWPqrMHTDtWPR`)
+   - Voice: Peter (ID: `R8IjtpeRZsjoJfq1wwj3`)
+   - Workspace: New workspace with updated API key
    - Critical dependency for voice output
 
 3. **Google Sheets API**

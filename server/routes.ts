@@ -420,7 +420,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[TTS Stream API] Cache MISS - streaming from ElevenLabs:', textHash.substring(0, 8));
 
       const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-      const VOICE_ID = 'CBP9p4KAWPqrMHTDtWPR'; // Peter mai 2025 FR
+      const VOICE_ID = 'R8IjtpeRZsjoJfq1wwj3'; // Peter - nouveau workspace
 
       if (!ELEVENLABS_API_KEY) {
         console.error('[TTS Stream API] ElevenLabs API key not configured');
@@ -551,7 +551,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[TTS API] Cache MISS - generating new audio for hash:', textHash.substring(0, 8));
 
       const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-      const VOICE_ID = 'CBP9p4KAWPqrMHTDtWPR'; // Peter mai 2025 FR
+      const VOICE_ID = 'R8IjtpeRZsjoJfq1wwj3'; // Peter - nouveau workspace
 
       console.log('[TTS API] Using voice:', VOICE_ID);
 
