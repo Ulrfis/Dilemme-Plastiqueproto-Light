@@ -20,6 +20,16 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 - Le texte s'affiche toujours progressivement (streaming SSE) pour l'UX, seul le TTS attend le texte complet.
 - Fichiers: `server/routes.ts`
 
+### Ajouté - Pré-génération TTS côté serveur (Phase 3 Latence)
+- Le serveur lance la génération TTS **immédiatement** dès que le LLM finit, avant même que le client la demande.
+- Nouveau store temporaire côté serveur (`ttsRequestStore`) avec tokens auto-expirables (60s TTL).
+- Nouvel endpoint `GET /api/tts/play/:token` pour récupérer l'audio pré-généré.
+- L'événement SSE `complete` inclut maintenant un `ttsToken` pour accès direct.
+- Nouvelle méthode `playFromUrl()` dans `useVoiceInteraction` : le navigateur joue l'audio via URL native (streaming natif du navigateur).
+- Fallback automatique vers le TTS client-side si le token n'est pas disponible.
+- Gain estimé : ~2-3s sur le délai entre affichage texte et début de la voix.
+- Fichiers: `server/routes.ts`, `client/src/hooks/useVoiceInteraction.ts`, `client/src/components/TutorialScreen.tsx`, `client/src/lib/api.ts`
+
 ---
 
 ## [1.6.2] - 2026-02-16

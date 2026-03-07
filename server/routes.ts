@@ -81,6 +81,103 @@ function requireAdmin(req: any, res: any): boolean {
 const ttsCache = new Map<string, Buffer>();
 const TTS_CACHE_MAX_SIZE = 100; // Limit cache to 100 entries to prevent memory issues
 
+// PHASE 3 OPTIMIZATION: Pre-generated TTS store
+// Stores TTS generation promises by token so the server can start generating
+// TTS as soon as the LLM finishes, before the client requests it.
+interface TtsRequest {
+  promise: Promise<Buffer>;
+  createdAt: number;
+}
+const ttsRequestStore = new Map<string, TtsRequest>();
+const TTS_REQUEST_TTL = 60000; // 60 seconds TTL for pre-generated audio
+
+// Cleanup expired TTS requests every 30 seconds
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, req] of ttsRequestStore) {
+    if (now - req.createdAt > TTS_REQUEST_TTL) {
+      ttsRequestStore.delete(token);
+    }
+  }
+}, 30000);
+
+// Helper: Generate TTS audio from ElevenLabs (returns Buffer)
+async function generateTtsAudio(text: string): Promise<Buffer> {
+  const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+  const VOICE_ID = 'R8IjtpeRZsjoJfq1wwj3';
+
+  if (!ELEVENLABS_API_KEY) {
+    throw new Error('ElevenLabs API key not configured');
+  }
+
+  // Check cache first
+  const textHash = crypto.createHash('md5').update(text).digest('hex');
+  if (ttsCache.has(textHash)) {
+    console.log('[TTS] Cache HIT:', textHash.substring(0, 8));
+    return ttsCache.get(textHash)!;
+  }
+
+  console.log('[TTS] Generating audio for', text.length, 'chars...');
+  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'audio/mpeg',
+      'Content-Type': 'application/json',
+      'xi-api-key': ELEVENLABS_API_KEY
+    },
+    body: JSON.stringify({
+      text,
+      model_id: 'eleven_multilingual_v2',
+      voice_settings: {
+        stability: 0.70,
+        similarity_boost: 0.75,
+        style: 0.0,
+        use_speaker_boost: true
+      },
+      optimize_streaming_latency: 3,
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+  }
+
+  const chunks: Buffer[] = [];
+  if (response.body) {
+    const reader = response.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(Buffer.from(value));
+    }
+  }
+
+  const audioBuffer = Buffer.concat(chunks);
+  if (audioBuffer.byteLength === 0) {
+    throw new Error('Received empty audio from ElevenLabs');
+  }
+
+  // Cache the result
+  if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
+    const firstKey = ttsCache.keys().next().value as string;
+    if (firstKey) ttsCache.delete(firstKey);
+  }
+  ttsCache.set(textHash, audioBuffer);
+  console.log('[TTS] Audio generated and cached:', audioBuffer.byteLength, 'bytes');
+
+  return audioBuffer;
+}
+
+// Helper: Pre-generate TTS and store with a token
+function preGenerateTts(text: string): string {
+  const token = crypto.randomUUID();
+  const promise = generateTtsAudio(text);
+  ttsRequestStore.set(token, { promise, createdAt: Date.now() });
+  console.log('[TTS] Pre-generation started, token:', token);
+  return token;
+}
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   organization: 'org-z0AK8zYLTeapGaiDZFQ5co2N',
@@ -392,6 +489,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error transcribing audio:', error);
       res.status(500).json({ error: 'Transcription failed' });
+    }
+  });
+
+  // PHASE 3 OPTIMIZATION: GET endpoint for pre-generated TTS audio
+  // The server starts TTS generation as soon as the LLM finishes (before client requests it).
+  // Client sets audio.src to this URL for native streaming playback.
+  app.get('/api/tts/play/:token', async (req, res) => {
+    const { token } = req.params;
+    const ttsRequest = ttsRequestStore.get(token);
+
+    if (!ttsRequest) {
+      return res.status(404).json({ error: 'TTS token not found or expired' });
+    }
+
+    try {
+      const audioBuffer = await ttsRequest.promise;
+
+      // Clean up the token after use
+      ttsRequestStore.delete(token);
+
+      res.set('Content-Type', 'audio/mpeg');
+      res.set('Content-Length', String(audioBuffer.byteLength));
+      res.set('Accept-Ranges', 'bytes');
+      res.set('Cache-Control', 'no-cache');
+      res.send(audioBuffer);
+    } catch (error) {
+      console.error('[TTS Play] Error:', error);
+      ttsRequestStore.delete(token);
+      res.status(500).json({
+        error: 'TTS generation failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
@@ -827,12 +956,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.incrementMessageCount(sessionId);
       console.log('[Chat Stream API] Message count incremented for session:', sessionId);
 
-      // Send completion event with clue information
+      // PHASE 3: Pre-generate TTS immediately (before client requests it)
+      // This eliminates the client→server round-trip + ElevenLabs cold start delay
+      let ttsToken: string | null = null;
+      if (fullResponse && fullResponse.trim().length > 0) {
+        try {
+          ttsToken = preGenerateTts(fullResponse);
+          console.log('[Chat Stream API] TTS pre-generation started, token:', ttsToken);
+        } catch (ttsErr) {
+          console.error('[Chat Stream API] TTS pre-generation failed:', ttsErr);
+        }
+      }
+
+      // Send completion event with clue information + TTS token
       res.write(`data: ${JSON.stringify({
         type: 'complete',
         fullResponse,
         foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
-        detectedClue: detectedClues.length > 0 ? detectedClues[0] : null
+        detectedClue: detectedClues.length > 0 ? detectedClues[0] : null,
+        ttsToken
       })}\n\n`);
 
       res.end();

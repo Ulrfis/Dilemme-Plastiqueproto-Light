@@ -560,6 +560,46 @@ LLM stream → Phrase 1 → UI ✏️
 
 ---
 
+### [2026-03-07] — TTS Pre-Generation & Streaming Playback (Phase 3 Latence) 🔷
+
+**Intent**: Réduire drastiquement la latence entre l'affichage du texte et le début de la voix de Peter, rendue trop longue par le fix du registre vocal (qui attend le texte complet avant de générer le TTS).
+
+**Prompt(s)**:
+```
+Il y a une trop grande latence entre le texte qui s'affiche et la voix Elevenlab ! Quelles sont les possibilités d'optimisation pour avoir quelque chose de beaucoup plus réactif, la voix qui arrive beaucoup plus vite ?
+```
+
+**Tool**: Claude Code (claude-opus-4-6)
+
+**Outcome**:
+- Pré-génération TTS côté serveur : dès que le LLM termine, le serveur lance immédiatement la génération audio ElevenLabs en arrière-plan (sans attendre la requête client).
+- Token system : le `complete` SSE event inclut un `ttsToken` que le client utilise pour accéder à l'audio pré-généré via `GET /api/tts/play/:token`.
+- Lecture streaming native : nouvelle méthode `playFromUrl()` qui pointe `audio.src` directement sur l'URL serveur. Le navigateur gère le buffering et commence à jouer dès qu'il a assez de données.
+- Store temporaire avec TTL 60s et cleanup automatique toutes les 30s.
+- Fallback client-side si le token n'est pas disponible.
+- Helper `generateTtsAudio()` factorisé pour réutilisation entre les endpoints.
+
+**Architecture Delta**:
+```
+Avant:
+LLM done → SSE complete → Client POST text → Server calls ElevenLabs →
+Server streams chunks → Client collects ALL chunks → Blob → play()
+(~3s de latence après affichage texte)
+
+Après:
+LLM done → Server starts TTS immediately → SSE complete (with ttsToken) →
+Client sets audio.src = /api/tts/play/token → Browser streams + plays natively
+(~0.5-1s de latence après affichage texte)
+```
+
+**Surprise**: La lecture streaming native du navigateur (`audio.src = URL`) est beaucoup plus efficace que la collecte manuelle de chunks + blob — le navigateur commence à jouer dès les premiers bytes bufferisés.
+
+**Friction**: La pré-génération côté serveur nécessite un store temporaire en mémoire. Risque de memory leak si pas de cleanup, résolu par un TTL automatique.
+
+**Time**: ~25 minutes
+
+---
+
 ## Pulse Checks
 
 *Subjective snapshots. AI should prompt these every 3-5 features or at major moments.*

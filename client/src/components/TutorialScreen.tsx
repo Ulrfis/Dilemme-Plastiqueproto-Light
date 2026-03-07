@@ -108,6 +108,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     startRecording,
     stopRecording,
     playAudio,
+    playFromUrl,
     stopAudio,
     checkMicrophonePermission,
     checkMediaRecorderSupport,
@@ -391,8 +392,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           });
         },
 
-        onComplete: async (finalResponse, newFoundClues, detectedClue) => {
-          console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length);
+        onComplete: async (finalResponse, newFoundClues, detectedClue, ttsToken) => {
+          console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length, 'ttsToken:', ttsToken);
 
           // Vérifier si la réponse est vide ou invalide
           if (!finalResponse || finalResponse.trim().length === 0) {
@@ -406,25 +407,23 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             return;
           }
 
-          // Generate TTS for the COMPLETE response in a single call
-          // This ensures consistent voice register and prosody across the entire response
+          // PHASE 3: Play audio from pre-generated TTS (server started generation immediately)
+          // Uses native browser streaming - starts playing as soon as browser has buffered enough
           try {
-            console.log('[TutorialScreen] Generating TTS for complete response...');
-            const audioBlob = await textToSpeechStreaming(finalResponse);
-
-            if (!audioBlob || audioBlob.size < 100) {
-              console.error('[TutorialScreen] Invalid audio blob from complete TTS');
+            if (ttsToken) {
+              // Use pre-generated audio via streaming URL (fastest path)
+              console.log('[TutorialScreen] Playing pre-generated TTS via streaming URL...');
+              await playFromUrl(`/api/tts/play/${ttsToken}`);
             } else {
-              console.log('[TutorialScreen] Complete TTS generated, size:', audioBlob.size);
-              // Play the complete audio directly (no queue needed)
-              try {
+              // Fallback: generate TTS client-side if server didn't provide a token
+              console.log('[TutorialScreen] No ttsToken, falling back to client-side TTS...');
+              const audioBlob = await textToSpeechStreaming(finalResponse);
+              if (audioBlob && audioBlob.size >= 100) {
                 await playAudio(audioBlob);
-              } catch (playError) {
-                console.error('[TutorialScreen] Audio playback failed:', playError);
               }
             }
           } catch (ttsError) {
-            console.error('[TutorialScreen] Complete TTS generation failed:', ttsError);
+            console.error('[TutorialScreen] Audio playback failed:', ttsError);
           }
 
           // Update final message (in case there was additional text at the end)
