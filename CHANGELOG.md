@@ -6,6 +6,22 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.7.0] - 2026-03-07
+
+### Corrigé - Continuité vocale ElevenLabs (Phase 3)
+- Correction du changement de registre vocal entre les phrases de Peter : le texte est désormais envoyé **en une seule fois** à ElevenLabs au lieu de phrase par phrase.
+- Suppression de l'architecture d'audio queue multi-phrases (`useAudioQueue`) devenue inutile.
+- Résultat : voix continue et naturelle avec une prosodie cohérente sur l'ensemble de la réponse.
+- Fichiers: `client/src/components/TutorialScreen.tsx`, `client/src/hooks/useAudioQueue.ts`
+
+### Amélioré - Optimisation latence et qualité TTS
+- Augmentation de `optimize_streaming_latency` de 2 à 3 pour une réponse plus rapide d'ElevenLabs (le texte complet est envoyé en un seul appel).
+- Augmentation de la stabilité vocale de 0.65 à 0.70 pour un registre plus constant sur les textes longs.
+- Le texte s'affiche toujours progressivement (streaming SSE) pour l'UX, seul le TTS attend le texte complet.
+- Fichiers: `server/routes.ts`
+
+---
+
 ## [1.6.2] - 2026-02-16
 
 ### Modifié - Résilience Session et Navigation

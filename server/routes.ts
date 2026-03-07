@@ -430,8 +430,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[TTS Stream API] Calling ElevenLabs streaming API...');
 
       // Call ElevenLabs with optimized settings for French diction quality
-      // Note: We collect the full audio before playback, so we can reduce latency optimization
-      // for better quality without impacting perceived reactivity
+      // Full text is sent in a single call to maintain consistent voice register
       const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
         method: 'POST',
         headers: {
@@ -441,16 +440,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_multilingual_v2', // Better quality for French diction
+          model_id: 'eleven_multilingual_v2', // Best quality for French diction
           voice_settings: {
-            stability: 0.65, // Higher stability for clearer pronunciation
+            stability: 0.70, // Higher stability for consistent register across full text
             similarity_boost: 0.75,
             style: 0.0, // Neutral style for clearer speech
             use_speaker_boost: true // Enhance voice clarity
           },
-          // Reduced from 4 to 2 for better audio quality
-          // (we wait for full audio anyway, so this doesn't affect perceived latency)
-          optimize_streaming_latency: 2,
+          // Increased to 3 for faster first-byte response (full text sent at once now)
+          optimize_streaming_latency: 3,
         })
       });
 
@@ -570,9 +568,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_multilingual_v2', // Better quality for French diction
+          model_id: 'eleven_multilingual_v2', // Best quality for French diction
           voice_settings: {
-            stability: 0.65, // Higher stability for clearer pronunciation
+            stability: 0.70, // Higher stability for consistent register
             similarity_boost: 0.75,
             style: 0.0, // Neutral style for clearer speech
             use_speaker_boost: true // Enhance voice clarity

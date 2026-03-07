@@ -8,7 +8,6 @@ import SuccessFeedback from "./SuccessFeedback";
 import ZoomableImage from "./ZoomableImage";
 import InfoModal from "./InfoModal";
 import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
-import { useAudioQueue } from "@/hooks/useAudioQueue";
 import { sendChatMessage, textToSpeech, sendChatMessageStreaming, textToSpeechStreaming } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { captureEvent } from "@/App";
@@ -128,18 +127,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     },
   });
 
-  // PHASE 2 OPTIMIZATION: Audio queue for streaming sentence-by-sentence playback
-  const audioQueue = useAudioQueue({
-    playAudio,
-    onQueueEmpty: () => {
-      console.log('[TutorialScreen] Audio queue empty');
-      setIsAudioPlaying(false);
-    },
-    onPlaybackStart: () => {
-      console.log('[TutorialScreen] Audio queue playback started');
-      setIsAudioPlaying(true);
-    },
-  });
+  // Audio queue no longer needed - TTS is now called once with the full response text
+  // to maintain consistent voice register across the entire response.
 
   // Vérifier si l'utilisateur revient avec une conversation existante
   const isReturningUser = messages.length > 0;
@@ -228,9 +217,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const handleInterruptPeter = () => {
     console.log('[TutorialScreen] User wants to interrupt Peter');
 
-    // PHASE 2: Clear audio queue for streaming
-    audioQueue.clear();
-
     // Arrêter immédiatement la lecture audio de Peter
     // handleAudioStop sera automatiquement appelé et gérera l'affichage du message
     stopAudio();
@@ -312,7 +298,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const processMessage = async (userMessage: string) => {
     // SIMPLIFICATION: Retrait du mécanisme de blocage strict qui causait des problèmes sur mobile
     // Si un audio est en cours, on l'interrompt automatiquement au lieu de bloquer l'utilisateur
-    if (audioState === 'playing' || audioQueue.isPlaying) {
+    if (audioState === 'playing') {
       console.log('[TutorialScreen] Interrupting Peter automatically to process new message');
       handleInterruptPeter();
     }
@@ -380,17 +366,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     }
   };
 
-  // PHASE 2 OPTIMIZATION: Streaming message processing
+  // PHASE 3: Streaming message processing with single TTS call for voice continuity
+  // Sentences are streamed for progressive UI display, but TTS is called ONCE with the full text
+  // to maintain consistent voice register and prosody across the entire response.
   const processMessageStreaming = async (userMessage: string, currentExchange: number) => {
     console.log('[TutorialScreen] Processing message with streaming, exchange:', currentExchange);
     let fullResponse = '';
-    const sentencesReceived: string[] = [];
-
-    // Track pending TTS requests to ensure all sentences are played
-    const pendingTTSRequests: Promise<void>[] = [];
-
-    // Reset the audio queue's expected index for this new response
-    audioQueue.reset();
 
     try {
       // Send streaming chat message with exchange context
@@ -398,70 +379,19 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         onSentence: async (sentence, index) => {
           console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...');
           fullResponse += sentence + ' ';
-          sentencesReceived.push(sentence);
 
-          // Update UI with partial response (progressive display)
+          // Update UI with partial response (progressive display only - NO TTS here)
           setMessages(prev => {
             const lastMessage = prev[prev.length - 1];
             if (lastMessage && lastMessage.role === 'assistant') {
-              // Update existing message
               return [...prev.slice(0, -1), { ...lastMessage, content: fullResponse.trim() }];
             } else {
-              // Add new assistant message
               return [...prev, makeMessage('assistant', fullResponse.trim())];
             }
           });
-
-          // Generate TTS for this sentence immediately (parallel to LLM)
-          // Use streaming endpoint for faster generation, but wait for complete audio
-          // CRITICAL: Track this promise to ensure all sentences are queued before completion
-          const ttsPromise = (async () => {
-            const maxRetries = 3;
-            let lastError: Error | null = null;
-            
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
-              try {
-                console.log('[TutorialScreen] Generating TTS for sentence #' + index + ' (attempt ' + (attempt + 1) + '/' + maxRetries + ')');
-
-                // textToSpeechStreaming uses the faster streaming endpoint
-                // but returns the complete audio blob to avoid playback cuts
-                const audioBlob = await textToSpeechStreaming(sentence);
-                
-                // Validate the audio blob
-                if (!audioBlob || audioBlob.size < 100) {
-                  throw new Error('Empty or invalid audio blob received');
-                }
-                
-                console.log('[TutorialScreen] TTS complete for sentence #' + index + ', size:', audioBlob.size);
-
-                // Add complete audio to queue for sequential playback
-                audioQueue.enqueue(audioBlob, sentence, index);
-                return; // Success - exit the retry loop
-              } catch (ttsError) {
-                lastError = ttsError instanceof Error ? ttsError : new Error(String(ttsError));
-                console.warn('[TutorialScreen] TTS attempt ' + (attempt + 1) + ' failed for sentence #' + index + ':', ttsError);
-                
-                // Wait before retrying (exponential backoff)
-                if (attempt < maxRetries - 1) {
-                  await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
-                }
-              }
-            }
-            
-            // All retries failed - skip this sentence to unblock the queue
-            console.error('[TutorialScreen] TTS failed for sentence #' + index + ' after ' + maxRetries + ' attempts:', lastError);
-            audioQueue.skipIndex(index);
-          })();
-
-          pendingTTSRequests.push(ttsPromise);
         },
 
         onComplete: async (finalResponse, newFoundClues, detectedClue) => {
-          // CRITICAL: Wait for all TTS requests to complete before processing completion
-          // This ensures the last sentence is fully queued for playback
-          console.log('[TutorialScreen] Waiting for', pendingTTSRequests.length, 'pending TTS requests to complete...');
-          await Promise.all(pendingTTSRequests);
-          console.log('[TutorialScreen] All TTS requests completed, processing onComplete');
           console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length);
 
           // Vérifier si la réponse est vide ou invalide
@@ -474,6 +404,27 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             });
             recoverFromError();
             return;
+          }
+
+          // Generate TTS for the COMPLETE response in a single call
+          // This ensures consistent voice register and prosody across the entire response
+          try {
+            console.log('[TutorialScreen] Generating TTS for complete response...');
+            const audioBlob = await textToSpeechStreaming(finalResponse);
+
+            if (!audioBlob || audioBlob.size < 100) {
+              console.error('[TutorialScreen] Invalid audio blob from complete TTS');
+            } else {
+              console.log('[TutorialScreen] Complete TTS generated, size:', audioBlob.size);
+              // Play the complete audio directly (no queue needed)
+              try {
+                await playAudio(audioBlob);
+              } catch (playError) {
+                console.error('[TutorialScreen] Audio playback failed:', playError);
+              }
+            }
+          } catch (ttsError) {
+            console.error('[TutorialScreen] Complete TTS generation failed:', ttsError);
           }
 
           // Update final message (in case there was additional text at the end)

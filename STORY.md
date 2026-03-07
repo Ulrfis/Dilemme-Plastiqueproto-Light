@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-02-16  
+> **Last Updated**: 2026-03-07  
 
 ---
 
@@ -517,6 +517,46 @@ Routes -> readStoredSessionFlow() unique + fallback robuste + nettoyage payload 
 **Friction**: Validation outillée partielle dans l'environnement de travail (`tsc`/`vite` indisponibles), donc audit principalement statique + correctifs à faible risque.
 
 **Time**: ~45 minutes
+
+---
+
+### [2026-03-07] — Voice Register Continuity Fix (Phase 3 TTS) 🔷
+
+**Intent**: Corriger les changements de registre vocal entre les phrases de Peter. ElevenLabs changeait de tonalité/prosodie entre chaque phrase car le texte était envoyé phrase par phrase via des appels API séparés. Optimiser la réactivité du pipeline global.
+
+**Prompt(s)**:
+```
+Il faut bien analyser la base de code, pour voir pourquoi lors de la lecture de la réponse de Peter, la mécanique Elevenlab change de registre entre deux phrases. C'est comme s'il y avait des coupures entre chaque phrases, avec un nouveau registre de jeu. C'est super important de garder une continuité pour avoir la même dynamique au sein d'une réponses, composée de plusieurs phrases. Il faut donc envoyer tout le texte en entier à Elevenlab, pour générer la réponse en une fois, et pas en plusieurs fois.
+```
+
+**Tool**: Claude Code (claude-opus-4-6)
+
+**Outcome**:
+- Diagnostic confirmé : l'architecture Phase 2 découpait la réponse en phrases via regex `/[.!?]\s+$/` et envoyait chaque phrase séparément à ElevenLabs. Chaque appel TTS indépendant produisait une prosodie différente.
+- Refactoring du pipeline : `onSentence` ne déclenche plus le TTS, il met à jour uniquement l'UI. `onComplete` envoie le texte COMPLET en un seul appel TTS.
+- Suppression de la dépendance `useAudioQueue` (multi-phrases) dans `TutorialScreen` — l'audio est joué en un seul bloc.
+- Augmentation de la stabilité vocale (0.65 → 0.70) et de `optimize_streaming_latency` (2 → 3) côté serveur.
+- Build vérifié OK.
+
+**Architecture Delta**:
+```
+Avant (Phase 2):
+LLM stream → Phrase 1 → TTS API → Audio 1 ▶️
+           → Phrase 2 → TTS API → Audio 2 ▶️ (registre différent!)
+           → Phrase 3 → TTS API → Audio 3 ▶️ (registre différent!)
+
+Après (Phase 3):
+LLM stream → Phrase 1 → UI ✏️
+           → Phrase 2 → UI ✏️
+           → Phrase 3 → UI ✏️
+           → Texte complet → TTS API (1 seul appel) → Audio complet ▶️ (registre uniforme)
+```
+
+**Surprise**: Le streaming UI (texte progressif) est conservé, donc l'utilisateur voit la réponse s'écrire progressivement pendant que l'audio se génère — la latence perçue est atténuée.
+
+**Friction**: Compromis latence vs continuité — l'audio commence ~1-2s plus tard qu'avant, mais sans aucune coupure ni changement de registre.
+
+**Time**: ~30 minutes
 
 ---
 
