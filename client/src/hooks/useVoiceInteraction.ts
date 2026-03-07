@@ -13,6 +13,7 @@ interface UseVoiceInteractionResult {
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<string | null>;
   playAudio: (audioBlob: Blob) => Promise<void>;
+  playFromUrl: (url: string) => Promise<void>;
   stopAudio: () => void;
   checkMicrophonePermission: () => Promise<boolean>;
   checkMediaRecorderSupport: () => boolean;
@@ -694,12 +695,133 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     // Le keepalive sera démarré lors de stopRecording ou playAudio, pas ici
   }, [initializeAudioElement, unlockAudioContext]);
 
+  // PHASE 3 OPTIMIZATION: Play audio directly from a URL
+  // Uses native browser audio streaming - the browser starts playing as soon as
+  // it has buffered enough data, without waiting for the full download.
+  const playFromUrl = useCallback(async (url: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      console.log('[useVoiceInteraction] playFromUrl called:', url);
+
+      audioExplicitlyStoppedRef.current = false;
+      unlockAudioContext();
+
+      const audio = initializeAudioElement();
+
+      // Clean up previous URL if it was a blob URL
+      if (currentAudioUrlRef.current && currentAudioUrlRef.current.startsWith('blob:')) {
+        URL.revokeObjectURL(currentAudioUrlRef.current);
+      }
+      currentAudioUrlRef.current = null;
+
+      if (!audio.paused) {
+        audio.pause();
+        audio.currentTime = 0;
+      }
+
+      // Safety timeout
+      const safetyTimeoutId = setTimeout(() => {
+        console.error('[useVoiceInteraction] playFromUrl timeout');
+        audio.pause();
+        audio.currentTime = 0;
+        stopAudioKeepAlive();
+        setAudioState('idle');
+        if (onAudioStopRef.current) onAudioStopRef.current();
+        resolve();
+      }, 120000);
+
+      let playStarted = false;
+      const playTimeoutId = setTimeout(() => {
+        if (!playStarted) {
+          console.error('[useVoiceInteraction] playFromUrl: play() did not start within 10s');
+          clearTimeout(safetyTimeoutId);
+          stopAudioKeepAlive();
+          setAudioState('idle');
+          if (onAudioStopRef.current) onAudioStopRef.current();
+          reject(new Error('Audio play timeout'));
+        }
+      }, 10000);
+
+      audio.onended = () => {
+        clearTimeout(safetyTimeoutId);
+        clearTimeout(playTimeoutId);
+        stopAudioKeepAlive();
+        setAudioState('idle');
+        if (onAudioStopRef.current) onAudioStopRef.current();
+        resolve();
+      };
+
+      audio.onerror = (error) => {
+        console.error('[useVoiceInteraction] playFromUrl error:', audio.error?.message);
+        clearTimeout(safetyTimeoutId);
+        clearTimeout(playTimeoutId);
+        stopAudioKeepAlive();
+        setAudioState('idle');
+        if (onAudioStopRef.current) onAudioStopRef.current();
+        reject(new Error(`Audio error: ${audio.error?.message || 'Unknown error'}`));
+      };
+
+      audio.onplaying = () => {
+        console.log('[useVoiceInteraction] playFromUrl: audio playing!');
+        playStarted = true;
+        clearTimeout(playTimeoutId);
+        stopAudioKeepAlive();
+        if (onAudioStartRef.current) onAudioStartRef.current();
+      };
+
+      // Handle mobile interruptions
+      audio.onpause = () => {
+        if (!audioExplicitlyStoppedRef.current && !audio.ended) {
+          audio.play().catch(() => {
+            setTimeout(() => {
+              if (audio.paused && !audioExplicitlyStoppedRef.current && !audio.ended) {
+                audio.play().catch(() => {});
+              }
+            }, 100);
+          });
+        }
+      };
+
+      // Set source to URL - browser will handle streaming/buffering natively
+      console.log('[useVoiceInteraction] Setting audio.src to streaming URL');
+      audio.src = url;
+      audio.load();
+
+      setAudioState('playing');
+
+      const attemptPlay = () => {
+        audio.play()
+          .then(() => {
+            console.log('[useVoiceInteraction] playFromUrl: play() resolved');
+          })
+          .catch((error) => {
+            console.error('[useVoiceInteraction] playFromUrl: play() rejected:', error);
+            clearTimeout(safetyTimeoutId);
+            clearTimeout(playTimeoutId);
+            stopAudioKeepAlive();
+            setAudioState('idle');
+            if (onAudioStopRef.current) onAudioStopRef.current();
+            reject(error);
+          });
+      };
+
+      if (audio.readyState >= 2) {
+        attemptPlay();
+      } else {
+        audio.addEventListener('canplay', () => attemptPlay(), { once: true });
+        setTimeout(() => {
+          if (audio.readyState < 2) attemptPlay();
+        }, 3000);
+      }
+    });
+  }, [unlockAudioContext, initializeAudioElement, stopAudioKeepAlive]);
+
   return {
     audioState,
     transcription,
     startRecording,
     stopRecording,
     playAudio,
+    playFromUrl,
     stopAudio,
     checkMicrophonePermission,
     checkMediaRecorderSupport,
