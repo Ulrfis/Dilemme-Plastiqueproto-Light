@@ -9,9 +9,7 @@ interface VideoIntroProps {
 }
 
 const VIDEO_URLS = {
-  intro: "https://video.gumlet.io/653feb38beac1fa13f8fa8e5/69577dbaf3928b38fc32c32b/main.m3u8",
-  desktop: "https://video.gumlet.io/653feb38beac1fa13f8fa8e5/69577d67d73a53e69e607fbf/main.m3u8",
-  mobile: "https://video.gumlet.io/653feb38beac1fa13f8fa8e5/69577d67f3928b38fc32bb95/main.m3u8",
+  main: "https://video.gumlet.io/653feb38beac1fa13f8fa8e5/69a5bb9c9c8c64404a782d85/main.m3u8",
 };
 
 function isMobileDevice(): boolean {
@@ -38,9 +36,8 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   const [showPlayButton, setShowPlayButton] = useState(true);
 
   const playlist = useMemo(() => [
-    VIDEO_URLS.intro,
-    isMobile ? VIDEO_URLS.mobile : VIDEO_URLS.desktop,
-  ], [isMobile]);
+    VIDEO_URLS.main,
+  ], []);
 
   console.log("[VideoIntro] Component mounted - isMobile:", isMobile, "playlist:", playlist);
 
@@ -233,28 +230,11 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   };
 
   const getVideoStyle = () => {
-    if (currentVideoIndex === 0) {
-      return {
-        width: "100%",
-        height: "auto",
-        maxHeight: "100%",
-        objectFit: "contain" as const,
-      };
-    }
-    
-    if (isMobile) {
-      return {
-        width: "auto",
-        height: "100%",
-        maxWidth: "100%",
-        objectFit: "contain" as const,
-      };
-    }
-    
     return {
       width: "100%",
-      height: "100%",
-      objectFit: "cover" as const,
+      height: "auto",
+      maxHeight: "100%",
+      objectFit: "contain" as const,
     };
   };
 
@@ -312,17 +292,11 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         </Button>
       </div>
 
-      {currentVideoIndex === 0 && !isFullscreen && (
+      {!isFullscreen && (
         <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full text-white text-sm sm:text-base font-semibold shadow-lg border-2 border-white/20">
           Mode paysage fortement recommandé
         </div>
       )}
-
-      <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-        <div className="bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full text-white text-xs font-medium">
-          {currentVideoIndex + 1} / {playlist.length}
-        </div>
-      </div>
 
       <Button
         onClick={() => {

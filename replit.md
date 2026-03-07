@@ -142,10 +142,12 @@ Preferred communication style: Simple, everyday language.
 ### Video Integration
 
 **Provider**: Gumlet video hosting
-- Video ID: `6916ff7ddf9720847e0868f0`
+- Video ID: `69a5bb9c9c8c64404a782d85`
+- HLS Stream: `https://video.gumlet.io/653feb38beac1fa13f8fa8e5/69a5bb9c9c8c64404a782d85/main.m3u8`
 - Autoplay attempt with fullscreen on mobile
 - Landscape orientation lock (when supported)
 - Skip button for quick navigation
+- Single video (replaces previous 2-video sequence)
 
 ## External Dependencies
 
