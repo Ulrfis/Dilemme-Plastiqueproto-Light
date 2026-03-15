@@ -18,9 +18,11 @@ interface UseAudioQueueOptions {
 
 interface UseAudioQueueResult {
   enqueue: (blob: Blob, sentence: string, index: number) => void;
-  skipIndex: (index: number) => void; // Skip a failed sentence and advance expected index
+  skipIndex: (index: number) => void;
   clear: () => void;
-  reset: () => void; // Reset the expected index for a new response
+  reset: () => void;
+  pause: () => void;
+  resume: () => void;
   isPlaying: boolean;
   queueLength: number;
 }
@@ -35,6 +37,7 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
   const isProcessingRef = useRef(false);
   const nextExpectedIndexRef = useRef(1);
   const skippedIndicesRef = useRef<Set<number>>(new Set());
+  const pausedRef = useRef(false);
 
   const advancePastSkipped = useCallback(() => {
     while (skippedIndicesRef.current.has(nextExpectedIndexRef.current)) {
@@ -45,7 +48,7 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
   }, []);
 
   const processQueue = useCallback(async () => {
-    if (isProcessingRef.current) {
+    if (isProcessingRef.current || pausedRef.current) {
       return;
     }
 
@@ -149,6 +152,7 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
     setIsPlaying(false);
     nextExpectedIndexRef.current = 1;
     skippedIndicesRef.current.clear();
+    pausedRef.current = false;
 
     if (onQueueEmpty) {
       onQueueEmpty();
@@ -159,7 +163,21 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
     console.log('[AudioQueue] Resetting expected index to 1');
     nextExpectedIndexRef.current = 1;
     skippedIndicesRef.current.clear();
+    pausedRef.current = false;
   }, []);
+
+  const pause = useCallback(() => {
+    console.log('[AudioQueue] Paused - items will buffer without playing');
+    pausedRef.current = true;
+  }, []);
+
+  const resume = useCallback(() => {
+    console.log('[AudioQueue] Resumed - starting playback of buffered items');
+    pausedRef.current = false;
+    if (!isProcessingRef.current && queueRef.current.length > 0) {
+      processQueue();
+    }
+  }, [processQueue]);
 
   const skipIndex = useCallback((index: number) => {
     console.log('[AudioQueue] Skipping failed sentence #' + index);
@@ -181,6 +199,8 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
     skipIndex,
     clear,
     reset,
+    pause,
+    resume,
     isPlaying,
     queueLength,
   };

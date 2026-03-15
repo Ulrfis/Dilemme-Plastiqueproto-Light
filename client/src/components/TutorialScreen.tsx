@@ -376,6 +376,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     let fullResponse = '';
 
     audioQueue.clear();
+    audioQueue.pause();
     streamGenerationRef.current++;
     const currentGeneration = streamGenerationRef.current;
 
@@ -462,12 +463,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           });
 
           if (detectedNewClues.length > 0) {
-            console.log('[TutorialScreen] New clues detected:', detectedNewClues);
+            console.log('[TutorialScreen] New clues detected — showing animation before audio');
             setFoundClues(newFoundClues);
             setNewClues(detectedNewClues);
             setShowSuccess(true);
             setTimeout(() => setShowSuccess(false), 4500);
           }
+
+          audioQueue.resume();
           
           const maxExchangesReached = currentExchange >= MAX_EXCHANGES;
 
