@@ -993,18 +993,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.incrementMessageCount(sessionId);
       console.log('[Chat Stream API] Message count incremented for session:', sessionId);
 
-      if (sentenceTtsPromises.length > 0) {
-        console.log('[Chat Stream API] Waiting for', sentenceTtsPromises.length, 'sentence TTS promises...');
-        await Promise.allSettled(sentenceTtsPromises);
-        console.log('[Chat Stream API] All sentence TTS promises settled');
-      }
-
       res.write(`data: ${JSON.stringify({
         type: 'complete',
         fullResponse,
         foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
         detectedClue: detectedClues.length > 0 ? detectedClues[0] : null,
       })}\n\n`);
+
+      if (sentenceTtsPromises.length > 0) {
+        console.log('[Chat Stream API] Waiting for', sentenceTtsPromises.length, 'remaining TTS promises...');
+        await Promise.allSettled(sentenceTtsPromises);
+        console.log('[Chat Stream API] All sentence TTS promises settled');
+      }
 
       res.end();
       console.log('[Chat Stream API] Stream ended successfully');

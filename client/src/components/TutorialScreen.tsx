@@ -375,7 +375,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     console.log('[TutorialScreen] Processing message with streaming, exchange:', currentExchange);
     let fullResponse = '';
 
-    audioQueue.reset();
+    audioQueue.clear();
     streamGenerationRef.current++;
     const currentGeneration = streamGenerationRef.current;
 
