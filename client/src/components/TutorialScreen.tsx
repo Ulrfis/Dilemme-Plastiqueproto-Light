@@ -92,8 +92,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const MAX_EXCHANGES = 8;
   const TOTAL_CLUES = 6;
 
-  // Ref pour s'assurer que le message de bienvenue ne joue qu'une seule fois
   const hasPlayedWelcome = useRef(false);
+  const streamGenerationRef = useRef(0);
 
   const { toast } = useToast();
 
@@ -376,10 +376,13 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     let fullResponse = '';
 
     audioQueue.reset();
+    streamGenerationRef.current++;
+    const currentGeneration = streamGenerationRef.current;
 
     try {
       await sendChatMessageStreaming(sessionId, userMessage, {
         onSentence: (sentence, index) => {
+          if (streamGenerationRef.current !== currentGeneration) return;
           console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...');
           fullResponse += sentence + ' ';
 
@@ -394,15 +397,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         },
 
         onSentenceAudio: (index, audioToken) => {
+          if (streamGenerationRef.current !== currentGeneration) return;
           console.log('[TutorialScreen] Sentence #' + index + ' audio ready, token:', audioToken);
           fetch(`/api/tts/play/${audioToken}`)
             .then(audioResponse => {
+              if (streamGenerationRef.current !== currentGeneration) return;
               if (audioResponse.ok) {
                 return audioResponse.blob();
               }
               throw new Error(`HTTP ${audioResponse.status}`);
             })
             .then(audioBlob => {
+              if (streamGenerationRef.current !== currentGeneration) return;
               if (audioBlob && audioBlob.size >= 100) {
                 audioQueue.enqueue(audioBlob, `sentence-${index}`, index);
               } else {
@@ -411,12 +417,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               }
             })
             .catch(fetchErr => {
+              if (streamGenerationRef.current !== currentGeneration) return;
               console.error('[TutorialScreen] Error fetching sentence #' + index + ' audio:', fetchErr);
               audioQueue.skipIndex(index);
             });
         },
 
         onSentenceAudioError: (index) => {
+          if (streamGenerationRef.current !== currentGeneration) return;
           console.warn('[TutorialScreen] Sentence #' + index + ' TTS failed on server, skipping');
           audioQueue.skipIndex(index);
         },

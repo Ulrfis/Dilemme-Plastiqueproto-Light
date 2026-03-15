@@ -94,11 +94,11 @@ const TTS_REQUEST_TTL = 60000; // 60 seconds TTL for pre-generated audio
 // Cleanup expired TTS requests every 30 seconds
 setInterval(() => {
   const now = Date.now();
-  for (const [token, req] of ttsRequestStore) {
+  ttsRequestStore.forEach((req, token) => {
     if (now - req.createdAt > TTS_REQUEST_TTL) {
       ttsRequestStore.delete(token);
     }
-  }
+  });
 }, 30000);
 
 // Helper: Generate TTS audio from ElevenLabs (returns Buffer)
