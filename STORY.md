@@ -64,6 +64,90 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
 
+### [2026-03-15] — Per-Sentence TTS Streaming & Latency Reduction 🔷
+
+**Intent**: Reduce time-to-first-audio from 5-9s to ~2-3s by implementing server-side per-sentence TTS generation with context-aware prosody, allowing audio to start playing while the LLM is still generating text.
+
+**Prompt(s)**:
+```
+Implement per-sentence TTS pipeline where each sentence gets its own ElevenLabs call with previous_text context for prosody continuity. Server streams sentence events to client, client fetches per-sentence audio tokens, and audio plays in sequence from index 1.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Complete per-sentence TTS architecture implemented: LLM streams sentences → server generates per-sentence TTS → client enqueues and plays in order
+- Improved sentence boundary detection: regex `/[\s\S]*?[.!?]/` now captures multiple sentences within a single text delta chunk
+- Server `/api/chat/stream` emits `sentence` (text) and `sentence_audio` (token) SSE events sequentially
+- `useAudioQueue` enhanced with pause/resume mechanism: allows audio buffering during response generation, playback starts only when explicitly resumed
+- Client-side stale fetch guard: stream generation ID prevents old audio callbacks from enqueueing after interruption/restart
+- Typo fix: Map iteration changed from for-of to forEach (TS compatibility)
+- Result: First audio now plays ~2-3s after user message (was 5-9s), full response audio still maintains natural prosody via `previous_text` context
+- Fichiers: `server/routes.ts`, `client/src/lib/api.ts`, `client/src/components/TutorialScreen.tsx`, `client/src/hooks/useAudioQueue.ts`
+
+**Architecture**:
+```
+Before (full-text TTS):
+User message → LLM streams text → LLM completes → Server TTS entire response (5-9s) → Audio plays
+
+After (per-sentence TTS):
+User message → LLM streams S1 → Server TTS S1 parallel → Client audio plays S1 (~2-3s)
+                LLM streams S2 → Server TTS S2 parallel → Client waits for S1 to finish, then S2 plays
+                ...
+```
+
+**Surprise**: The pause/resume mechanism elegantly solved synchronization: buffers audio while detecting new clues, prevents premature playback
+
+**Friction**: Sentence boundary detection with streaming required careful regex to handle multiple sentences in single chunk and avoid double-processing
+
+**Time**: ~45 minutes (streaming architecture, pause/resume, stale fetch guard, regex optimization)
+
+---
+
+### [2026-03-15] — Bottle Animation Synchronization & SVG Text Clipping 🔷
+
+**Intent**: Fix two celebration animation issues: (1) bottle appears AFTER Peter starts speaking instead of at the exact same moment, (2) long clue names overflow the SVG label area with no clipping.
+
+**Prompt(s)**:
+```
+Task 1: Synchoniser le déclenchement de l'animation bouteille AVANT le début du playback audio.
+Task 2: Ajouter un clipPath SVG pour l'étiquette de la bouteille et s'assurer que les noms longs ne dépassent pas les bords.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Audio playback synchronization fixed: Added `audioQueue.pause()` at start of message stream, `resume()` called in `onComplete` AFTER `setShowSuccess(true)` — ensures bottle animation triggers before any audio plays
+- Animation timeout increased: 3000ms → 4500ms to match full internal animation duration (3.5s appear + 0.5s shake + 0.5s explode)
+- SVG label text clipping: Added `<clipPath id="labelClip">` with exact label rect dimensions (x=45, y=140, w=110, h=110), applied to all label text via `<g clipPath="url(#labelClip)">`
+- Font size optimization: BRAVO (24→22), message (13→12), clue names (12→11) for better fit within clipped area
+- Clue count increased: 2 visible clues → 3 visible with adjusted spacing (16px → 14px between rows)
+- Result: Bottle appears exactly when Peter's audio starts, no text overflow regardless of clue name length
+- Fichiers: `client/src/components/TutorialScreen.tsx`, `client/src/hooks/useAudioQueue.ts`, `client/src/components/SuccessFeedback.tsx`
+
+**Architecture**:
+```
+Before (late animation):
+onSentenceAudio → enqueue audio → processQueue starts → audio plays (t=0)
+...later...
+onComplete → setShowSuccess(true) → animation appears (t=~500ms)
+Result: Bottle appears after user hears Peter's voice
+
+After (synchronized):
+processMessageStreaming → audioQueue.pause() → block all playback
+...audio accumulates in queue while paused...
+onComplete → setShowSuccess(true) → animate bottle → audioQueue.resume() → audio plays
+Result: Bottle appears exactly when first audio byte plays
+```
+
+**Surprise**: Pause/resume mechanism was simpler and more robust than trying to predict exact resume moment from audio timing
+
+**Friction**: Initial approach (detect animation end) was event-dependent and fragile; pause/resume is state-based and deterministic
+
+**Time**: ~30 minutes (pause/resume implementation, SVG clipPath setup, layout adjustments, testing)
+
+---
+
 ### [2024-12-12] — PostHog Analytics Integration 🔷
 
 **Intent**: Add comprehensive analytics tracking to monitor user engagement, tutorial completion rates, game performance, and synthesis submission patterns across the application.

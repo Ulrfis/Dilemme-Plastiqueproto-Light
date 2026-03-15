@@ -6,6 +6,33 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.8.0] - 2026-03-15
+
+### Amélioré - Latence Conversation Peter (Per-Sentence TTS Streaming)
+- Implémentation complète du pipeline per-sentence : chaque phrase génère son propre appel TTS avec contexte prosodique (`previous_text`)
+- Server `/api/chat/stream` émit des événements `sentence` (text) et `sentence_audio` (token audio) séquentiellement
+- Amélioration détection de frontières de phrases : regex `[\s\S]*?[.!?]` capture multiples phrases dans un delta chunk
+- Envoi immédiat de l'événement `complete` (sans attendre tous les TTS) pour UX plus réactive
+- Client `useAudioQueue` : nouveau système pause/resume pour synchroniser animation avant audio playback
+- Résultat : première audio démarre ~2-3s après soumission utilisateur (au lieu de 5-9s)
+- Fichiers: `server/routes.ts`, `client/src/lib/api.ts`, `client/src/components/TutorialScreen.tsx`, `client/src/hooks/useAudioQueue.ts`
+
+### Corrigé - Synchronisation Animation Bouteille Célébration
+- Animation bouteille apparaît maintenant AVANT que Peter commence à parler (synchronisation exacte du démarrage audio)
+- `audioQueue.pause()` appelé au démarrage du stream, `resume()` appelé après `setShowSuccess(true)` dans `onComplete`
+- Augmentation du timeout animation de 3000ms → 4500ms pour s'aligner sur la durée interne complète (3.5s apparition + 0.5s secousses + 0.5s explosion)
+- Fichiers: `client/src/components/TutorialScreen.tsx`, `client/src/hooks/useAudioQueue.ts`
+
+### Corrigé - Débordement Texte Étiquette Bouteille SVG
+- Ajout de `<clipPath>` SVG correspondant aux dimensions exactes de l'étiquette (x=45, y=140, width=110, height=110)
+- Application de la clipPath à tous les éléments texte de l'étiquette (BRAVO, message, noms d'indices)
+- Réduction des tailles de police (BRAVO: 24→22, message: 13→12, noms: 12→11) pour meilleur ajustement
+- Augmentation des indices visibles de 2 à 3 grâce à la meilleure utilisation d'espace
+- Noms d'indices longs maintenant toujours lisibles sans débordement
+- Fichier: `client/src/components/SuccessFeedback.tsx`
+
+---
+
 ## [1.7.0] - 2026-03-07
 
 ### Corrigé - Continuité vocale ElevenLabs (Phase 3)
