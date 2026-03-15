@@ -141,8 +141,8 @@ export async function textToSpeechStreaming(text: string): Promise<Blob> {
 
 // PHASE 2 OPTIMIZATION: Streaming chat API with SSE
 export interface StreamChatCallbacks {
-  onSentence?: (sentence: string, index: number) => void;
-  onComplete?: (fullResponse: string, foundClues: string[], detectedClue: string | null, ttsToken: string | null) => void;
+  onSentence?: (sentence: string, index: number, audioToken: string | null) => void;
+  onComplete?: (fullResponse: string, foundClues: string[], detectedClue: string | null) => void;
   onError?: (error: string) => void;
 }
 
@@ -199,9 +199,9 @@ export async function sendChatMessageStreaming(
           const data = JSON.parse(message.slice(6)); // Remove 'data: ' prefix
 
           if (data.type === 'sentence' && callbacks.onSentence) {
-            callbacks.onSentence(data.text, data.index);
+            callbacks.onSentence(data.text, data.index, data.audioToken || null);
           } else if (data.type === 'complete' && callbacks.onComplete) {
-            callbacks.onComplete(data.fullResponse, data.foundClues, data.detectedClue, data.ttsToken || null);
+            callbacks.onComplete(data.fullResponse, data.foundClues, data.detectedClue);
           } else if (data.type === 'error' && callbacks.onError) {
             callbacks.onError(data.message);
           }

@@ -89,11 +89,13 @@ Preferred communication style: Simple, everyday language.
 - **API Key**: Updated to new workspace (`sk_22fdaffb...`)
 - **Caching Strategy**: MD5 hash-based TTS response caching (max 100 entries) for repeated phrases
 
-**Streaming Architecture (Phase 2 Optimization)**:
+**Streaming Architecture (Per-Sentence TTS Pipeline)**:
 - Server-Sent Events (SSE) for streaming LLM responses sentence-by-sentence
-- Parallel TTS generation: Each sentence converted to audio as it arrives
-- Audio queue management for sequential playback without blocking
-- Reduces perceived latency from 6-18s to 3-4s by starting audio playback before full response completion
+- Per-sentence TTS: Each sentence gets its own ElevenLabs TTS call with `previous_text` context for prosody continuity
+- `sentence` SSE events include `audioToken` — client fetches audio from `/api/tts/play/{token}` (blocks until ready)
+- Audio queue (`useAudioQueue`) manages sequential playback: inserts in sorted order, plays in sequence
+- First sentence audio starts playing as soon as its TTS completes (~2-3s), while LLM + TTS continue for remaining sentences
+- User can interrupt Peter mid-playback (clears audio queue + stops current audio)
 
 **Clue Detection System**:
 - Target clues: ADN, bébé, penseur de Rodin, plastique
@@ -106,11 +108,11 @@ Preferred communication style: Simple, everyday language.
 1. **TTS Response Caching**: MD5-based cache for audio responses (1-3s savings on repeated phrases)
 2. **API Connection Warming**: DNS prefetch and preconnect for OpenAI/ElevenLabs endpoints (300-800ms reduction)
 
-**Phase 2 - Streaming Pipeline**:
+**Phase 2 - Per-Sentence TTS Pipeline**:
 1. **SSE Streaming**: LLM responses streamed sentence-by-sentence via `/api/chat/stream` endpoint
-2. **Parallel TTS**: Audio generation happens in parallel with LLM text generation
-3. **Audio Queue**: Custom hook manages sequential audio playback while more chunks generate
-4. **Expected Latency Reduction**: 6-11 seconds total (Phase 1 + Phase 2 combined)
+2. **Per-Sentence TTS**: Each sentence triggers immediate ElevenLabs TTS with `previous_text` for prosody continuity
+3. **Audio Queue**: `useAudioQueue` hook manages sequential playback of per-sentence audio blobs
+4. **Latency**: First sentence audio plays ~2-3s after user sends message (was 5-9s with full-text TTS)
 
 **Frontend Performance**:
 - Lazy loading and code splitting via Vite
@@ -131,8 +133,9 @@ Preferred communication style: Simple, everyday language.
 2. Audio captured via MediaRecorder API (WebM format)
 3. Sent to `/api/speech-to-text` for Whisper transcription
 4. Text sent to `/api/chat/stream` for AI response
-5. AI response streamed via SSE, each sentence sent to `/api/text-to-speech-streaming`
-6. Audio chunks queued and played sequentially
+5. AI response streamed via SSE, each `sentence` event includes `audioToken`
+6. Client fetches `/api/tts/play/{audioToken}` for each sentence (blocks until TTS ready)
+7. Audio blobs enqueued in `useAudioQueue`, played sequentially starting from sentence #1
 
 **Fallback Mechanisms**:
 - Text input mode if microphone permissions denied

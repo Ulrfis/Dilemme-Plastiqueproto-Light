@@ -102,7 +102,8 @@ setInterval(() => {
 }, 30000);
 
 // Helper: Generate TTS audio from ElevenLabs (returns Buffer)
-async function generateTtsAudio(text: string): Promise<Buffer> {
+// previousText: text spoken before this segment, used by ElevenLabs to maintain prosody continuity
+async function generateTtsAudio(text: string, previousText?: string): Promise<Buffer> {
   const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
   const VOICE_ID = 'R8IjtpeRZsjoJfq1wwj3';
 
@@ -110,14 +111,30 @@ async function generateTtsAudio(text: string): Promise<Buffer> {
     throw new Error('ElevenLabs API key not configured');
   }
 
-  // Check cache first
+  // Check cache first (only for full-text calls without context)
   const textHash = crypto.createHash('md5').update(text).digest('hex');
-  if (ttsCache.has(textHash)) {
+  if (!previousText && ttsCache.has(textHash)) {
     console.log('[TTS] Cache HIT:', textHash.substring(0, 8));
     return ttsCache.get(textHash)!;
   }
 
-  console.log('[TTS] Generating audio for', text.length, 'chars...');
+  console.log('[TTS] Generating audio for', text.length, 'chars', previousText ? `(with ${previousText.length} chars context)` : '', '...');
+  const body: Record<string, unknown> = {
+    text,
+    model_id: 'eleven_multilingual_v2',
+    voice_settings: {
+      stability: 0.70,
+      similarity_boost: 0.75,
+      style: 0.0,
+      use_speaker_boost: true
+    },
+    optimize_streaming_latency: 3,
+  };
+
+  if (previousText) {
+    body.previous_text = previousText;
+  }
+
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
     method: 'POST',
     headers: {
@@ -125,17 +142,7 @@ async function generateTtsAudio(text: string): Promise<Buffer> {
       'Content-Type': 'application/json',
       'xi-api-key': ELEVENLABS_API_KEY
     },
-    body: JSON.stringify({
-      text,
-      model_id: 'eleven_multilingual_v2',
-      voice_settings: {
-        stability: 0.70,
-        similarity_boost: 0.75,
-        style: 0.0,
-        use_speaker_boost: true
-      },
-      optimize_streaming_latency: 3,
-    })
+    body: JSON.stringify(body)
   });
 
   if (!response.ok) {
@@ -170,9 +177,9 @@ async function generateTtsAudio(text: string): Promise<Buffer> {
 }
 
 // Helper: Pre-generate TTS and store with a token
-function preGenerateTts(text: string): string {
+function preGenerateTts(text: string, previousText?: string): string {
   const token = crypto.randomUUID();
-  const promise = generateTtsAudio(text);
+  const promise = generateTtsAudio(text, previousText);
   ttsRequestStore.set(token, { promise, createdAt: Date.now() });
   console.log('[TTS] Pre-generation started, token:', token);
   return token;
@@ -846,22 +853,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let fullResponse = "";
       let currentSentence = "";
       let sentenceCount = 0;
+      let previousSentencesText = "";
 
-      // Helper to detect sentence boundaries
       const isSentenceEnd = (text: string): boolean => {
-        // Match sentence-ending punctuation followed by space or end of string
         return /[.!?]\s+$/.test(text) || /[.!?]$/.test(text);
       };
 
-      // Helper to send sentence via SSE
       const sendSentence = (sentence: string) => {
-        if (sentence.trim().length > 0) {
+        const trimmed = sentence.trim();
+        if (trimmed.length > 0) {
           sentenceCount++;
-          console.log('[Chat Stream API] Sending sentence #' + sentenceCount + ':', sentence.substring(0, 50) + '...');
+          const index = sentenceCount;
+          console.log('[Chat Stream API] Sending sentence #' + index + ':', trimmed.substring(0, 50) + '...');
+
+          let audioToken: string | null = null;
+          try {
+            audioToken = preGenerateTts(trimmed, previousSentencesText || undefined);
+            console.log('[Chat Stream API] TTS started for sentence #' + index + ', token:', audioToken);
+          } catch (ttsErr) {
+            console.error('[Chat Stream API] TTS failed for sentence #' + index + ':', ttsErr);
+          }
+
+          previousSentencesText += (previousSentencesText ? ' ' : '') + trimmed;
+
           res.write(`data: ${JSON.stringify({
             type: 'sentence',
-            text: sentence.trim(),
-            index: sentenceCount
+            text: trimmed,
+            index,
+            audioToken
           })}\n\n`);
         }
       };
@@ -956,25 +975,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.incrementMessageCount(sessionId);
       console.log('[Chat Stream API] Message count incremented for session:', sessionId);
 
-      // PHASE 3: Pre-generate TTS immediately (before client requests it)
-      // This eliminates the client→server round-trip + ElevenLabs cold start delay
-      let ttsToken: string | null = null;
-      if (fullResponse && fullResponse.trim().length > 0) {
-        try {
-          ttsToken = preGenerateTts(fullResponse);
-          console.log('[Chat Stream API] TTS pre-generation started, token:', ttsToken);
-        } catch (ttsErr) {
-          console.error('[Chat Stream API] TTS pre-generation failed:', ttsErr);
-        }
-      }
-
-      // Send completion event with clue information + TTS token
       res.write(`data: ${JSON.stringify({
         type: 'complete',
         fullResponse,
         foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
         detectedClue: detectedClues.length > 0 ? detectedClues[0] : null,
-        ttsToken
       })}\n\n`);
 
       res.end();

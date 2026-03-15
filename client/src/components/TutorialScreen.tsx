@@ -8,6 +8,7 @@ import SuccessFeedback from "./SuccessFeedback";
 import ZoomableImage from "./ZoomableImage";
 import InfoModal from "./InfoModal";
 import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
+import { useAudioQueue } from "@/hooks/useAudioQueue";
 import { sendChatMessage, textToSpeech, sendChatMessageStreaming, textToSpeechStreaming } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { captureEvent } from "@/App";
@@ -128,8 +129,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     },
   });
 
-  // Audio queue no longer needed - TTS is now called once with the full response text
-  // to maintain consistent voice register across the entire response.
+  const audioQueue = useAudioQueue({
+    playAudio,
+    onQueueEmpty: () => {
+      console.log('[TutorialScreen] Audio queue empty - all sentences played');
+    },
+    onPlaybackStart: () => {
+      console.log('[TutorialScreen] First sentence audio started playing');
+    },
+  });
 
   // Vérifier si l'utilisateur revient avec une conversation existante
   const isReturningUser = messages.length > 0;
@@ -214,14 +222,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     throw lastError || new Error('TTS failed after retries');
   };
 
-  // Fonction pour interrompre Peter et permettre à l'utilisateur de parler
   const handleInterruptPeter = () => {
     console.log('[TutorialScreen] User wants to interrupt Peter');
-
-    // Arrêter immédiatement la lecture audio de Peter
-    // handleAudioStop sera automatiquement appelé et gérera l'affichage du message
+    audioQueue.clear();
     stopAudio();
-
     console.log('[TutorialScreen] Peter interrupted, user can now speak');
   };
 
@@ -367,21 +371,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     }
   };
 
-  // PHASE 3: Streaming message processing with single TTS call for voice continuity
-  // Sentences are streamed for progressive UI display, but TTS is called ONCE with the full text
-  // to maintain consistent voice register and prosody across the entire response.
   const processMessageStreaming = async (userMessage: string, currentExchange: number) => {
     console.log('[TutorialScreen] Processing message with streaming, exchange:', currentExchange);
     let fullResponse = '';
 
+    audioQueue.reset();
+
     try {
-      // Send streaming chat message with exchange context
       await sendChatMessageStreaming(sessionId, userMessage, {
-        onSentence: async (sentence, index) => {
-          console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...');
+        onSentence: (sentence, index, audioToken) => {
+          console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...', 'audioToken:', audioToken);
           fullResponse += sentence + ' ';
 
-          // Update UI with partial response (progressive display only - NO TTS here)
           setMessages(prev => {
             const lastMessage = prev[prev.length - 1];
             if (lastMessage && lastMessage.role === 'assistant') {
@@ -390,14 +391,37 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               return [...prev, makeMessage('assistant', fullResponse.trim())];
             }
           });
+
+          if (audioToken) {
+            fetch(`/api/tts/play/${audioToken}`)
+              .then(audioResponse => {
+                if (audioResponse.ok) {
+                  return audioResponse.blob();
+                }
+                throw new Error(`HTTP ${audioResponse.status}`);
+              })
+              .then(audioBlob => {
+                if (audioBlob && audioBlob.size >= 100) {
+                  audioQueue.enqueue(audioBlob, sentence, index);
+                } else {
+                  console.warn('[TutorialScreen] Sentence #' + index + ' audio too small, skipping');
+                  audioQueue.skipIndex(index);
+                }
+              })
+              .catch(fetchErr => {
+                console.error('[TutorialScreen] Error fetching sentence #' + index + ' audio:', fetchErr);
+                audioQueue.skipIndex(index);
+              });
+          } else {
+            audioQueue.skipIndex(index);
+          }
         },
 
-        onComplete: async (finalResponse, newFoundClues, detectedClue, ttsToken) => {
-          console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length, 'ttsToken:', ttsToken);
+        onComplete: async (finalResponse, newFoundClues, detectedClue) => {
+          console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length);
 
-          // Vérifier si la réponse est vide ou invalide
           if (!finalResponse || finalResponse.trim().length === 0) {
-            console.error('[TutorialScreen] ⚠️ Empty response received from Peter');
+            console.error('[TutorialScreen] Empty response received from Peter');
             toast({
               title: "Réponse vide",
               description: "Peter n'a pas pu générer de réponse. Veuillez réessayer.",
@@ -407,26 +431,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             return;
           }
 
-          // PHASE 3: Play audio from pre-generated TTS (server started generation immediately)
-          // Uses native browser streaming - starts playing as soon as browser has buffered enough
-          try {
-            if (ttsToken) {
-              // Use pre-generated audio via streaming URL (fastest path)
-              console.log('[TutorialScreen] Playing pre-generated TTS via streaming URL...');
-              await playFromUrl(`/api/tts/play/${ttsToken}`);
-            } else {
-              // Fallback: generate TTS client-side if server didn't provide a token
-              console.log('[TutorialScreen] No ttsToken, falling back to client-side TTS...');
-              const audioBlob = await textToSpeechStreaming(finalResponse);
-              if (audioBlob && audioBlob.size >= 100) {
-                await playAudio(audioBlob);
-              }
-            }
-          } catch (ttsError) {
-            console.error('[TutorialScreen] Audio playback failed:', ttsError);
-          }
-
-          // Update final message (in case there was additional text at the end)
           setMessages(prev => {
             const lastMessage = prev[prev.length - 1];
             if (lastMessage && lastMessage.role === 'assistant') {
@@ -436,7 +440,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             }
           });
 
-          // Handle clue detection
           const previousClues = foundClues;
           const detectedNewClues = newFoundClues.filter(clue => !previousClues.includes(clue));
 
@@ -454,9 +457,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             setTimeout(() => setShowSuccess(false), 3000);
           }
           
-          // Vérifier si on a atteint la limite d'échanges (garantir au moins 8 échanges)
-          // Note: On ne termine PAS la conversation même si tous les indices sont trouvés
-          // L'utilisateur doit pouvoir discuter au moins 8 fois avec Peter
           const maxExchangesReached = currentExchange >= MAX_EXCHANGES;
 
           if (maxExchangesReached) {
@@ -466,9 +466,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         },
 
         onError: (error) => {
-          console.error('[TutorialScreen] ❌ Stream error:', error);
+          console.error('[TutorialScreen] Stream error:', error);
+          audioQueue.clear();
 
-          // Ajouter un message d'erreur visible dans la conversation
           setMessages(prev => [...prev, {
             role: 'assistant',
             content: `Erreur: ${error}. Veuillez réessayer.`
@@ -478,20 +478,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             title: "Erreur de Peter",
             description: `La conversation a échoué: ${error}`,
             variant: "destructive",
-            duration: 10000, // 10 secondes pour être visible
+            duration: 10000,
           });
 
-          // Réinitialiser l'état pour permettre de réessayer
           recoverFromError();
         },
       }, {
-        // Pass exchange context for Peter's behavior at end of conversation
         exchangeCount: currentExchange,
         userName: userName
       });
     } catch (error) {
       console.error('[TutorialScreen] Streaming failed:', error);
-      // Fallback to non-streaming
+      audioQueue.clear();
       console.log('[TutorialScreen] Falling back to non-streaming');
       await processMessageNonStreaming(userMessage);
     }
