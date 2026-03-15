@@ -124,6 +124,7 @@ export const feedbackSurveys = pgTable("feedback_surveys", {
   gameplayExplanation: integer("gameplay_explanation"),
   gameplaySimplicity: integer("gameplay_simplicity"),
   gameplayBotResponses: integer("gameplay_bot_responses"),
+  gameplayVoiceChat: integer("gameplay_voice_chat"),
   feelingOriginality: integer("feeling_originality"),
   feelingPleasant: integer("feeling_pleasant"),
   feelingInteresting: integer("feeling_interesting"),
