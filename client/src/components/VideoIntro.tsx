@@ -32,6 +32,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [videoEnded, setVideoEnded] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showLandscapeBanner, setShowLandscapeBanner] = useState(true);
   const [isMobile] = useState(() => isMobileDevice());
   const [showPlayButton, setShowPlayButton] = useState(true);
 
@@ -190,6 +191,31 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     };
   }, []);
 
+  // Hide landscape banner when in landscape orientation or after 6 seconds
+  useEffect(() => {
+    const checkLandscape = () => {
+      if (window.innerWidth > window.innerHeight) {
+        setShowLandscapeBanner(false);
+      }
+    };
+    checkLandscape();
+
+    const timer = setTimeout(() => setShowLandscapeBanner(false), 6000);
+
+    window.addEventListener("resize", checkLandscape);
+    if (screen.orientation) {
+      screen.orientation.addEventListener("change", checkLandscape);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", checkLandscape);
+      if (screen.orientation) {
+        screen.orientation.removeEventListener("change", checkLandscape);
+      }
+    };
+  }, []);
+
   // Auto-skip timer removed - only the "Continuer" button should allow skipping
   // The video should play its entire duration naturally
 
@@ -292,7 +318,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         </Button>
       </div>
 
-      {!isFullscreen && (
+      {!isFullscreen && showLandscapeBanner && (
         <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-20 bg-black/80 backdrop-blur-sm px-6 py-3 rounded-full text-white text-sm sm:text-base font-semibold shadow-lg border-2 border-white/20">
           Mode paysage fortement recommandé
         </div>
