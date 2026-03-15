@@ -9,6 +9,7 @@ import type { TutorialSession } from '@shared/schema';
 // 5. Copy the URL and set it as GOOGLE_SCRIPT_URL environment variable
 
 const SPREADSHEET_ID = '1CisRjSfqNpcZGwmklqdIRc93hbK4-Pyu_ysoaT2Dfb4';
+const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz97fmNZdndQIWvlcfmKxsbQjb7aZC8F490pCqeuJ_GDO9u5WP8V9CVS-ozv4GPZFw/exec';
 
 // Headers for unified session row (34 columns)
 const UNIFIED_HEADERS = [
@@ -28,7 +29,7 @@ export class GoogleSheetsSync {
   private scriptUrl: string | null;
 
   constructor() {
-    this.scriptUrl = process.env.GOOGLE_SCRIPT_URL || null;
+    this.scriptUrl = process.env.GOOGLE_SCRIPT_URL || DEFAULT_SCRIPT_URL;
     if (this.scriptUrl) {
       console.log('[GoogleSheets] ✅ Google Apps Script URL configured');
     } else {
@@ -131,7 +132,7 @@ export class GoogleSheetsSync {
 }
 
 export async function testGoogleSheetsConnection(): Promise<{ success: boolean; message: string; details?: any }> {
-  const scriptUrl = process.env.GOOGLE_SCRIPT_URL;
+  const scriptUrl = process.env.GOOGLE_SCRIPT_URL || DEFAULT_SCRIPT_URL;
   if (!scriptUrl) {
     return {
       success: false,
