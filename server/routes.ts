@@ -911,7 +911,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             currentSentence += textDelta;
 
             let match;
-            while ((match = currentSentence.match(/^(.*?[.!?])(\s+|$)/s)) !== null) {
+            while ((match = currentSentence.match(/^([\s\S]*?[.!?])(\s+|$)/)) !== null) {
               sendSentence(match[1]);
               currentSentence = currentSentence.slice(match[0].length);
             }
