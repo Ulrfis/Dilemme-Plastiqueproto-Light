@@ -856,10 +856,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let previousSentencesText = "";
       const sentenceTtsPromises: Promise<void>[] = [];
 
-      const isSentenceEnd = (text: string): boolean => {
-        return /[.!?]\s+$/.test(text) || /[.!?]$/.test(text);
-      };
-
       const sendSentence = (sentence: string) => {
         const trimmed = sentence.trim();
         if (trimmed.length > 0) {
@@ -914,10 +910,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             fullResponse += textDelta;
             currentSentence += textDelta;
 
-            // Check if we have a complete sentence
-            if (isSentenceEnd(currentSentence)) {
-              sendSentence(currentSentence);
-              currentSentence = "";
+            let match;
+            while ((match = currentSentence.match(/^(.*?[.!?])(\s+|$)/s)) !== null) {
+              sendSentence(match[1]);
+              currentSentence = currentSentence.slice(match[0].length);
             }
           }
         }
