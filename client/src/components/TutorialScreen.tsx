@@ -466,7 +466,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             setFoundClues(newFoundClues);
             setNewClues(detectedNewClues);
             setShowSuccess(true);
-            setTimeout(() => setShowSuccess(false), 3000);
+            setTimeout(() => setShowSuccess(false), 4500);
           }
           
           const maxExchangesReached = currentExchange >= MAX_EXCHANGES;
@@ -524,7 +524,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       setFoundClues(result.foundClues);
       setNewClues(detectedNewClues);
       setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
+      setTimeout(() => setShowSuccess(false), 4500);
     }
 
     // Afficher le message IMMEDIATEMENT

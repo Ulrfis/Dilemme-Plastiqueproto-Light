@@ -201,26 +201,30 @@ function PlasticBottle({ isExploding, isShaking, message, clueNames }: PlasticBo
         <rect x="45" y="140" width="110" height="110" rx="4" fill="rgba(0,0,0,0.1)" transform="translate(2, 2)" />
         <rect x="45" y="140" width="110" height="110" rx="4" fill="white" stroke="#E0E0E0" strokeWidth="0.5" />
 
-        {/* Contenu de l'étiquette - ajusté pour ne pas dépasser */}
-        <text x="100" y="170" textAnchor="middle" fontSize="24" fill="#1976D2" fontWeight="bold" fontFamily="Arial, sans-serif">BRAVO!</text>
-        <line x1="58" y1="180" x2="142" y2="180" stroke="#1976D2" strokeWidth="2" opacity="0.4" />
-        <text x="100" y="200" textAnchor="middle" fontSize="13" fill="#424242" fontWeight="500" fontFamily="Arial, sans-serif">{message}</text>
+        <clipPath id="labelClip">
+          <rect x="45" y="140" width="110" height="110" rx="4" />
+        </clipPath>
 
-        {/* Noms des indices - taille réduite pour tenir dans l'étiquette */}
-        {clueNames.slice(0, 2).map((clue, index) => (
-          <text
-            key={index}
-            x="100"
-            y={220 + index * 16}
-            textAnchor="middle"
-            fontSize="12"
-            fill="#1976D2"
-            fontWeight="600"
-            fontFamily="Arial, sans-serif"
-          >
-            {truncateClue(clue)}
-          </text>
-        ))}
+        <g clipPath="url(#labelClip)">
+          <text x="100" y="168" textAnchor="middle" fontSize="22" fill="#1976D2" fontWeight="bold" fontFamily="Arial, sans-serif">BRAVO!</text>
+          <line x1="58" y1="177" x2="142" y2="177" stroke="#1976D2" strokeWidth="2" opacity="0.4" />
+          <text x="100" y="195" textAnchor="middle" fontSize="12" fill="#424242" fontWeight="500" fontFamily="Arial, sans-serif">{message}</text>
+
+          {clueNames.slice(0, 3).map((clue, index) => (
+            <text
+              key={index}
+              x="100"
+              y={212 + index * 14}
+              textAnchor="middle"
+              fontSize="11"
+              fill="#1976D2"
+              fontWeight="600"
+              fontFamily="Arial, sans-serif"
+            >
+              {truncateClue(clue)}
+            </text>
+          ))}
+        </g>
 
         {/* Base de la bouteille (pied) */}
         <ellipse cx="100" cy="302" rx="52" ry="4" fill="rgba(0,0,0,0.1)" />
