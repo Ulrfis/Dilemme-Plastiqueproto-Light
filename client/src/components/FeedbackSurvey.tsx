@@ -265,6 +265,7 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
   });
   const [email, setEmail] = useState('');
   const [showThankYou, setShowThankYou] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const textDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   const totalChapters = CHAPTERS.length;
@@ -302,6 +303,14 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
         userName,
         sessionId,
       });
+      setShowThankYou(true);
+      setTimeout(() => {
+        onComplete();
+      }, 2000);
+    },
+    onError: (error) => {
+      console.error('[FeedbackSurvey] Submit failed:', error);
+      // Still show thank you - partial updates were already synced via PATCH
       setShowThankYou(true);
       setTimeout(() => {
         onComplete();
