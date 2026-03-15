@@ -33,20 +33,25 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
 
   const queueRef = useRef<AudioQueueItem[]>([]);
   const isProcessingRef = useRef(false);
-  // Track the next expected sentence index to ensure sequential playback
-  const nextExpectedIndexRef = useRef(1); // Sentences are 1-indexed from server
+  const nextExpectedIndexRef = useRef(1);
+  const skippedIndicesRef = useRef<Set<number>>(new Set());
 
-  // Process queue sequentially
-  // CRITICAL: Only play if the next item has the expected index (ensures correct order)
+  const advancePastSkipped = useCallback(() => {
+    while (skippedIndicesRef.current.has(nextExpectedIndexRef.current)) {
+      console.log('[AudioQueue] Advancing past skipped index #' + nextExpectedIndexRef.current);
+      skippedIndicesRef.current.delete(nextExpectedIndexRef.current);
+      nextExpectedIndexRef.current++;
+    }
+  }, []);
+
   const processQueue = useCallback(async () => {
-    // Prevent concurrent processing
     if (isProcessingRef.current) {
-      console.log('[AudioQueue] Already processing queue');
       return;
     }
 
+    advancePastSkipped();
+
     if (queueRef.current.length === 0) {
-      console.log('[AudioQueue] Queue empty, stopping playback');
       setIsPlaying(false);
       setQueueLength(0);
       if (onQueueEmpty) {
@@ -55,13 +60,10 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
       return;
     }
 
-    // Check if the first item in queue has the expected index
-    // If not, we need to wait for earlier sentences to arrive
     const nextItem = queueRef.current[0];
     if (nextItem.index > nextExpectedIndexRef.current) {
       console.log('[AudioQueue] Waiting for sentence #' + nextExpectedIndexRef.current +
-                  ' (queue has #' + nextItem.index + ' and ' + queueRef.current.length + ' items)');
-      // Don't process yet - wait for the expected sentence
+                  ' (queue has #' + nextItem.index + ')');
       return;
     }
 
@@ -104,7 +106,7 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
 
     // Process next item (recursive)
     await processQueue();
-  }, [playAudio, onQueueEmpty, onPlaybackStart]);
+  }, [playAudio, onQueueEmpty, onPlaybackStart, advancePastSkipped]);
 
   // Add item to queue and start processing if not already running
   // CRITICAL FIX: Insert in sorted order by index to ensure correct playback order
@@ -145,33 +147,34 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
     setQueueLength(0);
     isProcessingRef.current = false;
     setIsPlaying(false);
-    // Reset expected index for next conversation turn
     nextExpectedIndexRef.current = 1;
+    skippedIndicesRef.current.clear();
 
     if (onQueueEmpty) {
       onQueueEmpty();
     }
   }, [onQueueEmpty]);
 
-  // Reset expected index for a new response (call before starting new message)
   const reset = useCallback(() => {
     console.log('[AudioQueue] Resetting expected index to 1');
     nextExpectedIndexRef.current = 1;
+    skippedIndicesRef.current.clear();
   }, []);
 
-  // Skip a sentence that failed TTS generation - advance expected index and try to process queue
   const skipIndex = useCallback((index: number) => {
     console.log('[AudioQueue] Skipping failed sentence #' + index);
-    // Only advance if this is the expected index
     if (index === nextExpectedIndexRef.current) {
       nextExpectedIndexRef.current = index + 1;
+      advancePastSkipped();
       console.log('[AudioQueue] Advanced expected index to #' + nextExpectedIndexRef.current);
-      // Try to process queue in case next sentence is already queued
-      if (!isProcessingRef.current && queueRef.current.length > 0) {
+      if (!isProcessingRef.current) {
         processQueue();
       }
+    } else if (index > nextExpectedIndexRef.current) {
+      skippedIndicesRef.current.add(index);
+      console.log('[AudioQueue] Recorded future skip for #' + index);
     }
-  }, [processQueue]);
+  }, [processQueue, advancePastSkipped]);
 
   return {
     enqueue,
