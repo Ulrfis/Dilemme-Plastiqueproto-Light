@@ -379,8 +379,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     try {
       await sendChatMessageStreaming(sessionId, userMessage, {
-        onSentence: (sentence, index, audioToken) => {
-          console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...', 'audioToken:', audioToken);
+        onSentence: (sentence, index) => {
+          console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...');
           fullResponse += sentence + ' ';
 
           setMessages(prev => {
@@ -391,30 +391,34 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               return [...prev, makeMessage('assistant', fullResponse.trim())];
             }
           });
+        },
 
-          if (audioToken) {
-            fetch(`/api/tts/play/${audioToken}`)
-              .then(audioResponse => {
-                if (audioResponse.ok) {
-                  return audioResponse.blob();
-                }
-                throw new Error(`HTTP ${audioResponse.status}`);
-              })
-              .then(audioBlob => {
-                if (audioBlob && audioBlob.size >= 100) {
-                  audioQueue.enqueue(audioBlob, sentence, index);
-                } else {
-                  console.warn('[TutorialScreen] Sentence #' + index + ' audio too small, skipping');
-                  audioQueue.skipIndex(index);
-                }
-              })
-              .catch(fetchErr => {
-                console.error('[TutorialScreen] Error fetching sentence #' + index + ' audio:', fetchErr);
+        onSentenceAudio: (index, audioToken) => {
+          console.log('[TutorialScreen] Sentence #' + index + ' audio ready, token:', audioToken);
+          fetch(`/api/tts/play/${audioToken}`)
+            .then(audioResponse => {
+              if (audioResponse.ok) {
+                return audioResponse.blob();
+              }
+              throw new Error(`HTTP ${audioResponse.status}`);
+            })
+            .then(audioBlob => {
+              if (audioBlob && audioBlob.size >= 100) {
+                audioQueue.enqueue(audioBlob, `sentence-${index}`, index);
+              } else {
+                console.warn('[TutorialScreen] Sentence #' + index + ' audio too small, skipping');
                 audioQueue.skipIndex(index);
-              });
-          } else {
-            audioQueue.skipIndex(index);
-          }
+              }
+            })
+            .catch(fetchErr => {
+              console.error('[TutorialScreen] Error fetching sentence #' + index + ' audio:', fetchErr);
+              audioQueue.skipIndex(index);
+            });
+        },
+
+        onSentenceAudioError: (index) => {
+          console.warn('[TutorialScreen] Sentence #' + index + ' TTS failed on server, skipping');
+          audioQueue.skipIndex(index);
         },
 
         onComplete: async (finalResponse, newFoundClues, detectedClue) => {

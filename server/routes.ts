@@ -854,6 +854,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let currentSentence = "";
       let sentenceCount = 0;
       let previousSentencesText = "";
+      const sentenceTtsPromises: Promise<void>[] = [];
 
       const isSentenceEnd = (text: string): boolean => {
         return /[.!?]\s+$/.test(text) || /[.!?]$/.test(text);
@@ -866,22 +867,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const index = sentenceCount;
           console.log('[Chat Stream API] Sending sentence #' + index + ':', trimmed.substring(0, 50) + '...');
 
-          let audioToken: string | null = null;
-          try {
-            audioToken = preGenerateTts(trimmed, previousSentencesText || undefined);
-            console.log('[Chat Stream API] TTS started for sentence #' + index + ', token:', audioToken);
-          } catch (ttsErr) {
-            console.error('[Chat Stream API] TTS failed for sentence #' + index + ':', ttsErr);
-          }
-
-          previousSentencesText += (previousSentencesText ? ' ' : '') + trimmed;
-
           res.write(`data: ${JSON.stringify({
             type: 'sentence',
             text: trimmed,
-            index,
-            audioToken
+            index
           })}\n\n`);
+
+          const contextText = previousSentencesText || undefined;
+          previousSentencesText += (previousSentencesText ? ' ' : '') + trimmed;
+
+          const ttsPromise = generateTtsAudio(trimmed, contextText)
+            .then((audioBuffer) => {
+              const audioToken = crypto.randomUUID();
+              ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
+              console.log('[Chat Stream API] TTS ready for sentence #' + index + ', token:', audioToken);
+              if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({
+                  type: 'sentence_audio',
+                  index,
+                  audioToken
+                })}\n\n`);
+              }
+            })
+            .catch((ttsErr) => {
+              console.error('[Chat Stream API] TTS failed for sentence #' + index + ':', ttsErr);
+              if (!res.writableEnded) {
+                res.write(`data: ${JSON.stringify({
+                  type: 'sentence_audio_error',
+                  index
+                })}\n\n`);
+              }
+            });
+
+          sentenceTtsPromises.push(ttsPromise);
         }
       };
 
@@ -974,6 +992,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Incrémenter le compteur de messages pour la synchronisation Google Sheets
       await storage.incrementMessageCount(sessionId);
       console.log('[Chat Stream API] Message count incremented for session:', sessionId);
+
+      if (sentenceTtsPromises.length > 0) {
+        console.log('[Chat Stream API] Waiting for', sentenceTtsPromises.length, 'sentence TTS promises...');
+        await Promise.allSettled(sentenceTtsPromises);
+        console.log('[Chat Stream API] All sentence TTS promises settled');
+      }
 
       res.write(`data: ${JSON.stringify({
         type: 'complete',
