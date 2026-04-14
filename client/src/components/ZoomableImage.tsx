@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { TransformWrapper, TransformComponent, useControls } from "react-zoom-pan-pinch";
-import { ZoomIn, Maximize2 } from "lucide-react";
+import { Maximize2, MousePointer2, Hand } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface ZoomableImageProps {
@@ -9,29 +9,32 @@ interface ZoomableImageProps {
   className?: string;
 }
 
-function ZoomControls() {
-  const { zoomIn, resetTransform, instance } = useControls();
+function isTouchDevice(): boolean {
+  return typeof window !== 'undefined' &&
+    ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+}
+
+function ZoomControls({ isTouch }: { isTouch: boolean }) {
+  const { resetTransform, instance } = useControls();
   const [isZoomed, setIsZoomed] = useState(false);
 
   useEffect(() => {
     const checkZoom = () => {
-      if (instance.transformState.scale > 1) {
-        setIsZoomed(true);
-      } else {
-        setIsZoomed(false);
-      }
+      setIsZoomed(instance.transformState.scale > 1.05);
     };
 
     const element = instance.wrapperComponent;
     if (element) {
       element.addEventListener('wheel', checkZoom);
       element.addEventListener('touchmove', checkZoom);
+      element.addEventListener('mousedown', checkZoom);
     }
 
     return () => {
       if (element) {
         element.removeEventListener('wheel', checkZoom);
         element.removeEventListener('touchmove', checkZoom);
+        element.removeEventListener('mousedown', checkZoom);
       }
     };
   }, [instance]);
@@ -41,7 +44,7 @@ function ZoomControls() {
       {/* Bouton reset zoom - visible seulement si zoomé */}
       {isZoomed && (
         <Button
-          onClick={() => resetTransform()}
+          onClick={() => { resetTransform(); setIsZoomed(false); }}
           size="icon"
           variant="secondary"
           className="absolute top-4 right-4 z-20 w-12 h-12 rounded-full bg-background/90 backdrop-blur-sm shadow-lg animate-scale-in"
@@ -51,15 +54,21 @@ function ZoomControls() {
         </Button>
       )}
 
-      {/* Icône animée pour inciter au zoom - disparaît après zoom */}
+      {/* Hint contextuel selon appareil - disparaît après zoom */}
       {!isZoomed && (
         <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <div className="flex flex-col items-center gap-2 animate-bounce-subtle">
             <div className="bg-primary/90 backdrop-blur-sm rounded-full p-4 shadow-lg">
-              <ZoomIn className="w-8 h-8 text-primary-foreground" />
+              {isTouch
+                ? <Hand className="w-8 h-8 text-primary-foreground" />
+                : <MousePointer2 className="w-8 h-8 text-primary-foreground" />
+              }
             </div>
-            <p className="text-sm font-medium text-white bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full">
-              Pincez pour zoomer
+            <p className="text-sm font-medium text-white bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full text-center">
+              {isTouch
+                ? "Pincez pour zoomer · Glissez pour explorer"
+                : "Molette pour zoomer · Cliquez-glissez pour déplacer"
+              }
             </p>
           </div>
         </div>
@@ -69,22 +78,36 @@ function ZoomControls() {
 }
 
 export default function ZoomableImage({ src, alt, className = '' }: ZoomableImageProps) {
+  const isTouch = isTouchDevice();
+
   return (
     <div className={`relative w-full h-full ${className}`} data-testid="zoomable-image-container">
       <TransformWrapper
         initialScale={1}
         minScale={1}
-        maxScale={4}
-        wheel={{ step: 0.1 }}
-        pinch={{ step: 5 }}
-        doubleClick={{ disabled: false, mode: "zoomIn" }}
-        panning={{ velocityDisabled: true }}
+        maxScale={6}
+        centerOnInit
+        wheel={isTouch
+          ? { disabled: true }
+          : { step: 0.12, smoothStep: 0.01 }
+        }
+        pinch={isTouch
+          ? { step: 8 }
+          : { disabled: true }
+        }
+        doubleClick={{ disabled: false, mode: "zoomIn", step: 1.5 }}
+        panning={{
+          velocityDisabled: isTouch,
+          excluded: ['input', 'textarea'],
+        }}
+        limitToBounds
       >
-        {(utils) => (
+        {() => (
           <>
             <TransformComponent
               wrapperClass="!w-full !h-full"
               contentClass="!w-full !h-full flex items-center justify-center"
+              wrapperStyle={{ cursor: isTouch ? 'grab' : 'default' }}
             >
               <img
                 src={src}
@@ -95,7 +118,7 @@ export default function ZoomableImage({ src, alt, className = '' }: ZoomableImag
                 style={{ maxHeight: '100%' }}
               />
             </TransformComponent>
-            <ZoomControls />
+            <ZoomControls isTouch={isTouch} />
           </>
         )}
       </TransformWrapper>
