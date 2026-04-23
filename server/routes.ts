@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
-import { elevenLabsFetch } from "./elevenlabs-agent";
+import { elevenLabsFetch, getPoolStats } from "./elevenlabs-agent";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -297,6 +297,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     res.json(results);
+  });
+
+  // Connection pool diagnostics for the persistent undici Agent
+  app.get('/api/health/connections', (req, res) => {
+    if (!requireAdmin(req, res)) return;
+
+    const poolStats = getPoolStats();
+    const origins = Object.keys(poolStats);
+
+    const pools = origins.map((origin) => {
+      const s = poolStats[origin];
+      return {
+        origin,
+        connected: s.connected,
+        pending: s.pending,
+        running: s.running,
+        idleSockets: 'free' in s ? s.free : null,
+        queued: 'queued' in s ? s.queued : null,
+        size: s.size,
+      };
+    });
+
+    const totalConnected = pools.reduce((n, p) => n + (typeof p.connected === 'boolean' ? (p.connected ? 1 : 0) : p.connected), 0);
+    const totalPending = pools.reduce((n, p) => n + p.pending, 0);
+    const totalRunning = pools.reduce((n, p) => n + p.running, 0);
+    const totalIdle = pools.reduce((n, p) => n + (p.idleSockets ?? 0), 0);
+
+    res.json({
+      status: 'ok',
+      keepAlive: true,
+      note: 'idleSockets and queued are null for single-connection clients (ClientStats). poolCount is 0 before the first ElevenLabs request.',
+      summary: { totalConnected, totalPending, totalRunning, totalIdle, poolCount: pools.length },
+      pools,
+    });
   });
 
   // Endpoint de diagnostic pour Google Sheets

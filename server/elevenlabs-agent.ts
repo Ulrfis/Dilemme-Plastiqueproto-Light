@@ -1,9 +1,13 @@
 import { Agent, fetch as undiciFetch } from 'undici';
 
-const elevenLabsAgent = new Agent({
+export const elevenLabsAgent = new Agent({
   keepAliveTimeout: 35_000,
   keepAliveMaxTimeout: 300_000,
 });
+
+export function getPoolStats(): Agent['stats'] {
+  return elevenLabsAgent.stats;
+}
 
 process.once('SIGTERM', () => elevenLabsAgent.close());
 process.once('SIGINT', () => elevenLabsAgent.close());
