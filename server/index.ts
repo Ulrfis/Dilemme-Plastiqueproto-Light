@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import OpenAI from "openai";
+import { elevenLabsFetch } from "./elevenlabs-agent";
 
 const app = express();
 
@@ -97,7 +98,7 @@ app.use((req, res, next) => {
     if (process.env.ELEVENLABS_API_KEY) {
       const warmElevenLabsConnection = async () => {
         try {
-          const response = await fetch('https://api.elevenlabs.io/v1/models', {
+          const response = await elevenLabsFetch('https://api.elevenlabs.io/v1/models', {
             headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY! }
           });
           if (response.ok) {

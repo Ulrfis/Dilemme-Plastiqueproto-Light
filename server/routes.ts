@@ -6,6 +6,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
+import { elevenLabsFetch } from "./elevenlabs-agent";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -151,7 +152,7 @@ async function generateTtsAudio(text: string, previousText?: string, quality: 'f
     body.previous_text = previousText;
   }
 
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
+  const response = await elevenLabsFetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
     method: 'POST',
     headers: {
       'Accept': 'audio/mpeg',
@@ -282,7 +283,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // Test ElevenLabs
     try {
-      const response = await fetch('https://api.elevenlabs.io/v1/user', {
+      const response = await elevenLabsFetch('https://api.elevenlabs.io/v1/user', {
         headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY || '' }
       });
       if (response.ok) {
@@ -613,7 +614,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Call ElevenLabs with optimized settings for French diction quality
       // Full text is sent in a single call to maintain consistent voice register
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
+      const response = await elevenLabsFetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
         method: 'POST',
         headers: {
           'Accept': 'audio/mpeg',
@@ -741,7 +742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       console.log('[TTS API] Calling ElevenLabs API...');
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
+      const response = await elevenLabsFetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
         method: 'POST',
         headers: {
           'Accept': 'audio/mpeg',
