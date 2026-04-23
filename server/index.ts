@@ -1,10 +1,73 @@
 import express, { type Request, Response, NextFunction } from "express";
+import helmet from "helmet";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { elevenLabsFetch } from "./elevenlabs-agent";
 import { openAIFetch } from "./openai-agent";
 
 const app = express();
+
+// HTTP security headers — must be applied before any route or middleware
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'", // Required for PostHog & SiteBehaviour inline snippets in index.html
+          "https://eu-assets.i.posthog.com",
+          "https://sitebehaviour-cdn.fra1.cdn.digitaloceanspaces.com",
+        ],
+        styleSrc: [
+          "'self'",
+          "'unsafe-inline'", // Required for Tailwind/shadcn runtime styles
+          "https://fonts.googleapis.com",
+        ],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        mediaSrc: [
+          "'self'",
+          "blob:",
+          "https://video.gumlet.io",
+          "https://api.elevenlabs.io",
+        ],
+        connectSrc: [
+          "'self'",
+          "https://eu.i.posthog.com",
+          "https://eu-assets.i.posthog.com",
+          "https://api.openai.com",
+          "https://api.elevenlabs.io",
+        ],
+        frameSrc: ["'none'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"], // Consistent with X-Frame-Options: DENY
+        // Only force HTTPS upgrade in production; local dev runs over plain HTTP
+        ...(app.get("env") === "production"
+          ? { upgradeInsecureRequests: [] }
+          : {}),
+      },
+    },
+    // X-Frame-Options: DENY — clickjacking protection
+    frameguard: { action: "deny" },
+    // X-Content-Type-Options: nosniff — MIME sniffing protection
+    noSniff: true,
+    // Strict-Transport-Security — force HTTPS in production
+    hsts: {
+      maxAge: 31536000, // 1 year
+      includeSubDomains: true,
+      preload: true,
+    },
+    // X-XSS-Protection: disabled in favour of CSP (modern browsers ignore it anyway)
+    xssFilter: false,
+    // Referrer-Policy
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    // Cross-Origin-Opener-Policy
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+  })
+);
 
 declare module 'http' {
   interface IncomingMessage {
