@@ -121,10 +121,11 @@ async function generateTtsAudio(text: string, previousText?: string, quality: 'f
     throw new Error('ElevenLabs API key not configured');
   }
 
-  // Check cache first (only for calls without context)
-  const textHash = crypto.createHash('md5').update(text).digest('hex');
+  // Cache key includes text + quality level to avoid cross-phase cache pollution
+  // (flash model audio should not be returned when quality model is requested and vice-versa)
+  const textHash = crypto.createHash('md5').update(`${quality}:${text}`).digest('hex');
   if (!previousText && ttsCache.has(textHash)) {
-    console.log('[TTS] Cache HIT:', textHash.substring(0, 8));
+    console.log('[TTS] Cache HIT:', textHash.substring(0, 8), `(${quality})`);
     return ttsCache.get(textHash)!;
   }
 
@@ -915,6 +916,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // MIN_SENTENCE_CHARS, or at stream completion if nothing was long enough.
       // ─────────────────────────────────────────────────────────────────────────
       const MIN_SENTENCE_CHARS = 80;
+      const MAX_PHASE1_SENTENCES = 2;  // Prevent Phase 1 from grouping too many short sentences
       let phase1Done = false;
       let phase1Text = "";                        // text sent in Phase 1 (used as previous_text for Phase 2)
       let phase1ShortBuffer: Array<{ text: string; index: number }> = []; // short sentences accumulating before Phase 1 fires
@@ -1001,14 +1003,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (!phase1Done) {
           // Buffer short sentences; fire Phase 1 as soon as combined length ≥ MIN_SENTENCE_CHARS
+          // OR the buffer reaches MAX_PHASE1_SENTENCES (to bound first-audio latency)
           phase1ShortBuffer.push({ text: trimmed, index });
           const combined = phase1ShortBuffer.map(s => s.text).join(' ');
 
-          if (combined.length >= MIN_SENTENCE_CHARS) {
+          if (combined.length >= MIN_SENTENCE_CHARS || phase1ShortBuffer.length >= MAX_PHASE1_SENTENCES) {
             dispatchPhase1Tts(phase1ShortBuffer);
             phase1ShortBuffer = [];
           }
-          // If still too short: keep buffering — will be flushed on thread.run.completed
+          // If still too short and under cap: keep buffering — will be flushed on thread.run.completed
         } else {
           // Phase 2: accumulate for a single bulk TTS call after LLM finishes
           if (phase2Buffer.length === 0) {
