@@ -91,5 +91,34 @@ app.use((req, res, next) => {
 
       log('[Connection Warming] OpenAI connection warming enabled (every 30s)');
     }
+
+    // PHASE 1 OPTIMIZATION: Connection warming for ElevenLabs API
+    // Keeps TCP+TLS connection alive to reduce first-audio latency by ~200-400ms
+    if (process.env.ELEVENLABS_API_KEY) {
+      const warmElevenLabsConnection = async () => {
+        try {
+          const response = await fetch('https://api.elevenlabs.io/v1/models', {
+            headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY! }
+          });
+          if (response.ok) {
+            await response.arrayBuffer(); // Consume body to free socket for reuse
+            log('[Connection Warming] ElevenLabs connection kept alive');
+          } else {
+            await response.arrayBuffer(); // Consume body even on non-OK to release socket
+          }
+        } catch (error) {
+          // Silent fail - don't spam logs if API is down
+          // Connection will be established on next real request anyway
+        }
+      };
+
+      // Initial warmup after 6 seconds (staggered from OpenAI warmup at 5s)
+      setTimeout(warmElevenLabsConnection, 6000);
+
+      // Then keep warm every 30 seconds
+      setInterval(warmElevenLabsConnection, 30000);
+
+      log('[Connection Warming] ElevenLabs connection warming enabled (every 30s)');
+    }
   });
 })();
