@@ -1,8 +1,8 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import OpenAI from "openai";
 import { elevenLabsFetch } from "./elevenlabs-agent";
+import { openAIFetch } from "./openai-agent";
 
 const app = express();
 
@@ -68,16 +68,20 @@ app.use((req, res, next) => {
     // PHASE 1 OPTIMIZATION: Connection warming for OpenAI API
     // Keep HTTP connections warm to reduce latency on first request
     if (process.env.OPENAI_API_KEY) {
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-        organization: 'org-z0AK8zYLTeapGaiDZFQ5co2N',
-      });
-
       // Warm the connection every 30 seconds with a lightweight API call
+      // Uses the shared undici Agent so TCP/TLS sockets are reused
       const warmConnection = async () => {
         try {
-          await openai.models.list();
-          log('[Connection Warming] OpenAI connection kept alive');
+          const response = await openAIFetch('https://api.openai.com/v1/models', {
+            headers: {
+              'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+              'OpenAI-Organization': 'org-z0AK8zYLTeapGaiDZFQ5co2N',
+            },
+          });
+          await response.arrayBuffer(); // Consume body to free socket for reuse
+          if (response.ok) {
+            log('[Connection Warming] OpenAI connection kept alive');
+          }
         } catch (error) {
           // Silent fail - don't spam logs if API is down
           // Connection will be established on next real request anyway
