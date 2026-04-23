@@ -349,6 +349,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       // Ajouter le message utilisateur
       setMessages(prev => [...prev, makeMessage('user', userMessage)]);
 
+      // Record the send time here so both pipelines can compute latency_ms
+      exchangeStartTimeRef.current = Date.now();
+
       // PHASE 2 OPTIMIZATION: Use streaming pipeline for better latency
       if (useStreaming.current) {
         console.log('[TutorialScreen] Using STREAMING pipeline');
@@ -387,8 +390,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     console.log('[TutorialScreen] Processing message with streaming, exchange:', currentExchange);
     let fullResponse = '';
 
-    // Reset PostHog latency tracking for this exchange
-    exchangeStartTimeRef.current = Date.now();
+    // Reset streaming-specific PostHog latency refs (exchangeStartTimeRef is set in processMessage)
     phase1ReadyTimeRef.current = 0;
     phase1ReportedRef.current = false;
 
@@ -606,6 +608,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       }
 
       console.log('[TutorialScreen] Starting audio playback...');
+      const now = Date.now();
+      const latencyMs = exchangeStartTimeRef.current > 0 ? now - exchangeStartTimeRef.current : undefined;
+      captureEvent('audio_playback_started', {
+        latency_ms: latencyMs,
+        pipeline: 'non-streaming',
+      });
       await playAudio(audioBlob);
       console.log('[TutorialScreen] Audio playback completed successfully');
     } catch (error) {
