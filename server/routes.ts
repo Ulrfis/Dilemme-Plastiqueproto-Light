@@ -31,9 +31,20 @@ const upload = multer({
 type RateEntry = { count: number; resetAt: number };
 function createRateLimiter(maxRequests: number, windowMs: number) {
   const buckets = new Map<string, RateEntry>();
+  let lastPurge = Date.now();
+
   return function rateLimiter(req: any, res: any, next: any) {
     const key = req.ip || req.headers["x-forwarded-for"] || "unknown";
     const now = Date.now();
+
+    // Purge expired entries every 5 minutes to prevent unbounded memory growth
+    if (now - lastPurge > 5 * 60 * 1000) {
+      for (const [k, v] of buckets) {
+        if (now > v.resetAt) buckets.delete(k);
+      }
+      lastPurge = now;
+    }
+
     const entry = buckets.get(key) || { count: 0, resetAt: now + windowMs };
 
     if (now > entry.resetAt) {
@@ -59,12 +70,9 @@ const ttsLimiter = createRateLimiter(60, 15 * 60 * 1000); // plus strict pour en
 const sttLimiter = createRateLimiter(60, 15 * 60 * 1000);
 
 function requireAdmin(req: any, res: any): boolean {
-  // En développement, on laisse passer pour faciliter le debug
-  if (process.env.NODE_ENV === 'development') return true;
-
   const adminToken = process.env.ADMIN_TOKEN;
   if (!adminToken) {
-    // Si aucun token défini, ne pas exposer l'endpoint
+    // No token configured: never expose the endpoint regardless of environment
     res.status(404).json({ error: 'Not found' });
     return false;
   }
@@ -462,10 +470,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/sessions/:id/feedback', async (req, res) => {
     try {
       const sessionId = req.params.id;
-      const partialFeedback = req.body;
-      
-      console.log('[API] Partial feedback update for session:', sessionId, 'data:', partialFeedback);
-      
+
+      const feedbackSchema = z.object({
+        scenarioComprehension: z.number().int().min(1).max(6).optional(),
+        scenarioObjectives: z.number().int().min(1).max(6).optional(),
+        scenarioClueLink: z.number().int().min(1).max(6).optional(),
+        gameplayExplanation: z.number().int().min(1).max(6).optional(),
+        gameplaySimplicity: z.number().int().min(1).max(6).optional(),
+        gameplayBotResponses: z.number().int().min(1).max(6).optional(),
+        gameplayVoiceChat: z.number().int().min(1).max(6).optional(),
+        feelingOriginality: z.number().int().min(1).max(6).optional(),
+        feelingPleasant: z.number().int().min(1).max(6).optional(),
+        feelingInteresting: z.number().int().min(1).max(6).optional(),
+        motivationContinue: z.number().int().min(1).max(6).optional(),
+        motivationGameplay: z.number().int().min(1).max(6).optional(),
+        motivationEcology: z.number().int().min(1).max(6).optional(),
+        interfaceVisualBeauty: z.number().int().min(1).max(6).optional(),
+        interfaceVisualClarity: z.number().int().min(1).max(6).optional(),
+        interfaceVoiceChat: z.number().int().min(1).max(6).optional(),
+        overallRating: z.number().int().min(1).max(6).optional(),
+        improvements: z.string().max(2000).optional(),
+        wantsUpdates: z.boolean().optional(),
+        updateEmail: z.string().email().max(254).optional().nullable(),
+        wouldRecommend: z.boolean().optional(),
+        wantsInSchool: z.boolean().optional(),
+        feedbackCompletedAt: z.string().optional(),
+      });
+
+      const partialFeedback = feedbackSchema.parse(req.body);
+
+      console.log('[API] Partial feedback update for session:', sessionId, '- fields:', Object.keys(partialFeedback).join(', '));
+
       const session = await storage.updatePartialFeedback(sessionId, partialFeedback);
       if (!session) {
         return res.status(404).json({ error: 'Session not found' });
@@ -473,6 +508,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, session });
     } catch (error) {
       console.error('Error updating partial feedback:', error);
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: 'Invalid feedback data', details: error.errors });
+      }
       res.status(500).json({ error: 'Server error' });
     }
   });
@@ -770,6 +808,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Missing sessionId or userMessage' });
       }
 
+      if (typeof userMessage !== 'string' || userMessage.length > 2000) {
+        return res.status(400).json({ error: 'userMessage must be a string of at most 2000 characters' });
+      }
+
       const session = await storage.getSession(sessionId);
       if (!session) {
         return res.status(404).json({ error: 'Session not found' });
@@ -778,7 +820,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[Chat Stream API] Session found:', { sessionId, foundClues: session.foundClues });
 
       const detectedClues = detectClues(userMessage, session.foundClues);
-      console.log('[Chat Stream API] Clue detection:', { detectedClues, userMessage });
+      console.log('[Chat Stream API] Clue detection:', { detectedClues, messageLength: userMessage.length });
 
       await storage.addMessage({
         sessionId,
@@ -1007,7 +1049,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('[Chat Stream API] Error:', error);
 
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isProd = process.env.NODE_ENV === 'production';
+      const errorMessage = isProd
+        ? 'Une erreur est survenue lors de la conversation'
+        : (error instanceof Error ? error.message : 'Unknown error');
       res.write(`data: ${JSON.stringify({
         type: 'error',
         message: errorMessage
@@ -1025,6 +1070,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Missing sessionId or userMessage' });
       }
 
+      if (typeof userMessage !== 'string' || userMessage.length > 2000) {
+        return res.status(400).json({ error: 'userMessage must be a string of at most 2000 characters' });
+      }
+
       const session = await storage.getSession(sessionId);
       if (!session) {
         return res.status(404).json({ error: 'Session not found' });
@@ -1033,7 +1082,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[Chat API] Session found:', { sessionId, foundClues: session.foundClues });
 
       const detectedClues = detectClues(userMessage, session.foundClues);
-      console.log('[Chat API] Clue detection:', { detectedClues, userMessage });
+      console.log('[Chat API] Clue detection:', { detectedClues, messageLength: userMessage.length });
 
       await storage.addMessage({
         sessionId,
@@ -1166,28 +1215,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
       });
     } catch (error) {
-      console.error('[Chat API] Error in chat:', error);
-      
-      const errorDetails = {
+      console.error('[Chat API] Error in chat:', {
         message: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
         name: error instanceof Error ? error.name : undefined,
         sessionId: req.body.sessionId,
-        assistantId: 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9',
-      };
-      
-      console.error('[Chat API] Full error details:', errorDetails);
-      
-      // Return detailed error to frontend
+      });
+
+      const isProd = process.env.NODE_ENV === 'production';
       res.status(500).json({
         error: 'Erreur lors de la conversation avec Peter',
-        details: error instanceof Error ? error.message : 'Unknown error',
-        technicalInfo: {
-          errorType: error instanceof Error ? error.name : 'UnknownError',
-          sessionId: req.body.sessionId,
-          assistantId: 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9',
-          timestamp: new Date().toISOString()
-        }
+        ...(isProd ? {} : {
+          details: error instanceof Error ? error.message : 'Unknown error',
+          technicalInfo: {
+            errorType: error instanceof Error ? error.name : 'UnknownError',
+            sessionId: req.body.sessionId,
+            timestamp: new Date().toISOString()
+          }
+        })
       });
     }
   });
