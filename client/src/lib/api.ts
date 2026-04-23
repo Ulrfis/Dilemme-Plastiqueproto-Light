@@ -143,9 +143,9 @@ export interface StreamChatCallbacks {
   onSentence?: (sentence: string, index: number) => void;
   // count: number of sentence indices covered by this audio token (default 1).
   // When count > 1, the client must skip indices (index+1)...(index+count-1) in the audio queue.
-  onSentenceAudio?: (index: number, audioToken: string, count: number) => void;
+  onSentenceAudio?: (index: number, audioToken: string, count: number, phase?: 'phase1' | 'phase2') => void;
   onSentenceAudioError?: (index: number) => void;
-  onComplete?: (fullResponse: string, foundClues: string[], detectedClue: string | null) => void;
+  onComplete?: (fullResponse: string, foundClues: string[], detectedClue: string | null, phase2Dispatched?: boolean) => void;
   onError?: (error: string) => void;
 }
 
@@ -204,11 +204,11 @@ export async function sendChatMessageStreaming(
           if (data.type === 'sentence' && callbacks.onSentence) {
             callbacks.onSentence(data.text, data.index);
           } else if (data.type === 'sentence_audio' && callbacks.onSentenceAudio) {
-            callbacks.onSentenceAudio(data.index, data.audioToken, data.count ?? 1);
+            callbacks.onSentenceAudio(data.index, data.audioToken, data.count ?? 1, data.phase);
           } else if (data.type === 'sentence_audio_error' && callbacks.onSentenceAudioError) {
             callbacks.onSentenceAudioError(data.index);
           } else if (data.type === 'complete' && callbacks.onComplete) {
-            callbacks.onComplete(data.fullResponse, data.foundClues, data.detectedClue);
+            callbacks.onComplete(data.fullResponse, data.foundClues, data.detectedClue, data.phase2Dispatched);
           } else if (data.type === 'error' && callbacks.onError) {
             callbacks.onError(data.message);
           }

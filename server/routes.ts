@@ -922,6 +922,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let phase1ShortBuffer: Array<{ text: string; index: number }> = []; // short sentences accumulating before Phase 1 fires
       let phase2Buffer: string[] = [];            // sentences queued for Phase 2 single call
       let phase2StartIndex = -1;                  // SSE index of the first Phase 2 sentence
+      let phase2Dispatched = false;               // true when Phase 2 TTS call has been dispatched
 
       const dispatchPhase1Tts = (sentences: Array<{ text: string; index: number }>) => {
         const combined = sentences.map(s => s.text).join(' ');
@@ -943,6 +944,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 index: startIndex,
                 audioToken,
                 count,  // client must skip indices startIndex+1 … startIndex+count-1
+                phase: 'phase1',
               })}\n\n`);
             }
           })
@@ -961,6 +963,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const dispatchPhase2Tts = (sentences: string[], startIndex: number) => {
         const combined = sentences.join(' ');
         const count = sentences.length;
+        phase2Dispatched = true;
 
         console.log(`[Chat Stream API] Phase 2 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
 
@@ -975,6 +978,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 index: startIndex,
                 audioToken,
                 count,  // client must skip indices startIndex+1 … startIndex+count-1
+                phase: 'phase2',
               })}\n\n`);
             }
           })
@@ -1125,6 +1129,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fullResponse,
         foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
         detectedClue: detectedClues.length > 0 ? detectedClues[0] : null,
+        phase2Dispatched,
       })}\n\n`);
 
       if (sentenceTtsPromises.length > 0) {

@@ -38,6 +38,7 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
   const nextExpectedIndexRef = useRef(1);
   const skippedIndicesRef = useRef<Set<number>>(new Set());
   const pausedRef = useRef(false);
+  const hasStartedPlaybackRef = useRef(false);
 
   const advancePastSkipped = useCallback(() => {
     while (skippedIndicesRef.current.has(nextExpectedIndexRef.current)) {
@@ -91,8 +92,9 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
     // Update the next expected index
     nextExpectedIndexRef.current = item.index + 1;
 
-    // Notify that playback is starting (for first item)
-    if (onPlaybackStart && item.index === 1) {
+    // Notify that playback is starting (for the first item played in this exchange)
+    if (onPlaybackStart && !hasStartedPlaybackRef.current) {
+      hasStartedPlaybackRef.current = true;
       onPlaybackStart();
     }
 
@@ -153,6 +155,7 @@ export function useAudioQueue(options: UseAudioQueueOptions): UseAudioQueueResul
     nextExpectedIndexRef.current = 1;
     skippedIndicesRef.current.clear();
     pausedRef.current = false;
+    hasStartedPlaybackRef.current = false;
 
     if (onQueueEmpty) {
       onQueueEmpty();

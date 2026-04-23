@@ -95,6 +95,11 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const hasPlayedWelcome = useRef(false);
   const streamGenerationRef = useRef(0);
 
+  // PostHog TTS latency tracking refs
+  const exchangeStartTimeRef = useRef<number>(0);
+  const phase1ReadyTimeRef = useRef<number>(0);
+  const phase1ReportedRef = useRef<boolean>(false);
+
   const { toast } = useToast();
 
   // MOBILE FIX: Ajouter un état local pour forcer le retour à idle en cas de blocage
@@ -136,6 +141,13 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     },
     onPlaybackStart: () => {
       console.log('[TutorialScreen] First sentence audio started playing');
+      const now = Date.now();
+      const latencyMs = exchangeStartTimeRef.current > 0 ? now - exchangeStartTimeRef.current : undefined;
+      const phase1ToPlaybackMs = phase1ReadyTimeRef.current > 0 ? now - phase1ReadyTimeRef.current : undefined;
+      captureEvent('audio_playback_started', {
+        latency_ms: latencyMs,
+        phase1_to_playback_ms: phase1ToPlaybackMs,
+      });
     },
   });
 
@@ -375,6 +387,11 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     console.log('[TutorialScreen] Processing message with streaming, exchange:', currentExchange);
     let fullResponse = '';
 
+    // Reset PostHog latency tracking for this exchange
+    exchangeStartTimeRef.current = Date.now();
+    phase1ReadyTimeRef.current = 0;
+    phase1ReportedRef.current = false;
+
     audioQueue.clear();
     audioQueue.pause();
     streamGenerationRef.current++;
@@ -397,9 +414,30 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           });
         },
 
-        onSentenceAudio: (index, audioToken, count) => {
+        onSentenceAudio: (index, audioToken, count, phase) => {
           if (streamGenerationRef.current !== currentGeneration) return;
-          console.log(`[TutorialScreen] Audio block ready: index=${index}, count=${count}, token=${audioToken}`);
+          console.log(`[TutorialScreen] Audio block ready: index=${index}, count=${count}, phase=${phase}, token=${audioToken}`);
+
+          const now = Date.now();
+          const latencyMs = exchangeStartTimeRef.current > 0 ? now - exchangeStartTimeRef.current : undefined;
+          if (phase === 'phase1' || (!phase && !phase1ReportedRef.current)) {
+            phase1ReportedRef.current = true;
+            phase1ReadyTimeRef.current = now;
+            captureEvent('tts_phase1_ready', {
+              latency_ms: latencyMs,
+              sentence_index: index,
+              sentence_count: count,
+            });
+          } else if (phase === 'phase2' || (!phase && phase1ReportedRef.current)) {
+            const phase1ToPhase2Ms = phase1ReadyTimeRef.current > 0 ? now - phase1ReadyTimeRef.current : undefined;
+            captureEvent('tts_phase2_ready', {
+              latency_ms: latencyMs,
+              phase1_to_phase2_ms: phase1ToPhase2Ms,
+              sentence_index: index,
+              sentence_count: count,
+              phase2_missing: false,
+            });
+          }
 
           // Pre-register all higher indices in this audio block as skipped.
           // The audio at `index` covers sentences index through index+count-1.
@@ -438,7 +476,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           audioQueue.skipIndex(index);
         },
 
-        onComplete: async (finalResponse, newFoundClues, detectedClue) => {
+        onComplete: async (finalResponse, newFoundClues, detectedClue, phase2Dispatched) => {
           console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length);
 
           if (!finalResponse || finalResponse.trim().length === 0) {
@@ -450,6 +488,21 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             });
             recoverFromError();
             return;
+          }
+
+          // Server explicitly confirms whether Phase 2 was dispatched.
+          // Only emit phase2_missing when the server confirms it will NOT arrive
+          // (short response handled entirely by Phase 1).
+          // Note: when phase2Dispatched===true but generation fails, the server sends
+          // sentence_audio_error events — those are tracked separately and this path
+          // doesn't trigger (Phase 2 audio arrives after `complete`, so the check here
+          // would be a race; instead we rely on server-side error events).
+          if (phase2Dispatched === false) {
+            const now = Date.now();
+            captureEvent('tts_phase2_ready', {
+              latency_ms: exchangeStartTimeRef.current > 0 ? now - exchangeStartTimeRef.current : undefined,
+              phase2_missing: true,
+            });
           }
 
           setMessages(prev => {
