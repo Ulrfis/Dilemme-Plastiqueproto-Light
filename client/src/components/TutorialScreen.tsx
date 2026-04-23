@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
-import tutorialImage from "@assets/BURDEN_OF_THE_THINKER_2_retrav_1776145190837.jpg";
+import tutorialImage from "@assets/image_1776947757912.png";
 import ConversationPanel from "./ConversationPanel";
 import SuccessFeedback from "./SuccessFeedback";
 import ZoomableImage from "./ZoomableImage";
@@ -756,8 +756,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
       {/* DESKTOP LAYOUT - two columns side by side (lg and above) */}
       <div className="hidden lg:flex h-full">
-        {/* LEFT COLUMN - Conversation scrollable (wider column ~35%) */}
-        <div className="w-[35%] flex flex-col border-r border-card-border flex-shrink-0">
+        {/* LEFT COLUMN - Conversation scrollable (narrower column) */}
+        <div className="w-[26%] xl:w-[24%] flex flex-col border-r border-card-border flex-shrink-0">
           <ConversationPanel
             messages={messages}
             userName={userName}
@@ -774,7 +774,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           />
         </div>
 
-        {/* RIGHT COLUMN - Image maximized with info bar on top (~65% width) */}
+        {/* RIGHT COLUMN - Image maximized with info bar on top */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Info bar above image - contains clue counter, found clues, and help */}
           <div className="flex-shrink-0 bg-card border-b border-card-border px-6 py-3 flex items-center justify-between gap-4">
@@ -840,7 +840,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           </div>
 
           {/* Image section - maximized to fill remaining space */}
-          <div className="flex-1 relative bg-white overflow-hidden">
+          <div className="flex-1 relative bg-background overflow-hidden">
             <ZoomableImage
               src={tutorialImage}
               alt="Image à analyser"
