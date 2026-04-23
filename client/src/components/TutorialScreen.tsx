@@ -147,6 +147,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       captureEvent('audio_playback_started', {
         latency_ms: latencyMs,
         phase1_to_playback_ms: phase1ToPlaybackMs,
+        pipeline: 'streaming',
       });
     },
   });
@@ -429,6 +430,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               latency_ms: latencyMs,
               sentence_index: index,
               sentence_count: count,
+              pipeline: 'streaming',
             });
           } else if (phase === 'phase2' || (!phase && phase1ReportedRef.current)) {
             const phase1ToPhase2Ms = phase1ReadyTimeRef.current > 0 ? now - phase1ReadyTimeRef.current : undefined;
@@ -438,6 +440,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               sentence_index: index,
               sentence_count: count,
               phase2_missing: false,
+              pipeline: 'streaming',
             });
           }
 
@@ -504,6 +507,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             captureEvent('tts_phase2_ready', {
               latency_ms: exchangeStartTimeRef.current > 0 ? now - exchangeStartTimeRef.current : undefined,
               phase2_missing: true,
+              pipeline: 'streaming',
             });
           }
 
