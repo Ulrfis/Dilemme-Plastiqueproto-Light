@@ -397,9 +397,17 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           });
         },
 
-        onSentenceAudio: (index, audioToken) => {
+        onSentenceAudio: (index, audioToken, count) => {
           if (streamGenerationRef.current !== currentGeneration) return;
-          console.log('[TutorialScreen] Sentence #' + index + ' audio ready, token:', audioToken);
+          console.log(`[TutorialScreen] Audio block ready: index=${index}, count=${count}, token=${audioToken}`);
+
+          // Pre-register all higher indices in this audio block as skipped.
+          // The audio at `index` covers sentences index through index+count-1.
+          // The AudioQueue expects sequential playback, so we skip the "inner" indices.
+          for (let i = index + 1; i < index + count; i++) {
+            audioQueue.skipIndex(i);
+          }
+
           fetch(`/api/tts/play/${audioToken}`)
             .then(audioResponse => {
               if (streamGenerationRef.current !== currentGeneration) return;
@@ -411,16 +419,16 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             .then(audioBlob => {
               if (streamGenerationRef.current !== currentGeneration) return;
               if (audioBlob && audioBlob.size >= 100) {
-                audioQueue.enqueue(audioBlob, `sentence-${index}`, index);
+                audioQueue.enqueue(audioBlob, `sentences-${index}-to-${index + count - 1}`, index);
               } else {
-                console.warn('[TutorialScreen] Sentence #' + index + ' audio too small, skipping');
-                audioQueue.skipIndex(index);
+                console.warn('[TutorialScreen] Audio block at index #' + index + ' too small, skipping all', count, 'indices');
+                for (let i = index; i < index + count; i++) audioQueue.skipIndex(i);
               }
             })
             .catch(fetchErr => {
               if (streamGenerationRef.current !== currentGeneration) return;
-              console.error('[TutorialScreen] Error fetching sentence #' + index + ' audio:', fetchErr);
-              audioQueue.skipIndex(index);
+              console.error('[TutorialScreen] Error fetching audio block at index #' + index + ':', fetchErr);
+              for (let i = index; i < index + count; i++) audioQueue.skipIndex(i);
             });
         },
 

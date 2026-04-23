@@ -111,7 +111,9 @@ setInterval(() => {
 
 // Helper: Generate TTS audio from ElevenLabs (returns Buffer)
 // previousText: text spoken before this segment, used by ElevenLabs to maintain prosody continuity
-async function generateTtsAudio(text: string, previousText?: string): Promise<Buffer> {
+// quality: 'fast' uses eleven_flash_v2_5 for lowest latency (Phase 1)
+//          'quality' uses eleven_multilingual_v2 for best prosody continuity (Phase 2)
+async function generateTtsAudio(text: string, previousText?: string, quality: 'fast' | 'quality' = 'quality'): Promise<Buffer> {
   const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
   const VOICE_ID = 'R8IjtpeRZsjoJfq1wwj3';
 
@@ -119,24 +121,29 @@ async function generateTtsAudio(text: string, previousText?: string): Promise<Bu
     throw new Error('ElevenLabs API key not configured');
   }
 
-  // Check cache first (only for full-text calls without context)
+  // Check cache first (only for calls without context)
   const textHash = crypto.createHash('md5').update(text).digest('hex');
   if (!previousText && ttsCache.has(textHash)) {
     console.log('[TTS] Cache HIT:', textHash.substring(0, 8));
     return ttsCache.get(textHash)!;
   }
 
-  console.log('[TTS] Generating audio for', text.length, 'chars', previousText ? `(with ${previousText.length} chars context)` : '', '...');
+  // Phase 1 (fast): eleven_flash_v2_5, max latency opt → ~300-500ms faster first audio
+  // Phase 2 (quality): eleven_multilingual_v2, lower latency opt → natural prosody for bulk of response
+  const modelId = quality === 'fast' ? 'eleven_flash_v2_5' : 'eleven_multilingual_v2';
+  const latencyOpt = quality === 'fast' ? 4 : 2;
+
+  console.log('[TTS]', quality.toUpperCase(), 'mode — generating', text.length, 'chars', previousText ? `(with ${previousText.length} chars context)` : '', `[${modelId}]`);
   const body: Record<string, unknown> = {
     text,
-    model_id: 'eleven_multilingual_v2',
+    model_id: modelId,
     voice_settings: {
       stability: 0.70,
       similarity_boost: 0.75,
-      style: 0.0,
+      style: 0.2,  // Slight expressivity for more natural delivery (was 0.0)
       use_speaker_boost: true
     },
-    optimize_streaming_latency: 3,
+    optimize_streaming_latency: latencyOpt,
   };
 
   if (previousText) {
@@ -895,54 +902,123 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let fullResponse = "";
       let currentSentence = "";
       let sentenceCount = 0;
-      let previousSentencesText = "";
       const sentenceTtsPromises: Promise<void>[] = [];
+
+      // ── 2-PHASE TTS STRATEGY ───────────────────────────────────────────────
+      // Phase 1 (FAST): first group of sentences sent to ElevenLabs immediately
+      //   using eleven_flash_v2_5 + optimize_streaming_latency:4 → first audio ~2-3s
+      // Phase 2 (QUALITY): remaining sentences sent as ONE single ElevenLabs call
+      //   using eleven_multilingual_v2 + previous_text=phase1 → natural prosody for 70-80% of response
+      //
+      // Short sentences (< MIN_SENTENCE_CHARS) are grouped with the next one to avoid
+      // unnatural micro-segments. Phase 1 fires as soon as the combined buffer reaches
+      // MIN_SENTENCE_CHARS, or at stream completion if nothing was long enough.
+      // ─────────────────────────────────────────────────────────────────────────
+      const MIN_SENTENCE_CHARS = 80;
+      let phase1Done = false;
+      let phase1Text = "";                        // text sent in Phase 1 (used as previous_text for Phase 2)
+      let phase1ShortBuffer: Array<{ text: string; index: number }> = []; // short sentences accumulating before Phase 1 fires
+      let phase2Buffer: string[] = [];            // sentences queued for Phase 2 single call
+      let phase2StartIndex = -1;                  // SSE index of the first Phase 2 sentence
+
+      const dispatchPhase1Tts = (sentences: Array<{ text: string; index: number }>) => {
+        const combined = sentences.map(s => s.text).join(' ');
+        const startIndex = sentences[0].index;
+        const count = sentences.length;
+        phase1Text = combined;
+        phase1Done = true;
+
+        console.log(`[Chat Stream API] Phase 1 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (fast model)`);
+
+        const ttsPromise = generateTtsAudio(combined, undefined, 'fast')
+          .then((audioBuffer) => {
+            const audioToken = crypto.randomUUID();
+            ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
+            console.log(`[Chat Stream API] Phase 1 TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({
+                type: 'sentence_audio',
+                index: startIndex,
+                audioToken,
+                count,  // client must skip indices startIndex+1 … startIndex+count-1
+              })}\n\n`);
+            }
+          })
+          .catch((ttsErr) => {
+            console.error('[Chat Stream API] Phase 1 TTS failed:', ttsErr);
+            if (!res.writableEnded) {
+              for (const s of sentences) {
+                res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: s.index })}\n\n`);
+              }
+            }
+          });
+
+        sentenceTtsPromises.push(ttsPromise);
+      };
+
+      const dispatchPhase2Tts = (sentences: string[], startIndex: number) => {
+        const combined = sentences.join(' ');
+        const count = sentences.length;
+
+        console.log(`[Chat Stream API] Phase 2 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
+
+        const ttsPromise = generateTtsAudio(combined, phase1Text || undefined, 'quality')
+          .then((audioBuffer) => {
+            const audioToken = crypto.randomUUID();
+            ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
+            console.log(`[Chat Stream API] Phase 2 TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({
+                type: 'sentence_audio',
+                index: startIndex,
+                audioToken,
+                count,  // client must skip indices startIndex+1 … startIndex+count-1
+              })}\n\n`);
+            }
+          })
+          .catch((ttsErr) => {
+            console.error('[Chat Stream API] Phase 2 TTS failed:', ttsErr);
+            if (!res.writableEnded) {
+              for (let i = startIndex; i < startIndex + count; i++) {
+                res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
+              }
+            }
+          });
+
+        sentenceTtsPromises.push(ttsPromise);
+      };
 
       const sendSentence = (sentence: string) => {
         const trimmed = sentence.trim();
-        if (trimmed.length > 0) {
-          sentenceCount++;
-          const index = sentenceCount;
-          console.log('[Chat Stream API] Sending sentence #' + index + ':', trimmed.substring(0, 50) + '...');
+        if (trimmed.length === 0) return;
 
-          res.write(`data: ${JSON.stringify({
-            type: 'sentence',
-            text: trimmed,
-            index
-          })}\n\n`);
+        sentenceCount++;
+        const index = sentenceCount;
+        console.log('[Chat Stream API] Sentence #' + index + ' (' + trimmed.length + ' chars):', trimmed.substring(0, 50) + (trimmed.length > 50 ? '...' : ''));
 
-          const contextText = previousSentencesText || undefined;
-          previousSentencesText += (previousSentencesText ? ' ' : '') + trimmed;
+        // Always emit the text SSE event immediately (client display + UI)
+        res.write(`data: ${JSON.stringify({ type: 'sentence', text: trimmed, index })}\n\n`);
 
-          const ttsPromise = generateTtsAudio(trimmed, contextText)
-            .then((audioBuffer) => {
-              const audioToken = crypto.randomUUID();
-              ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
-              console.log('[Chat Stream API] TTS ready for sentence #' + index + ', token:', audioToken);
-              if (!res.writableEnded) {
-                res.write(`data: ${JSON.stringify({
-                  type: 'sentence_audio',
-                  index,
-                  audioToken
-                })}\n\n`);
-              }
-            })
-            .catch((ttsErr) => {
-              console.error('[Chat Stream API] TTS failed for sentence #' + index + ':', ttsErr);
-              if (!res.writableEnded) {
-                res.write(`data: ${JSON.stringify({
-                  type: 'sentence_audio_error',
-                  index
-                })}\n\n`);
-              }
-            });
+        if (!phase1Done) {
+          // Buffer short sentences; fire Phase 1 as soon as combined length ≥ MIN_SENTENCE_CHARS
+          phase1ShortBuffer.push({ text: trimmed, index });
+          const combined = phase1ShortBuffer.map(s => s.text).join(' ');
 
-          sentenceTtsPromises.push(ttsPromise);
+          if (combined.length >= MIN_SENTENCE_CHARS) {
+            dispatchPhase1Tts(phase1ShortBuffer);
+            phase1ShortBuffer = [];
+          }
+          // If still too short: keep buffering — will be flushed on thread.run.completed
+        } else {
+          // Phase 2: accumulate for a single bulk TTS call after LLM finishes
+          if (phase2Buffer.length === 0) {
+            phase2StartIndex = index;
+          }
+          phase2Buffer.push(trimmed);
         }
       };
 
       for await (const event of stream) {
-        // Log tous les événements pour le débogage
         console.log('[Chat Stream API] Event received:', event.event);
 
         if (event.event === 'thread.message.delta') {
@@ -963,15 +1039,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (event.event === 'thread.run.completed') {
           console.log('[Chat Stream API] ✅ Run completed:', { responseLength: fullResponse.length });
 
-          // Annuler le timeout car le stream a réussi
           if (streamTimeout) {
             clearTimeout(streamTimeout);
             streamTimeout = null;
           }
 
-          // Send any remaining text as final sentence
+          // Flush any remaining text as a final sentence
           if (currentSentence.trim().length > 0) {
             sendSentence(currentSentence);
+            currentSentence = "";
+          }
+
+          // Flush Phase 1 buffer if it never reached the threshold (entire response was short)
+          if (!phase1Done && phase1ShortBuffer.length > 0) {
+            dispatchPhase1Tts(phase1ShortBuffer);
+            phase1ShortBuffer = [];
+          }
+
+          // Dispatch Phase 2 as a single quality TTS call
+          if (phase2Buffer.length > 0) {
+            dispatchPhase2Tts(phase2Buffer, phase2StartIndex);
           }
         }
 
@@ -980,7 +1067,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             event.event === 'thread.run.expired') {
           console.error('[Chat Stream API] ❌ Assistant run failed:', event.event);
 
-          // Annuler le timeout
           if (streamTimeout) {
             clearTimeout(streamTimeout);
             streamTimeout = null;
