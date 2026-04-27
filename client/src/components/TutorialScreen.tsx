@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
-import tutorialImage from "@assets/image_1776947757912.png";
+import tutorialImage from "@assets/BURDEN_OF_THE_THINKER_2_retrav_1776145190837.jpg";
 import ConversationPanel from "./ConversationPanel";
 import SuccessFeedback from "./SuccessFeedback";
 import ZoomableImage from "./ZoomableImage";
