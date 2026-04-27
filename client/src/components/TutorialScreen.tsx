@@ -147,7 +147,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       captureEvent('audio_playback_started', {
         latency_ms: latencyMs,
         phase1_to_playback_ms: phase1ToPlaybackMs,
-        pipeline: 'streaming',
       });
     },
   });
@@ -350,9 +349,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       // Ajouter le message utilisateur
       setMessages(prev => [...prev, makeMessage('user', userMessage)]);
 
-      // Record the send time here so both pipelines can compute latency_ms
-      exchangeStartTimeRef.current = Date.now();
-
       // PHASE 2 OPTIMIZATION: Use streaming pipeline for better latency
       if (useStreaming.current) {
         console.log('[TutorialScreen] Using STREAMING pipeline');
@@ -391,7 +387,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     console.log('[TutorialScreen] Processing message with streaming, exchange:', currentExchange);
     let fullResponse = '';
 
-    // Reset streaming-specific PostHog latency refs (exchangeStartTimeRef is set in processMessage)
+    // Reset PostHog latency tracking for this exchange
+    exchangeStartTimeRef.current = Date.now();
     phase1ReadyTimeRef.current = 0;
     phase1ReportedRef.current = false;
 
@@ -430,7 +427,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               latency_ms: latencyMs,
               sentence_index: index,
               sentence_count: count,
-              pipeline: 'streaming',
             });
           } else if (phase === 'phase2' || (!phase && phase1ReportedRef.current)) {
             const phase1ToPhase2Ms = phase1ReadyTimeRef.current > 0 ? now - phase1ReadyTimeRef.current : undefined;
@@ -440,7 +436,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               sentence_index: index,
               sentence_count: count,
               phase2_missing: false,
-              pipeline: 'streaming',
             });
           }
 
@@ -507,7 +502,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             captureEvent('tts_phase2_ready', {
               latency_ms: exchangeStartTimeRef.current > 0 ? now - exchangeStartTimeRef.current : undefined,
               phase2_missing: true,
-              pipeline: 'streaming',
             });
           }
 
@@ -612,12 +606,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       }
 
       console.log('[TutorialScreen] Starting audio playback...');
-      const now = Date.now();
-      const latencyMs = exchangeStartTimeRef.current > 0 ? now - exchangeStartTimeRef.current : undefined;
-      captureEvent('audio_playback_started', {
-        latency_ms: latencyMs,
-        pipeline: 'non-streaming',
-      });
       await playAudio(audioBlob);
       console.log('[TutorialScreen] Audio playback completed successfully');
     } catch (error) {
