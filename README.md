@@ -14,9 +14,21 @@
 
 ## 🆕 Version Actuelle (v2.0.0 - May 2)
 
+### 🧠 Peter suit les indices à chaque échange
+
+- **Mémoire continue** : Peter reçoit désormais à chaque échange un bloc de contexte mis à jour (`[Suivi des indices: N/6 trouvés — manquants: X, Y]`). Il ne peut plus redemander un indice déjà trouvé.
+- **Instructions adaptatives** : quand il ne reste qu'un seul indice, Peter guide explicitement vers lui. Quand les 6 sont trouvés, il félicite et invite à cliquer sur « Poursuivre » — sans attendre le 8e échange.
+- **Fin automatique à 6/6** : la conversation se ferme côté client dès que tous les indices sont détectés, le bouton « Poursuivre » s'illumine en vert.
+
+### 💭 Bulle "Peter réfléchit" pendant la génération
+
+- **Zéro silence visuel** : une bulle Peter apparaît immédiatement dès l'envoi du message, avant même le premier mot de la vraie réponse — inspiré du pattern Claude d'Anthropic.
+- **12 phrases rotatives** toutes les 2,8 s : mix de génériques ("Peter réfléchit") et d'allusions au plastique ("Peter trie les microplastiques", "Peter cherche au fond du sac plastique"…). 3 points animés en séquence, avatar qui rebondit.
+- **Disparaît proprement** dès la première phrase de la vraie réponse (ou en cas d'erreur). State machine robuste, generation-scoped pour éviter les races entre streams.
+
 ### 🎤 Transcription Live Deepgram pendant l'enregistrement
 
-- **Texte en temps réel** : pendant que l'utilisateur parle, la transcription s'affiche immédiatement dans la zone de saisie avec un curseur clignotant — Deepgram nova-2 FR avec résultats intermédiaires toutes les ~250ms.
+- **Texte en temps réel** : pendant que l'utilisateur parle, la transcription s'affiche immédiatement dans la zone de saisie avec un curseur clignotant — Deepgram nova-2 FR avec résultats intermédiaires toutes les ~250 ms.
 - **Whisper reste la source de vérité** : à la fin de l'enregistrement, Whisper effectue une passe de correction sur l'audio complet et c'est son texte qui est envoyé à Peter. Deepgram est purement du feedback visuel.
 - **Architecture sécurisée** : le relais WebSocket serveur (`/ws/deepgram`) exige un token de session valide avant toute connexion, limite les connexions concurrentes par IP, et plafonne la mémoire utilisée si Deepgram est lent.
 

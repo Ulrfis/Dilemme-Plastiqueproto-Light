@@ -8,6 +8,18 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ## [2.0.0] - 2026-05-02
 
+### Corrigé — Peter suit les indices à chaque échange et propose "Poursuivre" à 6/6
+
+- **Mémoire continue des indices** : avant, le contexte des indices trouvés n'était injecté que dans le *premier* message du thread OpenAI. Désormais, chaque message envoyé à Peter contient un bloc `[Suivi des indices: N/6 trouvés (X, Y) — manquants: A, B, C]` mis à jour en temps réel. Peter ne peut plus redemander un indice déjà trouvé lors d'un échange précédent.
+- **Instructions adaptatives selon l'état des indices** :
+  - 0 manquant (tous trouvés avant ou pendant cet échange) → Peter félicite par le prénom, récapitule les 6 indices, invite à cliquer sur « Poursuivre ».
+  - 1 manquant → Peter guide vers cet indice précis ; s'il le valide dans sa réponse, il invite immédiatement à « Poursuivre ».
+  - 7e échange → rappel de l'avant-dernier tour avec liste des manquants.
+  - 8e échange → récap complet trouvés/manquants + invitation « Poursuivre ».
+- **Fin de conversation dès 6/6** : côté client, lorsque `newFoundClues.length >= TOTAL_CLUES` dans le callback `onComplete` (streaming) ou après réception de la réponse (non-streaming), `conversationEnded` passe à `true` — le bouton « Poursuivre » (déjà vert et clignotant à 6/6) devient la seule action disponible.
+- **Fix migration legacy sessions** : `SessionFlowContext` détecte au démarrage les sessions avec `sessionId` mais sans `accessToken` (créées avant l'introduction de l'auth par token) et les reset proprement pour éviter des 403 en cours de session.
+- Fichiers : `server/routes.ts` (routes `/api/chat/stream` et `/api/chat`), `client/src/components/TutorialScreen.tsx`, `client/src/contexts/SessionFlowContext.tsx`.
+
 ### Ajouté — Bulle "Peter réfléchit" pendant la génération (réduction latence perçue)
 
 - Dès l'envoi d'un message utilisateur, une bulle Peter "vivante" apparaît immédiatement dans la conversation, avant l'arrivée du premier mot de la vraie réponse — inspiré du pattern Claude d'Anthropic.

@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-05-02  
+> **Last Updated**: 2026-05-02 (suivi indices + fin auto à 6/6)  
 
 ---
 
@@ -641,6 +641,55 @@ LLM stream → Phrase 1 → UI ✏️
 **Friction**: Compromis latence vs continuité — l'audio commence ~1-2s plus tard qu'avant, mais sans aucune coupure ni changement de registre.
 
 **Time**: ~30 minutes
+
+---
+
+### [2026-05-02] — Suivi continu des indices + fin de conversation à 6/6 🔷
+
+**Intent**: Peter "oubliait" les indices déjà trouvés lors des échanges suivants, car le contexte n'était injecté qu'au premier message du thread. Il fallait aussi terminer automatiquement la conversation dès que tous les 6 indices étaient trouvés, sans attendre le 8e échange.
+
+**Prompt(s)**:
+```
+Il faut que Peter prenne en compte à tous les tours de conversations les indices trouvés.
+il faut garder en mémoire les indices, et ne pas redemander les indices trouvés, et
+seulement se concentrer sur les indices manquants.
+Une fois que tous les 6 indices ont été trouvés, il faut proposer à l'utilisateur de
+cliquer sur le bouton "Poursuivre" pour continuer l'expérience.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Serveur (`/api/chat/stream` et `/api/chat`) : à chaque échange, un bloc de contexte est désormais injecté dans **chaque** message OpenAI (pas seulement le premier) :
+  `[Suivi des indices: N/6 trouvés (X, Y) — manquants: A, B, C]`
+  Calculé à partir de `session.foundClues` (DB) + `detectedClues` (message courant), dédupliqué.
+- Instructions adaptatives en cascade :
+  - `missingClues.length === 0` → félicitations + récap + "Poursuivre"
+  - `missingClues.length === 1` → guide vers le dernier indice + "Poursuivre" si validé dans cette réponse
+  - `exchangeCount === 7` → avant-dernier échange avec liste des manquants
+  - `exchangeCount >= 8` → récap complet + "Poursuivre"
+- Client (`TutorialScreen.tsx`) : `setConversationEnded(true)` déclenché dès `newFoundClues.length >= TOTAL_CLUES` dans `onComplete` (streaming) et dans `processMessageNonStreaming`.
+- Bonus : migration legacy dans `SessionFlowContext` — reset automatique des sessions sans `accessToken` pour éviter les 403 silencieux.
+
+**Architecture**:
+```
+Avant:
+Tour 1 → "[Indices trouvés: aucun] + message"  ← contexte injecté
+Tour 2 → "message" seulement                   ← Peter oublie
+Tour N → "message" seulement                   ← Peter peut redemander ADN
+
+Après:
+Tour 1 → "[Suivi 0/6 — manquants: ADN, Plastique, ...] + message"
+Tour 2 → "[Suivi 1/6 (ADN) — manquants: Plastique, ...] + message"
+Tour N → "[Suivi 5/6 (ADN,Plastique,...) — manquants: Femme]
+          [INSTRUCTION: guide vers Femme, Poursuivre si validé] + message"
+```
+
+**Surprise**: Le calcul `allFoundSoFar` combine `session.foundClues` (DB) + `detectedClues` (message courant) **avant** d'envoyer à OpenAI — ce qui couvre le cas où l'utilisateur mentionne un indice dans son message et que le serveur le détecte immédiatement, sans attendre la réponse de Peter.
+
+**Friction**: Le spread `[...new Set([...])]` ne compile pas avec la config TS du projet (`--downlevelIteration` absent). Solution : `.filter((v, i) => arr.indexOf(v) === i)` pour dédupliquer sans Set spread.
+
+**Time**: ~20 minutes
 
 ---
 
