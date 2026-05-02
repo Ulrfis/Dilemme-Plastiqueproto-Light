@@ -644,6 +644,53 @@ LLM stream → Phrase 1 → UI ✏️
 
 ---
 
+### [2026-05-02] — Bulle "Peter réfléchit" inspirée Claude (latence subjective) 🔷
+
+**Intent**: Réduire l'impression de latence pendant la génération de la réponse de Peter en affichant immédiatement une bulle de réponse "vivante" (animations + phrases rotatives, dont des allusions au plastique), visuellement distincte de la vraie réponse pour éviter qu'elles se parasitent. S'inspirer de Claude d'Anthropic.
+
+**Prompt(s)**:
+```
+Durant le moment où la réponse de Peter est générée, il faut tout de suite ajouter
+une bulle de réponse de Peter, avec une indication "vivante" (animations diverses ?)
+qui fait des variations de "Peter pense", "Peter réfléchit" etc, dans le format,
+le style du projet, tout en y ajoutant de temps en temps de allusions au thème du
+plastique. […] Réduire subjectivement l'impression de latence et d'attente.
+S'inspirer de la manière que fonctionne Claude d'Anthropic.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Nouveau composant `ThinkingBubble` dans `ConversationPanel.tsx` : bulle visuellement distincte des vraies réponses (fond `bg-card/40`, bordure dashed, italique muted, avatar avec `bounce-subtle`, 3 points animés en séquence).
+- 12 phrases rotatives toutes les 2.8s, mélangées au mount, alternant générique + allusions plastique : "Peter réfléchit", "Peter observe l'image", "Peter cherche au fond du sac plastique", "Peter trie les microplastiques", "Peter remonte la chaîne du plastique", "Peter écoute ce que disent les déchets", etc. Transition fluide `thinking-fade` (0.35s) à chaque changement de phrase via `key={phrase}`.
+- État `isThinking` + ref `firstSentenceReceivedRef` dans `TutorialScreen.tsx` : activation dès l'envoi du message user, désactivation au premier `onSentence` (streaming) ou avant `setMessages` (non-streaming).
+- Suite revue architect : garde-fous ajoutés sur `onComplete` (cas stream complète sans phrase) et `onError`, tous generation-scoped (`streamGenerationRef.current === currentGeneration`) pour éviter qu'un callback en retard d'un ancien stream ne touche l'état du nouveau.
+- Accessibilité : `role="status" aria-live="polite" aria-label="{phrase}…"`, support `prefers-reduced-motion` via `motion-reduce:animate-none` sur toutes les animations (avatar bounce, dots, fade).
+- Nouvelles keyframes Tailwind `thinking-dot` (1.2s ease-in-out infinite) et `thinking-fade` (0.35s ease-out).
+
+**Architecture**:
+```
+Avant:
+User envoie → setMessages(user) → API call (3-10s silence visuel) → setMessages(assistant)
+
+Après:
+User envoie → setMessages(user) + setIsThinking(true)
+            ↓
+        ThinkingBubble (bulle distincte, phrases rotatives, dots animés)
+            ↓
+Stream onSentence #1 → setIsThinking(false) + setMessages(assistant streaming)
+            ↓
+Stream onComplete → setIsThinking(false) [garde-fou] + setMessages(final)
+```
+
+**Surprise**: Le pattern `key={phrase}` sur le `<span>` permet à React de remonter le node à chaque changement de phrase, ce qui réinitialise automatiquement l'animation `thinking-fade` sans avoir besoin de gestion de state additionnelle.
+
+**Friction**: Le shuffle initial des phrases doit être fait dans un `useMemo` (et non un `useState`) pour rester stable mais sans warnings React, et la première phrase ("Peter réfléchit") est gardée en position 0 pour assurer un démarrage cohérent.
+
+**Time**: ~30 minutes (composant + state machine + revue architect + corrections accessibilité/race conditions)
+
+---
+
 ### [2026-05-02] — Deepgram Live Transcription + Waveform Amplification 🔷
 
 **Intent**: Rendre visible que le micro capte bien quelque chose pendant l'enregistrement (waveform trop discrète), et afficher la transcription en temps réel dans la zone de saisie pendant que l'utilisateur parle — pour réduire la perception d'attente et rassurer sur la captation.

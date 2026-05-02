@@ -95,6 +95,11 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const hasPlayedWelcome = useRef(false);
   const streamGenerationRef = useRef(0);
 
+  // Bulle "Peter réfléchit" : visible dès l'envoi du message utilisateur,
+  // masquée dès la première phrase de la vraie réponse (ou onError/onComplete fallback)
+  const [isThinking, setIsThinking] = useState(false);
+  const firstSentenceReceivedRef = useRef(false);
+
   // PostHog TTS latency tracking refs
   const exchangeStartTimeRef = useRef<number>(0);
   const phase1ReadyTimeRef = useRef<number>(0);
@@ -397,6 +402,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       // Ajouter le message utilisateur
       setMessages(prev => [...prev, makeMessage('user', userMessage)]);
 
+      // Activer la bulle "Peter réfléchit" pendant la génération de la réponse
+      firstSentenceReceivedRef.current = false;
+      setIsThinking(true);
+
       // PHASE 2 OPTIMIZATION: Use streaming pipeline for better latency
       if (useStreaming.current) {
         console.log('[TutorialScreen] Using STREAMING pipeline');
@@ -406,6 +415,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         await processMessageNonStreaming(userMessage);
       }
     } catch (error) {
+      setIsThinking(false);
       console.error('Error processing message:', error);
 
       // Extract detailed error information
@@ -451,6 +461,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           if (streamGenerationRef.current !== currentGeneration) return;
           console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...');
           fullResponse += sentence + ' ';
+
+          // Première phrase reçue : masquer la bulle "Peter réfléchit"
+          if (!firstSentenceReceivedRef.current) {
+            firstSentenceReceivedRef.current = true;
+            setIsThinking(false);
+          }
 
           setMessages(prev => {
             const lastMessage = prev[prev.length - 1];
@@ -527,7 +543,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         },
 
         onComplete: async (finalResponse, newFoundClues, detectedClue, phase2Dispatched) => {
+          if (streamGenerationRef.current !== currentGeneration) return;
           console.log('[TutorialScreen] Stream complete, final response length:', finalResponse.length);
+
+          // Garde-fou : si le stream complète sans aucun event onSentence, la bulle
+          // "Peter réfléchit" doit être retirée ici (sinon elle resterait à jamais).
+          setIsThinking(false);
 
           if (!finalResponse || finalResponse.trim().length === 0) {
             console.error('[TutorialScreen] Empty response received from Peter');
@@ -592,6 +613,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         },
 
         onError: (error) => {
+          if (streamGenerationRef.current !== currentGeneration) return;
+          setIsThinking(false);
           console.error('[TutorialScreen] Stream error:', error);
           captureEvent('tts_stream_error', { pipeline: 'streaming' });
           audioQueue.clear();
@@ -644,6 +667,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     // Afficher le message IMMEDIATEMENT
     console.log('[TutorialScreen] Adding assistant message immediately');
+    setIsThinking(false);
     setMessages(prev => [...prev, makeMessage('assistant', result.response)]);
 
     // Generate TTS and play
@@ -804,6 +828,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             maxExchanges={MAX_EXCHANGES}
             audioLevel={audioLevel}
             liveTranscript={liveTranscript}
+            isThinking={isThinking}
           />
         </div>
       </div>
@@ -827,6 +852,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             exchangeCount={exchangeCount}
             maxExchanges={MAX_EXCHANGES}
             audioLevel={audioLevel}
+            isThinking={isThinking}
           />
         </div>
 

@@ -8,6 +8,15 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ## [2.0.0] - 2026-05-02
 
+### Ajouté — Bulle "Peter réfléchit" pendant la génération (réduction latence perçue)
+
+- Dès l'envoi d'un message utilisateur, une bulle Peter "vivante" apparaît immédiatement dans la conversation, avant l'arrivée du premier mot de la vraie réponse — inspiré du pattern Claude d'Anthropic.
+- Visuellement distincte des vraies réponses : fond semi-transparent (`bg-card/40`), bordure dashed, texte italique muted, avatar avec animation `bounce-subtle`, 3 points qui rebondissent en séquence (`animate-thinking-dot` avec délais 0/150/300ms).
+- Phrases rotatives toutes les 2.8s (12 phrases mélangées : "Peter réfléchit", "Peter observe l'image", "Peter cherche au fond du sac plastique", "Peter trie les microplastiques", "Peter remonte la chaîne du plastique", etc.) avec transition `thinking-fade` entre chaque phrase.
+- Disparaît dès que la première phrase de la vraie réponse arrive (streaming) ou dès l'arrivée de la réponse complète (non-streaming). Garde-fous sur tous les chemins terminaux : `onSentence` (premier appel), `onComplete`, `onError`, `catch` global, tous generation-scoped pour éviter les races avec d'anciens streams.
+- Accessibilité : `role="status" aria-live="polite"`, support `prefers-reduced-motion` (`motion-reduce:animate-none` sur toutes les animations).
+- Fichiers : `client/src/components/ConversationPanel.tsx` (nouveau composant `ThinkingBubble`), `client/src/components/TutorialScreen.tsx` (état `isThinking` + ref `firstSentenceReceivedRef`), `tailwind.config.ts` (keyframes `thinking-dot` et `thinking-fade`).
+
 ### Ajouté — Transcription Live Deepgram pendant l'enregistrement
 
 - **Relais WebSocket serveur** (`server/deepgramRelay.ts`) : un `WebSocketServer({noServer:true})` est attaché au `http.Server` via l'événement `upgrade` sur le chemin `/ws/deepgram`. Pour chaque client il ouvre une connexion upstream vers `wss://api.deepgram.com/v1/listen` (nova-2, fr, `interim_results`, `smart_format`, `endpointing 300ms`). Les chunks audio binaires du client sont transférés vers Deepgram ; les messages `Results` JSON de Deepgram sont parsés et renvoyés au client sous la forme `{type:'transcript', transcript, isFinal}`.

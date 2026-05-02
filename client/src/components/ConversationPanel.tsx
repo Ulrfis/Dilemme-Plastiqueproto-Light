@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo } from "react";
 import { Mic, Square, Send, Loader2, Keyboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,90 @@ interface ConversationPanelProps {
   maxExchanges: number;
   audioLevel?: number;
   liveTranscript?: string;
+  isThinking?: boolean;
+}
+
+const THINKING_PHRASES = [
+  "Peter réfléchit",
+  "Peter observe l'image",
+  "Peter analyse les indices",
+  "Peter scrute les détails",
+  "Peter pèse ses mots",
+  "Peter cherche au fond du sac plastique",
+  "Peter trie les microplastiques",
+  "Peter remonte la chaîne du plastique",
+  "Peter écoute ce que disent les déchets",
+  "Peter compare les pièces du puzzle",
+  "Peter regarde sous l'emballage",
+  "Peter relie les indices",
+];
+
+function ThinkingBubble() {
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const orderedPhrases = useMemo(() => {
+    const rest = THINKING_PHRASES.slice(1);
+    for (let i = rest.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+    return [THINKING_PHRASES[0], ...rest];
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setPhraseIndex(prev => (prev + 1) % orderedPhrases.length);
+    }, 2800);
+    return () => clearInterval(interval);
+  }, [orderedPhrases.length]);
+
+  const phrase = orderedPhrases[phraseIndex];
+
+  return (
+    <div
+      className="flex justify-start animate-slide-up motion-reduce:animate-none"
+      role="status"
+      aria-live="polite"
+      aria-label={`${phrase}…`}
+      data-testid="bubble-peter-thinking"
+    >
+      <div className="flex gap-1.5 sm:gap-2 max-w-[85%] sm:max-w-[80%]">
+        <img
+          src={peterImage}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex-shrink-0 animate-bounce-subtle motion-reduce:animate-none"
+        />
+        <div
+          className="bg-card/40 backdrop-blur-sm rounded-2xl rounded-tl-none px-3 sm:px-4 py-2 sm:py-3 border border-dashed border-card-border min-h-[48px] flex items-center"
+        >
+          <p className="text-xs sm:text-sm italic text-muted-foreground text-left flex items-center gap-1">
+            <span
+              key={phrase}
+              className="animate-thinking-fade motion-reduce:animate-none inline-block"
+              data-testid="text-thinking-phrase"
+            >
+              {phrase}
+            </span>
+            <span className="inline-flex items-end gap-0.5 ml-0.5" aria-hidden="true">
+              <span
+                className="w-1 h-1 rounded-full bg-muted-foreground/70 animate-thinking-dot motion-reduce:animate-none"
+                style={{ animationDelay: '0ms' }}
+              />
+              <span
+                className="w-1 h-1 rounded-full bg-muted-foreground/70 animate-thinking-dot motion-reduce:animate-none"
+                style={{ animationDelay: '150ms' }}
+              />
+              <span
+                className="w-1 h-1 rounded-full bg-muted-foreground/70 animate-thinking-dot motion-reduce:animate-none"
+                style={{ animationDelay: '300ms' }}
+              />
+            </span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function ConversationPanel({
@@ -44,6 +128,7 @@ export default function ConversationPanel({
   maxExchanges,
   audioLevel = 0,
   liveTranscript = '',
+  isThinking = false,
 }: ConversationPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +141,7 @@ export default function ConversationPanel({
     if (messagesEndRef.current && isNearBottom) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isNearBottom]);
+  }, [messages, isThinking, isNearBottom]);
 
   // Suivre la position de scroll pour éviter les sauts si l'utilisateur consulte l'historique
   useEffect(() => {
@@ -129,6 +214,7 @@ export default function ConversationPanel({
             </div>
           );
         })}
+        {isThinking && <ThinkingBubble />}
         <div ref={messagesEndRef} />
       </div>
 

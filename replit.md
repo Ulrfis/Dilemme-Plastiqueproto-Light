@@ -145,6 +145,13 @@ Preferred communication style: Simple, everyday language.
 6. Client fetches `/api/tts/play/{audioToken}` for each sentence (blocks until TTS ready)
 7. Audio blobs enqueued in `useAudioQueue`, played sequentially starting from sentence #1
 
+**"Peter is Thinking" Bubble (perceived latency reduction, Claude-inspired)**:
+- Component: `ThinkingBubble` in `ConversationPanel.tsx` — visually distinct ephemeral bubble (italic, dashed border, `bg-card/40`, 3 animated dots staggered 0/150/300ms, avatar with `animate-bounce-subtle`)
+- 12 rotating phrases shuffled at mount, switching every 2.8s via `key={phrase}` to retrigger `animate-thinking-fade`. Mix of generic ("Peter réfléchit", "Peter analyse les indices") and plastic-themed ("Peter cherche au fond du sac plastique", "Peter trie les microplastiques", "Peter remonte la chaîne du plastique")
+- State: `isThinking` in `TutorialScreen` activated on user message send, cleared on first streaming `onSentence` (via `firstSentenceReceivedRef` guard) or `onComplete`/`onError`/global `catch`. All terminal callbacks generation-scoped (`streamGenerationRef.current === currentGeneration`) to prevent stale stream callbacks from desynchronizing the bubble state
+- Accessibility: `role="status" aria-live="polite" aria-label="{currentPhrase}…"`, `motion-reduce:animate-none` on all animations
+- Tailwind: new keyframes `thinking-dot` (1.2s) and `thinking-fade` (0.35s) in `tailwind.config.ts`
+
 **Fallback Mechanisms**:
 - Text input mode if microphone permissions denied
 - Non-streaming endpoints available if SSE fails
