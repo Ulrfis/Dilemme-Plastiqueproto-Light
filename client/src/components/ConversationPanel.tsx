@@ -3,7 +3,7 @@ import { Mic, Square, Send, Loader2, Keyboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import peterImage from "@assets/Peter Avatar_1763217836125.jpg";
+import peterImage from "@assets/Peter_Avatar_white_1777753861103.jpeg";
 import type { AudioState } from "@/hooks/useVoiceInteraction";
 
 interface Message {
