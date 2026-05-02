@@ -605,9 +605,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           audioQueue.resume();
           
           const maxExchangesReached = currentExchange >= MAX_EXCHANGES;
+          const allCluesNowFound = newFoundClues.length >= TOTAL_CLUES;
 
-          if (maxExchangesReached) {
-            console.log('[TutorialScreen] Conversation ending: max exchanges reached', { currentExchange, foundClues: newFoundClues.length });
+          if (maxExchangesReached || allCluesNowFound) {
+            console.log('[TutorialScreen] Conversation ending:', { maxExchangesReached, allCluesNowFound, exchange: currentExchange, clues: newFoundClues.length });
             setConversationEnded(true);
           }
         },
@@ -669,6 +670,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     console.log('[TutorialScreen] Adding assistant message immediately');
     setIsThinking(false);
     setMessages(prev => [...prev, makeMessage('assistant', result.response)]);
+
+    // Fin de conversation si tous les indices trouvés
+    if (result.foundClues.length >= TOTAL_CLUES) {
+      console.log('[TutorialScreen] All clues found — ending conversation');
+      setConversationEnded(true);
+    }
 
     // Generate TTS and play
     try {

@@ -889,15 +889,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('[Chat Stream API] Using OpenAI Assistant:', ASSISTANT_ID);
 
-      // Build exchange-specific instructions for final exchanges
+      const userNameToUse = userName || 'mon ami';
+
+      // Compute the current clue state (already found + newly detected from user message)
+      const allTargetKeywords = TARGET_CLUES.map(c => c.keyword);
+      const combined1 = [...session.foundClues, ...detectedClues];
+      const allFoundSoFar = combined1.filter((v, i) => combined1.indexOf(v) === i);
+      const missingClues = allTargetKeywords.filter(k => !allFoundSoFar.includes(k));
+
+      // Clue tracking context — injected on EVERY message so Peter always knows the state
+      const cluesContext = `[Suivi des indices: ${allFoundSoFar.length}/6 trouvés${allFoundSoFar.length > 0 ? ` (${allFoundSoFar.join(', ')})` : ''} — manquants: ${missingClues.length > 0 ? missingClues.join(', ') : 'aucun, tous trouvés !'}]`;
+
+      // Build exchange-specific instructions
       let exchangeInstructions = '';
-      if (exchangeCount === 7) {
-        // 7th exchange: Peter must insist there's one more chance
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange (7/8). Tu dois absolument mentionner qu'il reste encore UN échange possible pour trouver les derniers indices. N'ouvre pas la conversation, mais encourage l'utilisateur à faire un dernier effort. Ne dis pas au revoir maintenant.]`;
+      if (missingClues.length === 0) {
+        // All 6 clues already found — Peter must celebrate and prompt Poursuivre
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les 6 indices ont déjà été trouvés ! Félicite chaleureusement ${userNameToUse} pour avoir trouvé les 6 indices, fais un bref récapitulatif de la liste complète, et invite-le à cliquer sur le bouton "Poursuivre" pour continuer l'expérience.]`;
+      } else if (missingClues.length === 1) {
+        // One clue left — hint + Poursuivre if validated in this response
+        exchangeInstructions = `\n\n[INSTRUCTION: Il ne reste qu'UN seul indice à trouver : "${missingClues[0]}". Guide habilement l'utilisateur vers cet indice. Si tu valides sa découverte dans cette réponse et que tous les 6 sont maintenant trouvés, félicite chaleureusement ${userNameToUse} et invite-le immédiatement à cliquer sur le bouton "Poursuivre" pour continuer l'expérience.]`;
+      } else if (exchangeCount === 7) {
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange (7/8). Tu dois absolument mentionner qu'il reste encore UN échange possible pour trouver les indices manquants (${missingClues.join(', ')}). Encourage l'utilisateur à faire un dernier effort. Ne dis pas au revoir maintenant.]`;
       } else if (exchangeCount >= 8) {
-        // 8th exchange: Peter must close the conversation with personalized goodbye
-        const userNameToUse = userName || 'mon ami';
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est le DERNIER échange (8/8). Tu dois terminer la conversation de manière chaleureuse. Salue l'utilisateur en utilisant son prénom "${userNameToUse}". Ensuite, invite-le à cliquer sur le bouton "Continuer" pour poursuivre l'expérience. Fais un bref récapitulatif des indices trouvés et remercie-le pour cette conversation.]`;
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est le DERNIER échange (8/8). Tu dois terminer la conversation de manière chaleureuse. Salue l'utilisateur en utilisant son prénom "${userNameToUse}". Fais un bref récapitulatif des indices trouvés (${allFoundSoFar.join(', ') || 'aucun'}) et des indices manquants (${missingClues.join(', ') || 'aucun'}). Invite-le à cliquer sur le bouton "Poursuivre" pour continuer l'expérience.]`;
       }
 
       // Reuse or create thread
@@ -910,19 +924,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         await storage.updateSession(sessionId, { threadId });
         console.log('[Chat Stream API] Thread created and saved:', threadId);
-
-        const contextPrompt = `Indices déjà trouvés: ${session.foundClues.join(', ') || 'aucun'}`;
-        await openai.beta.threads.messages.create(threadId, {
-          role: 'user',
-          content: `${contextPrompt}${exchangeInstructions}\n\n${userMessage}`
-        });
-      } else {
-        console.log('[Chat Stream API] Reusing existing thread:', threadId);
-        await openai.beta.threads.messages.create(threadId, {
-          role: 'user',
-          content: `${userMessage}${exchangeInstructions}`
-        });
       }
+
+      // Always inject clue context in every message so Peter tracks the state across all turns
+      await openai.beta.threads.messages.create(threadId, {
+        role: 'user',
+        content: `${cluesContext}${exchangeInstructions}\n\n${userMessage}`
+      });
 
       // Stream the assistant response
       console.log('[Chat Stream API] Running assistant with streaming...', { assistantId: ASSISTANT_ID, threadId });
@@ -1307,6 +1315,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ASSISTANT_ID = 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9';
       console.log('[Chat API] Using OpenAI Assistant:', ASSISTANT_ID);
 
+      // Compute the current clue state for context injection
+      const allTargetKeywordsNS = TARGET_CLUES.map(c => c.keyword);
+      const combined2 = [...session.foundClues, ...detectedClues];
+      const allFoundSoFarNS = combined2.filter((v, i) => combined2.indexOf(v) === i);
+      const missingCluesNS = allTargetKeywordsNS.filter(k => !allFoundSoFarNS.includes(k));
+      const userNameToUseNS = (req.body.userName as string | undefined) || 'mon ami';
+
+      const cluesContextNS = `[Suivi des indices: ${allFoundSoFarNS.length}/6 trouvés${allFoundSoFarNS.length > 0 ? ` (${allFoundSoFarNS.join(', ')})` : ''} — manquants: ${missingCluesNS.length > 0 ? missingCluesNS.join(', ') : 'aucun, tous trouvés !'}]`;
+
+      let nsInstructions = '';
+      if (missingCluesNS.length === 0) {
+        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les 6 indices ont été trouvés ! Félicite chaleureusement ${userNameToUseNS}, fais un récapitulatif de la liste complète, et invite-le à cliquer sur "Poursuivre".]`;
+      } else if (missingCluesNS.length === 1) {
+        nsInstructions = `\n\n[INSTRUCTION: Il ne reste qu'UN seul indice : "${missingCluesNS[0]}". Si tu le valides dans cette réponse, félicite ${userNameToUseNS} et invite-le à cliquer sur "Poursuivre".]`;
+      }
+
       // Réutiliser le thread existant ou en créer un nouveau
       let threadId = session.threadId;
 
@@ -1314,27 +1338,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('[Chat API] Creating new thread for session...');
         const thread = await openai.beta.threads.create();
         threadId = thread.id;
-
-        // Sauvegarder le threadId dans la session
         await storage.updateSession(sessionId, { threadId });
         console.log('[Chat API] Thread created and saved:', threadId);
-
-        // Premier message : ajouter le contexte initial
-        const contextPrompt = `Indices déjà trouvés: ${session.foundClues.join(', ') || 'aucun'}`;
-        await openai.beta.threads.messages.create(threadId, {
-          role: 'user',
-          content: `${contextPrompt}\n\n${userMessage}`
-        });
       } else {
         console.log('[Chat API] Reusing existing thread:', threadId);
-
-        // Messages suivants : juste ajouter le message utilisateur
-        // Le thread garde déjà tout le contexte
-        await openai.beta.threads.messages.create(threadId, {
-          role: 'user',
-          content: userMessage
-        });
       }
+
+      // Always inject clue context so Peter tracks state on every turn
+      await openai.beta.threads.messages.create(threadId, {
+        role: 'user',
+        content: `${cluesContextNS}${nsInstructions}\n\n${userMessage}`
+      });
 
       // Run the assistant avec streaming pour meilleure réactivité
       console.log('[Chat API] Running assistant with streaming...', { assistantId: ASSISTANT_ID, threadId });
