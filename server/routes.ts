@@ -990,9 +990,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phase1Text = combined;
         phase1Done = true;
 
-        console.log(`[Chat Stream API] Phase 1 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (fast model)`);
+        console.log(`[Chat Stream API] Phase 1 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model — uniforme)`);
 
-        const ttsPromise = generateTtsAudio(combined, undefined, 'fast')
+        // Use 'quality' (eleven_multilingual_v2) for Phase 1 too, to keep a consistent voice
+        // across all sentences. The flash model was producing saturated/exaggerated output
+        // on sentences ending with "!" (different acoustic profile from multilingual_v2).
+        const ttsPromise = generateTtsAudio(combined, undefined, 'quality')
           .then((audioBuffer) => {
             const audioToken = crypto.randomUUID();
             ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
