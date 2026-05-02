@@ -2,7 +2,7 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-1.6.2-blue.svg)
+![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
@@ -12,7 +12,26 @@
 
 ---
 
-## 🆕 Version Actuelle (v1.6.2 - February 16)
+## 🆕 Version Actuelle (v1.9.0 - May 2)
+
+### ⚡ Latence TTS Encore Réduite — Phase 2 Rolling + Bienvenue Pré-générée
+
+- **Phase 2 rolling early dispatch** : la TTS de qualité (ElevenLabs multilingual) se déclenche maintenant *pendant* que le LLM génère encore, dès que 120 caractères ou 3 phrases sont accumulés — au lieu d'attendre la fin complète du LLM. Les phrases résiduelles sont traitées dans un second appel enchaîné (`previous_text` complet) pour une prosodie continue.
+- **Message de bienvenue pré-généré** : dès la création de session (pendant la navigation vers le tutoriel), le serveur lance la génération ElevenLabs en arrière-plan. TutorialScreen récupère l'audio immédiatement à son montage — Peter parle sans délai perceptible. Fallback automatique si le token n'est pas encore prêt.
+- **MIN_SENTENCE_CHARS 80 → 55** : Phase 1 (modèle flash) se déclenche plus tôt sur les phrases courtes.
+
+---
+
+## 🚀 Améliorations Précédentes (v1.8.0 - March 15)
+
+### ⚡ Per-Sentence TTS Streaming (première audio ~2-3s)
+- Pipeline per-sentence complet : chaque phrase génère sa propre TTS avec contexte prosodique (`previous_text`).
+- Première audio joue ~2-3s après le message utilisateur (contre 5-9s avant).
+- `useAudioQueue` enrichi avec mécanisme pause/resume pour synchroniser l'animation bouteille.
+
+---
+
+## 🚀 Améliorations Précédentes (v1.6.2 - February 16)
 
 ### 🛡️ Robustesse Sans Changer la Mécanique
 - **Lecture session sécurisée** : ajout d'un helper unique pour lire `sessionStorage` sans crash si payload corrompu, avec nettoyage automatique des données invalides.

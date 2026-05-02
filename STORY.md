@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-03-07  
+> **Last Updated**: 2026-05-02  
 
 ---
 
@@ -639,6 +639,53 @@ LLM stream → Phrase 1 → UI ✏️
 **Surprise**: Le streaming UI (texte progressif) est conservé, donc l'utilisateur voit la réponse s'écrire progressivement pendant que l'audio se génère — la latence perçue est atténuée.
 
 **Friction**: Compromis latence vs continuité — l'audio commence ~1-2s plus tard qu'avant, mais sans aucune coupure ni changement de registre.
+
+**Time**: ~30 minutes
+
+---
+
+### [2026-05-02] — Rolling Phase 2 TTS Dispatch & Welcome Pre-generation 🔷
+
+**Intent**: Réduire encore la latence conversation en déclenchant la TTS de qualité plus tôt (sans attendre la fin du LLM) et en pré-générant le message de bienvenue dès la création de session pour que Peter parle immédiatement à l'arrivée sur l'écran tutoriel.
+
+**Prompt(s)**:
+```
+Implémenter 3 optimisations latence : (A) rolling Phase 2 TTS early dispatch mid-stream,
+(B) pré-génération du message de bienvenue à la création de session,
+(C) MIN_SENTENCE_CHARS abaissé 80→55.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- `MIN_SENTENCE_CHARS` abaissé 80 → 55 : Phase 1 (flash model) se déclenche plus tôt sur les phrases courtes (~200-400ms gagnés sur le premier audio).
+- Phase 2 scindée en deux appels parallèles au lieu d'un seul bloc à la fin du LLM :
+  - `dispatchPhase2aTts()` se déclenche mid-stream dès 120 chars ou 3 phrases accumulées, avec `previous_text = phase1Text`.
+  - `dispatchPhase2bTts()` traite les phrases résiduelles à `thread.run.completed`, avec `previous_text = phase1Text + phase2aText` pour une continuité prosodique complète.
+- `POST /api/sessions` lance désormais la génération ElevenLabs du message de bienvenue en arrière-plan dès la création DB. Un `welcomeAudioToken` (UUID) est retourné dans la réponse JSON. L'app le stocke en sessionStorage. TutorialScreen le consomme au montage via `/api/tts/play/{token}` — fallback automatique vers la génération à la demande si le token est absent ou expiré.
+- Fichiers: `server/routes.ts`, `client/src/lib/api.ts`, `client/src/App.tsx`, `client/src/components/TutorialScreen.tsx`
+
+**Architecture**:
+```
+Avant (Phase 2 classique):
+LLM stream → S1, S2, S3 (Phase 1 TTS mid-stream)
+LLM complete → Phase 2 TTS (S4+S5+S6 en un bloc) → audio joue après silence
+
+Après (Phase 2 rolling):
+LLM stream → S1, S2 (Phase 1 TTS)
+           → S3, S4, S5 (Phase 2a TTS mid-stream, pas d'attente fin LLM)
+LLM complete → Phase 2b TTS (S6 résiduel si présent)
+(chevauchement temporel → moins de silence entre Phase 1 et Phase 2)
+
+Bienvenue:
+Avant: WelcomeSetup → navigate → TutorialScreen.mount → TTS(3-5s) → audio
+Après: WelcomeSetup → POST /api/sessions → TTS starts background → navigate
+       → TutorialScreen.mount → fetch pregen token (~0s si prêt) → audio
+```
+
+**Surprise**: Le pattern `sessionStorage.getItem('welcomeAudioToken')` + suppression immédiate ("consume once") est simple et robuste — aucun état global supplémentaire requis.
+
+**Friction**: La chaîne `previous_text` pour Phase 2b nécessite de conserver `phase2aText` pour que l'ElevenLabs API produise une prosodie cohérente avec les segments précédents.
 
 **Time**: ~30 minutes
 

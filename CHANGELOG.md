@@ -6,6 +6,17 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [1.9.0] - 2026-05-02
+
+### Amélioré - Latence TTS : Phase 2 Rolling Dispatch + Pré-génération Bienvenue
+
+- **MIN_SENTENCE_CHARS abaissé 80 → 55** : Phase 1 se déclenche plus tôt sur les phrases courtes, réduisant le délai avant le premier audio de ~200-400ms.
+- **Phase 2 rolling early dispatch** : au lieu d'attendre la fin complète du LLM, `dispatchPhase2aTts()` se déclenche dès que 120 caractères ou 3 phrases sont accumulés en cours de streaming (mid-stream). Les phrases résiduelles sont gérées par `dispatchPhase2bTts()` à `thread.run.completed`, avec `previous_text = phase1Text + phase2aText` pour chaîner la continuité prosodique sur la totalité de la réponse.
+- **Pré-génération du message de bienvenue** : `POST /api/sessions` lance immédiatement un appel ElevenLabs en arrière-plan pour le message de bienvenue personnalisé. Un `welcomeAudioToken` est retourné dans la réponse, stocké en sessionStorage par l'app cliente. TutorialScreen consomme le token via `/api/tts/play/{token}` au montage — fallback automatique vers la génération à la demande si le token est expiré ou absent.
+- Fichiers: `server/routes.ts`, `client/src/lib/api.ts`, `client/src/App.tsx`, `client/src/components/TutorialScreen.tsx`
+
+---
+
 ## [1.8.0] - 2026-03-15
 
 ### Amélioré - Latence Conversation Peter (Per-Sentence TTS Streaming)
