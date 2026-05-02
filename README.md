@@ -2,7 +2,7 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
@@ -12,7 +12,24 @@
 
 ---
 
-## 🆕 Version Actuelle (v2.0.0 - May 2)
+## 🆕 Version Actuelle (v2.1.0 - May 2)
+
+### 🎨 Redesign UI Complet de l'Interface Tutoriel
+
+- **Mobile (< 768px)** : header compact (badge + mini barre de progression + bouton icône Info) ; image collapsible (22 vh par défaut, 0 px masquée) avec overlay gradient pour les indices ; bouton toggle Masquer/Voir l'image ; détection automatique du clavier virtuel via `visualViewport` qui replie l'image quand le clavier s'ouvre ; la conversation occupe tout l'espace restant — la bande d'indices séparée est supprimée.
+- **Tablette 768–1023px (nouveau breakpoint)** : disposition côte-à-côte — conversation à gauche (1/3, colonne verticale avec mini header) + image à droite (2/3) avec overlay gradient des indices en bas.
+- **Desktop (≥ 1024px)** : colonne conversation ramenée à 30 % (xl: 28 %) pour laisser l'image dominer (~70 %) ; barre d'info restructurée en 3 zones : progression (badge + barre) | indices trouvés | actions.
+- **ConversationPanel** : avatar hexagonal (`clip-path polygon`), bulles `rounded-xl`, compteur d'échanges HUD en bas à droite, zone de statut colorée par état, bouton micro gaming 56–64 px, animation barres-ondes pour "Peter parle". Suppression des anciens spinner et rebond au-dessus de la zone de saisie.
+- **Indication de zoom plus subtile** : remplace la grosse bulle violette centrée par une pastille discrète en bas à droite (11 px, fond noir 45 % transparent).
+
+### 🔊 Voix Peter Uniforme sur Toutes les Phrases
+
+- **Avant** : la première phrase utilisait le modèle rapide `eleven_flash_v2_5` (Phase 1), les suivantes `eleven_multilingual_v2` (Phase 2). Les deux modèles ont des profils acoustiques différents — le flash amplifie les pics sur les phrases en "!", causant saturation et ton exagéré sur la première réplique.
+- **Après** : Phase 1 utilise aussi `eleven_multilingual_v2`. Voix identique du début à la fin de chaque réponse, y compris sur les exclamations.
+
+---
+
+## 🚀 Améliorations Précédentes (v2.0.0 - May 2)
 
 ### 🧠 Peter suit les indices à chaque échange
 

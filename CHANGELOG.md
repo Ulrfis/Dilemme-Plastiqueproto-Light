@@ -6,6 +6,52 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2.1.0] - 2026-05-02
+
+### Ajouté — Redesign UI interface tutoriel (mobile / tablette / desktop)
+
+#### Mobile (< 768px)
+- Header compact : badge indices (`N/6`) + mini barre de progression (w-12, h-1.5) + bouton icône `HelpCircle` uniquement. Suppression du bouton "Nouvelle session" du header mobile (espace insuffisant).
+- Image collapsible : hauteur `22vh` / `minHeight 160px` par défaut, réduite à 0 via `imageCollapsed` state. Transition CSS `duration-300`.
+- Overlay gradient sur l'image : les badges des indices trouvés sont affichés dans un gradient `from-background/80` en bas de l'image — supprime la bande d'indices séparée.
+- Toggle Masquer/Voir l'image : bouton `<button>` pleine largeur avec `ChevronUp/ChevronDown`.
+- Détection clavier virtuel : `useEffect` sur `window.visualViewport` — collapse l'image automatiquement quand `innerHeight - vv.height > 120px`, restaure si l'utilisateur n'a pas collapsé manuellement (`userCollapsedRef`).
+- Fichiers : `client/src/components/TutorialScreen.tsx`
+
+#### Tablette — nouveau layout (768px–1023px, `hidden md:flex lg:hidden`)
+- Deux colonnes : conversation gauche (w-[34%]) + image droite (flex-1, ≈ 66%).
+- Colonne conversation : mini header (badge + barre de progression + Poursuivre + Info icon), `ConversationPanel` en dessous.
+- Colonne image : pleine hauteur, overlay gradient avec badges indices.
+- Fichiers : `client/src/components/TutorialScreen.tsx`
+
+#### Desktop (≥ 1024px)
+- Colonne conversation : `w-[30%] xl:w-[28%]` (était 34 %/32 %) — l'image occupe ~70 % de la largeur.
+- Barre d'info restructurée en 3 zones : (1) badge progression + barre `w-16`, (2) badges indices `flex-1`, (3) actions (Poursuivre + Nouvelle session sm + icône Info).
+- Fichiers : `client/src/components/TutorialScreen.tsx`
+
+#### ConversationPanel redesign
+- Avatar Peter hexagonal via `clip-path: polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%)`.
+- Bulles de conversation `rounded-xl`.
+- Compteur d'échanges HUD en bas à droite de la zone de statut (`data-testid="badge-exchange-counter-conversation"` préservé).
+- Zone de statut colorée : rouge (recording), primary (processing), orange (playing), muted (idle).
+- Bouton micro gaming `rounded-full` 56 px (mobile) / 64 px (desktop), animation `scale-105` au hover.
+- Animation barres-ondes (5 barres) pour l'état "Peter parle" — remplace le rebond et le spinner au-dessus de la zone de saisie.
+- Fichiers : `client/src/components/ConversationPanel.tsx`, `tailwind.config.ts`
+
+#### Indication de zoom plus discrète
+- `ZoomableImage.tsx` : pastille discrète en bas à droite (`text-[11px]`, icône 12 px, `bg-black/45 backdrop-blur-sm rounded-full`) au lieu d'une grosse bulle centrée avec icône 32 px + texte séparé.
+- Disparaît toujours après le premier zoom.
+- Fichiers : `client/src/components/ZoomableImage.tsx`
+
+### Corrigé — Voix Peter uniforme sur toutes les phrases (plus de saturation sur "!")
+
+- **Problème** : la Phase 1 TTS (première phrase) utilisait `eleven_flash_v2_5` (`optimize_streaming_latency: 3`) tandis que la Phase 2 utilisait `eleven_multilingual_v2` (`latency: 2`). Les deux modèles ont des profils acoustiques différents : le flash amplifie les pics d'amplitude sur les phonèmes exclamatifs, causant saturation et ton exagéré même avec `stability: 0.75, style: 0.0, use_speaker_boost: false`.
+- **Correction** : `dispatchPhase1Tts()` passe maintenant `'quality'` à `generateTtsAudio()` → `eleven_multilingual_v2` pour Phase 1 et Phase 2. Voix identique sur l'ensemble de la réponse.
+- Légère hausse de la latence première phrase (quelques centaines de ms) acceptée en échange d'une cohérence vocale totale.
+- Fichiers : `server/routes.ts`
+
+---
+
 ## [2.0.0] - 2026-05-02
 
 ### Corrigé — Peter suit les indices à chaque échange et propose "Poursuivre" à 6/6

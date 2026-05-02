@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-05-02 (suivi indices + fin auto à 6/6)  
+> **Last Updated**: 2026-05-02 (redesign UI tutoriel + voix uniforme)  
 
 ---
 
@@ -63,6 +63,78 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 ## Feature Chronicle
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
+
+### [2026-05-02] — Redesign UI Tutoriel : Mobile Collapsible, Tablette, Desktop 🔷
+
+**Intent**: Refaire entièrement les layouts mobile, tablette et desktop de l'interface tutoriel pour éliminer l'espace gaspillé, corriger l'absence de breakpoint tablette, et donner à la colonne de conversation plus de place tout en gardant l'image dominante.
+
+**Prompt(s)**:
+```
+Full UI redesign of the conversational tutorial interface. Mobile: collapsible
+image, clue overlay on image (remove separate strip), virtualViewport keyboard
+detection. Tablet: new 768-1023px layout, conversation on left 1/3, image
+on right 2/3. Desktop: wider image, 3-zone info bar. ConversationPanel: hex
+avatar, HUD exchange counter, colored status zone, gaming mic button, wave bars.
+ZoomableImage hint: subtle pill bottom-right.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- **Mobile** : image collapsible 22vh avec overlay gradient + badges indices ; toggle Masquer/Voir avec ChevronUp/Down ; détection clavier virtuel via `visualViewport` (collapse automatique quand keyboard > 120px, restauration si l'utilisateur n'avait pas collapsé manuellement) ; header compact badge + barre de progression + icône Info.
+- **Tablette (nouveau)** : layout côte-à-côte `hidden md:flex lg:hidden` — conversation gauche 34%, image droite 66% avec overlay indices.
+- **Desktop** : colonne conversation rétrécie 34% → 30% (xl: 32% → 28%) pour que l'image occupe ~70% ; barre d'info 3 zones (progression | indices | actions).
+- **ConversationPanel** : avatar hexagonal clip-path, bulles rounded-xl, HUD compteur bas-droite, statut coloré par état (rouge/primary/orange/muted), bouton micro gaming rounded-full 56-64px, animation barres-ondes "Peter parle".
+- **ZoomableImage** : hint centré géant → pastille discrète 11px bas-droite.
+- Fichiers : `TutorialScreen.tsx`, `ConversationPanel.tsx`, `ZoomableImage.tsx`, `tailwind.config.ts`
+
+**Architecture**:
+```
+Avant (breakpoints) : mobile = lg:hidden (< 1024px), desktop = lg:flex
+Après : mobile = md:hidden (< 768px) | tablette = md:flex lg:hidden (768-1023px) | desktop = lg:flex
+```
+
+**Surprise**: La détection `visualViewport` pour le clavier virtuel mobile est beaucoup plus fiable que les approches `window.resize` — elle donne directement la hauteur visuelle disponible, indépendante des safe areas.
+
+**Friction**: Les ajustements de largeur desktop ont nécessité deux passes (d'abord 34%, puis retour à 30%) suite au retour utilisateur sur la proportion image/conversation.
+
+**Time**: ~2 sessions
+
+---
+
+### [2026-05-02] — Voix Peter Uniforme : Même Modèle TTS pour Toutes les Phrases 🔹
+
+**Intent**: Éliminer la différence audible entre la première phrase de Peter (trop forte, saturée sur "!") et les suivantes — causée par l'utilisation de deux modèles ElevenLabs différents selon la phase.
+
+**Prompt(s)**:
+```
+il faut corriger un problème audio: lorsque Peter fait une première phrase qui
+termine par un !, il exagère et c'est trop fort et saturé. Il faut garder le
+même style sur toutes les réponses, y compris les réponses avec un point
+d'exclamation !
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Diagnostic : Phase 1 utilisait `eleven_flash_v2_5` (latency opt 3) ; Phase 2 utilisait `eleven_multilingual_v2` (latency opt 2). Même `voice_settings` (stability 0.75, style 0.0, speaker_boost false) mais profils acoustiques différents — le flash amplifie les pics sur les exclamatives.
+- Fix : `dispatchPhase1Tts()` passe `'quality'` à `generateTtsAudio()` → même modèle `eleven_multilingual_v2` sur toutes les phrases. Cohérence vocale totale.
+- Trade-off accepté : légère hausse latence première phrase (~200-400ms) contre voix uniforme.
+- Fichier : `server/routes.ts`
+
+**Architecture**:
+```
+Avant : Phase 1 → eleven_flash_v2_5 | Phase 2 → eleven_multilingual_v2
+Après : Phase 1 → eleven_multilingual_v2 | Phase 2 → eleven_multilingual_v2
+```
+
+**Surprise**: Le problème n'était pas dans `voice_settings` (déjà optimisés) mais dans le modèle lui-même — deux modèles avec les mêmes paramètres sonnent différemment.
+
+**Insight**: Homogénéité > vitesse quand l'utilisateur perçoit l'incohérence comme un bug.
+
+**Time**: ~5 minutes (diagnostic + one-line fix)
+
+---
 
 ### [2026-03-15] — Per-Sentence TTS Streaming & Latency Reduction 🔷
 
