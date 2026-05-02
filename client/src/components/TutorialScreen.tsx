@@ -864,31 +864,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         </div>
       </div>
 
-      {/* TABLET LAYOUT — deux colonnes 45/55 (768px–1023px) */}
+      {/* TABLET LAYOUT — conversation gauche (1/3) + image droite (2/3) (768px–1023px) */}
       <div className="hidden md:flex lg:hidden h-full">
-        {/* Colonne gauche — Image */}
-        <div className="w-[45%] flex-shrink-0 relative bg-muted overflow-hidden">
-          <ZoomableImage src={tutorialImage} alt="Image à analyser" />
-          {/* Clues overlay bas de l'image */}
-          {foundClues.length > 0 && (
-            <div className="absolute bottom-0 left-0 right-0 px-3 pb-3 pt-6 bg-gradient-to-t from-background/90 to-transparent flex flex-wrap gap-1.5 pointer-events-none">
-              {foundClues.map((clue, index) => (
-                <Badge
-                  key={index}
-                  variant="default"
-                  className="animate-scale-in text-xs pointer-events-auto"
-                  data-testid={`badge-clue-${index}`}
-                >
-                  <CheckCircle2 className="w-2.5 h-2.5 mr-1" />
-                  {clue}
-                </Badge>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Colonne droite — Conversation */}
-        <div className="flex-1 flex flex-col min-w-0">
+        {/* Colonne gauche — Conversation (1/3) */}
+        <div className="w-[34%] flex-shrink-0 flex flex-col border-r border-card-border min-w-0">
           {/* Mini header conversation */}
           <div className="flex-shrink-0 bg-card border-b border-card-border px-4 py-2.5 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -898,16 +877,16 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
                 data-testid="badge-clue-counter"
               >
                 <span className="font-bold text-primary">{foundClues.length}</span>
-                <span className="text-muted-foreground">/{TOTAL_CLUES} indices</span>
+                <span className="text-muted-foreground">/{TOTAL_CLUES}</span>
               </Badge>
-              <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
+              <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
                 <div
                   className="h-full bg-primary rounded-full transition-all duration-500"
                   style={{ width: `${(foundClues.length / TOTAL_CLUES) * 100}%` }}
                 />
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               {FinishButton}
               <Button
                 variant="ghost"
@@ -940,12 +919,33 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             />
           </div>
         </div>
+
+        {/* Colonne droite — Image (2/3) */}
+        <div className="flex-1 relative bg-muted overflow-hidden min-w-0">
+          <ZoomableImage src={tutorialImage} alt="Image à analyser" />
+          {/* Clues overlay bas de l'image */}
+          {foundClues.length > 0 && (
+            <div className="absolute bottom-0 left-0 right-0 px-3 pb-3 pt-6 bg-gradient-to-t from-background/90 to-transparent flex flex-wrap gap-1.5 pointer-events-none">
+              {foundClues.map((clue, index) => (
+                <Badge
+                  key={index}
+                  variant="default"
+                  className="animate-scale-in text-xs pointer-events-auto"
+                  data-testid={`badge-clue-${index}`}
+                >
+                  <CheckCircle2 className="w-2.5 h-2.5 mr-1" />
+                  {clue}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* DESKTOP LAYOUT — deux colonnes (≥ 1024px) */}
       <div className="hidden lg:flex h-full">
-        {/* Colonne gauche — Conversation (34%) */}
-        <div className="w-[34%] xl:w-[32%] flex flex-col border-r border-card-border flex-shrink-0">
+        {/* Colonne gauche — Conversation (~1/3) */}
+        <div className="w-[30%] xl:w-[28%] flex flex-col border-r border-card-border flex-shrink-0">
           <ConversationPanel
             messages={messages}
             userName={userName}

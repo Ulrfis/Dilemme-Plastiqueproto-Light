@@ -54,22 +54,15 @@ function ZoomControls({ isTouch }: { isTouch: boolean }) {
         </Button>
       )}
 
-      {/* Hint contextuel selon appareil - disparaît après zoom */}
+      {/* Hint discret en bas à droite - disparaît après zoom */}
       {!isZoomed && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="flex flex-col items-center gap-2 animate-bounce-subtle">
-            <div className="bg-primary/90 backdrop-blur-sm rounded-full p-4 shadow-lg">
-              {isTouch
-                ? <Hand className="w-8 h-8 text-primary-foreground" />
-                : <MousePointer2 className="w-8 h-8 text-primary-foreground" />
-              }
-            </div>
-            <p className="text-sm font-medium text-white bg-black/70 backdrop-blur-sm px-4 py-2 rounded-full text-center">
-              {isTouch
-                ? "Pincez pour zoomer · Glissez pour explorer"
-                : "Molette pour zoomer · Cliquez-glissez pour déplacer"
-              }
-            </p>
+        <div className="absolute bottom-2 right-2 z-10 pointer-events-none">
+          <div className="flex items-center gap-1.5 bg-black/45 backdrop-blur-sm rounded-full px-2 py-1 text-[11px] text-white/90">
+            {isTouch
+              ? <Hand className="w-3 h-3" />
+              : <MousePointer2 className="w-3 h-3" />
+            }
+            <span>{isTouch ? "Pincez · Glissez" : "Molette · Glissez"}</span>
           </div>
         </div>
       )}
