@@ -130,20 +130,20 @@ async function generateTtsAudio(text: string, previousText?: string, quality: 'f
     return ttsCache.get(textHash)!;
   }
 
-  // Phase 1 (fast): eleven_flash_v2_5, max latency opt → ~300-500ms faster first audio
-  // Phase 2 (quality): eleven_multilingual_v2, lower latency opt → natural prosody for bulk of response
+  // Phase 1 (fast): eleven_flash_v2_5, latency opt 3 → fast first audio without heavy compression artifacts
+  // Phase 2 (quality): eleven_multilingual_v2, latency opt 2 → natural prosody for bulk of response
   const modelId = quality === 'fast' ? 'eleven_flash_v2_5' : 'eleven_multilingual_v2';
-  const latencyOpt = quality === 'fast' ? 4 : 2;
+  const latencyOpt = quality === 'fast' ? 3 : 2;  // Was 4 for fast — level 4 causes compression artifacts on loud phonemes
 
   console.log('[TTS]', quality.toUpperCase(), 'mode — generating', text.length, 'chars', previousText ? `(with ${previousText.length} chars context)` : '', `[${modelId}]`);
   const body: Record<string, unknown> = {
     text,
     model_id: modelId,
     voice_settings: {
-      stability: 0.70,
+      stability: 0.75,          // Was 0.70 — slightly more stable, reduces amplitude spikes on "!"
       similarity_boost: 0.75,
-      style: 0.2,  // Slight expressivity for more natural delivery (was 0.0)
-      use_speaker_boost: true
+      style: 0.0,               // Was 0.2 — neutral on flash model; expressivity on flash amplifies clipping on "!"
+      use_speaker_boost: false  // Was true — speaker boost artificially amplifies peaks, causing saturation on exclamations
     },
     optimize_streaming_latency: latencyOpt,
   };
@@ -625,12 +625,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           text,
           model_id: 'eleven_multilingual_v2', // Best quality for French diction
           voice_settings: {
-            stability: 0.70, // Higher stability for consistent register across full text
+            stability: 0.75,
             similarity_boost: 0.75,
-            style: 0.0, // Neutral style for clearer speech
-            use_speaker_boost: true // Enhance voice clarity
+            style: 0.0,
+            use_speaker_boost: false  // Disabled — causes saturation/clipping on exclamations
           },
-          // Increased to 3 for faster first-byte response (full text sent at once now)
           optimize_streaming_latency: 3,
         })
       });
@@ -753,10 +752,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           text,
           model_id: 'eleven_multilingual_v2', // Best quality for French diction
           voice_settings: {
-            stability: 0.70, // Higher stability for consistent register
+            stability: 0.75,
             similarity_boost: 0.75,
-            style: 0.0, // Neutral style for clearer speech
-            use_speaker_boost: true // Enhance voice clarity
+            style: 0.0,
+            use_speaker_boost: false  // Disabled — causes saturation/clipping on exclamations
           }
         })
       });
