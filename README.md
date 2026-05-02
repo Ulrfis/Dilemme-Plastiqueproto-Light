@@ -2,7 +2,7 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-1.9.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
@@ -12,7 +12,25 @@
 
 ---
 
-## 🆕 Version Actuelle (v1.9.0 - May 2)
+## 🆕 Version Actuelle (v2.0.0 - May 2)
+
+### 🎤 Transcription Live Deepgram pendant l'enregistrement
+
+- **Texte en temps réel** : pendant que l'utilisateur parle, la transcription s'affiche immédiatement dans la zone de saisie avec un curseur clignotant — Deepgram nova-2 FR avec résultats intermédiaires toutes les ~250ms.
+- **Whisper reste la source de vérité** : à la fin de l'enregistrement, Whisper effectue une passe de correction sur l'audio complet et c'est son texte qui est envoyé à Peter. Deepgram est purement du feedback visuel.
+- **Architecture sécurisée** : le relais WebSocket serveur (`/ws/deepgram`) exige un token de session valide avant toute connexion, limite les connexions concurrentes par IP, et plafonne la mémoire utilisée si Deepgram est lent.
+
+### 🎚️ Waveform d'enregistrement bien plus visible
+
+- 9 barres (était 5), hauteur doublée, gain perceptuel amplifié avec plancher ambiant pour ne jamais sembler "mort".
+
+### 📊 Dashboard PostHog Latence Pipeline
+
+- Nouveau dashboard dédié : p50 et p95 pour chaque étape du pipeline (Audio Playback Started, TTS Phase 1, TTS Phase 2) par type de pipeline.
+
+---
+
+## 🚀 Améliorations Précédentes (v1.9.0 - May 2)
 
 ### ⚡ Latence TTS Encore Réduite — Phase 2 Rolling + Bienvenue Pré-générée
 

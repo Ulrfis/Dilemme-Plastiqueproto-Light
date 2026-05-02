@@ -6,6 +6,42 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2.0.0] - 2026-05-02
+
+### Ajouté — Transcription Live Deepgram pendant l'enregistrement
+
+- **Relais WebSocket serveur** (`server/deepgramRelay.ts`) : un `WebSocketServer({noServer:true})` est attaché au `http.Server` via l'événement `upgrade` sur le chemin `/ws/deepgram`. Pour chaque client il ouvre une connexion upstream vers `wss://api.deepgram.com/v1/listen` (nova-2, fr, `interim_results`, `smart_format`, `endpointing 300ms`). Les chunks audio binaires du client sont transférés vers Deepgram ; les messages `Results` JSON de Deepgram sont parsés et renvoyés au client sous la forme `{type:'transcript', transcript, isFinal}`.
+- **Hook client** (`client/src/hooks/useDeepgramTranscription.ts`) : ouvre le WebSocket vers `/ws/deepgram`, démarre un second `MediaRecorder` (timeslice 250ms) sur le même `MediaStream`, envoie chaque chunk en `ArrayBuffer`. Cleanup automatique au démontage (`useEffect`).
+- **Intégration** (`useVoiceInteraction`) : option `onLiveTranscript(text, isFinal)`. `deepgram.start()` lancé en parallèle au `MediaRecorder` Whisper dans `startRecording` ; `deepgram.stop()` appelé dans `stopRecording()` ET dans `reset()`.
+- **Affichage** (`ConversationPanel`) : pendant `state==='recording'`, la zone de saisie affiche le texte Deepgram en temps réel avec un curseur clignotant (ou "À l'écoute…" avant le premier mot). En `state==='processing'`, le texte reste visible jusqu'à ce que Whisper retourne son résultat. Whisper reste la source de vérité pour le message envoyé à Peter — Deepgram est uniquement du feedback visuel.
+
+### Amélioré — Waveform d'enregistrement bien plus visible
+
+- 9 barres au lieu de 5, conteneur rehaussé `h-16 sm:h-20` (était `h-6 sm:h-8`)
+- Gain perceptuel `sqrt(audioLevel) × 2.2` + plancher ambiant `0.12` pour que les barres soient toujours animées pendant l'enregistrement
+- Opacité des barres proportionnelle au niveau, transition `75ms`
+
+### Sécurité & Robustesse — Deepgram WebSocket
+
+- **Auth obligatoire** : le handler `upgrade` valide `sessionId` + `token` (query params) contre `storage.getSession()` avant `handleUpgrade`. Rejets 401/403 avec destruction de socket.
+- **Limite anti-abus par IP** : max 3 connexions simultanées par `req.socket.remoteAddress` (pas `x-forwarded-for` qui est client-contrôlable). Compteur incrémenté après l'attachement du hook `socket.once('close')` pour garantir un décrément même si l'upgrade échoue silencieusement.
+- **Buffer audio plafonné** : `MAX_BUFFERED_CHUNKS=40` / `MAX_BUFFERED_BYTES=4MB` — les chunks les plus anciens sont supprimés en cas de dépassement (Deepgram lent ou indisponible).
+- **Timeouts** : `UPSTREAM_OPEN_TIMEOUT_MS=8s` (ferme si Deepgram ne répond pas), `MAX_SESSION_DURATION_MS=5min` (hard kill anti-zombie).
+- **Cleanup idempotent** : `cleanup()` câblé sur tous les chemins `close/error` client et upstream.
+
+### Ajouté — Dashboard PostHog "Pipeline Latency Comparison"
+
+- Dashboard créé via l'API PostHog (id=656626) : <https://eu.posthog.com/project/107669/dashboard/656626>
+- 6 insights attachés : `Audio Playback Started p50/p95`, `TTS Phase 1 Ready p50/p95`, `TTS Phase 2 Ready p50/p95` — chacun avec breakdown par propriété `pipeline`
+- Documentation dans `docs/POSTHOG_DASHBOARDS.md` (URL, IDs insights, flux de données, instructions de recréation)
+
+### Corrigé — Nettoyage code
+
+- Cast `(session as any).welcomeAudioToken` retiré dans `App.tsx` : le type de retour de `createSession()` inclut déjà `welcomeAudioToken?: string`
+- Helper `preGenerateTts()` inutilisé supprimé de `server/routes.ts`
+
+---
+
 ## [1.9.0] - 2026-05-02
 
 ### Amélioré - Latence TTS : Phase 2 Rolling Dispatch + Pré-génération Bienvenue

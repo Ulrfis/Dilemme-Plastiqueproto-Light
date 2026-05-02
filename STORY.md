@@ -644,6 +644,64 @@ LLM stream → Phrase 1 → UI ✏️
 
 ---
 
+### [2026-05-02] — Deepgram Live Transcription + Waveform Amplification 🔷
+
+**Intent**: Rendre visible que le micro capte bien quelque chose pendant l'enregistrement (waveform trop discrète), et afficher la transcription en temps réel dans la zone de saisie pendant que l'utilisateur parle — pour réduire la perception d'attente et rassurer sur la captation.
+
+**Prompt(s)**:
+```
+(1) Rendre le waveform d'enregistrement beaucoup plus visible
+(2) Ajouter la transcription Deepgram en direct dans la barre de texte pendant
+    que l'utilisateur parle, avec Whisper en passe de correction pour le message
+    final envoyé à Peter
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Waveform : 9 barres (était 5), conteneur `h-16/h-20` (était `h-6/h-8`), gain perceptuel `sqrt(level)×2.2` + plancher ambiant `0.12`, opacité proportionnelle au niveau, transition 75ms.
+- Relais WebSocket serveur `server/deepgramRelay.ts` : `WebSocketServer({noServer:true})` sur `/ws/deepgram` via l'événement `upgrade` http. Ouvre une connexion upstream vers Deepgram nova-2 FR avec `interim_results`, `smart_format`, `endpointing 300ms`. Transfère les chunks binaires du client vers Deepgram, parse les `Results` et les renvoie comme `{type:'transcript', transcript, isFinal}`.
+- Hook client `useDeepgramTranscription` : ouvre le WS authentifié, lance un second `MediaRecorder` (timeslice 250ms) sur le même `MediaStream`, envoie chaque chunk. Cleanup au démontage.
+- `TutorialScreen` accumule committed+interim dans `liveTranscript`, passe le prop aux deux instances de `ConversationPanel` (mobile + desktop).
+- Pendant l'enregistrement la zone de saisie affiche le texte live avec curseur clignotant. Whisper reste la source de vérité pour l'envoi à Peter.
+- Suite revue architect : auth session obligatoire sur `/ws/deepgram` (sessionId+token), limite anti-abus 3 connexions/IP via `socket.remoteAddress`, buffer audio plafonné (40 chunks/4MB), timeout upstream 8s, hard kill 5min, cleanup idempotent, `deepgram.stop()` dans `reset()` et unmount, max-height sur l'affichage transcript.
+
+**Architecture**:
+```
+Enregistrement utilisateur:
+  MicRecorder (Whisper) → audio blob → POST /api/speech-to-text → correction finale → Peter
+  MicRecorder (Deepgram) → chunks 250ms → WS /ws/deepgram → upstream Deepgram
+                                                           ← {transcript, isFinal}
+                                                           → liveTranscript state
+                                                           → ConversationPanel (curseur)
+
+Sécurité WS:
+  upgrade → auth(sessionId, token) → IP rate-limit → handleUpgrade
+  client close → cleanup() → releaseIp() → upstream.close()
+```
+
+**Surprise**: Le pattern "deux MediaRecorder sur le même MediaStream" fonctionne sans interférence — les tracks audio sont partagés en lecture seule, chaque recorder produit son propre encodage indépendamment.
+
+**Friction**: Le SDK Deepgram v5 (Fern-generated) ne fournit plus d'API live transcription — solution : connexion upstream WebSocket directe avec `Authorization: Token` côté serveur, ce qui a l'avantage de ne jamais exposer la clé côté client.
+
+**Time**: ~90 minutes (architecture serveur, hook client, wiring TutorialScreen, review architect × 2, hardening sécurité)
+
+---
+
+### [2026-05-02] — PostHog "Pipeline Latency Comparison" Dashboard 🔹
+
+**Intent**: Créer un dashboard PostHog dédié au suivi de la latence des pipelines streaming/non-streaming, avec percentiles p50 et p95 par type de pipeline.
+
+**Outcome**:
+- Dashboard créé via l'API REST PostHog (id=656626) : [lien direct](https://eu.posthog.com/project/107669/dashboard/656626)
+- 6 insights : `Audio Playback Started p50/p95`, `TTS Phase 1 Ready p50/p95`, `TTS Phase 2 Ready p50/p95` — chacun breakdowné par propriété `pipeline`
+- API PostHog legacy (filters) bloquée en 403 → utilisation du format `InsightVizNode/TrendsQuery` plus récent
+- `docs/POSTHOG_DASHBOARDS.md` créé pour la maintenabilité future
+
+**Time**: ~15 minutes (API calls only, no code changes)
+
+---
+
 ### [2026-05-02] — Rolling Phase 2 TTS Dispatch & Welcome Pre-generation 🔷
 
 **Intent**: Réduire encore la latence conversation en déclenchant la TTS de qualité plus tôt (sans attendre la fin du LLM) et en pré-générant le message de bienvenue dès la création de session pour que Peter parle immédiatement à l'arrivée sur l'écran tutoriel.
