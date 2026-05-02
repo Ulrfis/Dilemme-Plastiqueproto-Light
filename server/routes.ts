@@ -1111,9 +1111,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: fullResponse,
       });
 
-      // Update session with detected clues
-      if (detectedClues.length > 0) {
-        const updatedClues = [...session.foundClues, ...detectedClues];
+      // Detect clues from Peter's response too (not just from the user's message).
+      // Peter often explicitly names a clue when validating it — e.g. "Bravo, tu as trouvé le Traité plastique !"
+      // The earlier detectClues(userMessage) only caught words the USER used; this catches what PETER validates.
+      const detectedFromResponse = detectClues(fullResponse, [...session.foundClues, ...detectedClues]);
+      const allDetectedClues = [...detectedClues, ...detectedFromResponse];
+      if (detectedFromResponse.length > 0) {
+        console.log('[Chat Stream API] Additional clues detected from Peter\'s response:', detectedFromResponse);
+      }
+
+      // Update session with all detected clues (from user message + from Peter's response)
+      if (allDetectedClues.length > 0) {
+        const updatedClues = [...session.foundClues, ...allDetectedClues];
         await storage.updateSession(sessionId, {
           foundClues: updatedClues,
           score: updatedClues.length,
@@ -1127,8 +1136,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.write(`data: ${JSON.stringify({
         type: 'complete',
         fullResponse,
-        foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
-        detectedClue: detectedClues.length > 0 ? detectedClues[0] : null,
+        foundClues: allDetectedClues.length > 0 ? [...session.foundClues, ...allDetectedClues] : session.foundClues,
+        detectedClue: allDetectedClues.length > 0 ? allDetectedClues[0] : null,
         phase2Dispatched,
       })}\n\n`);
 
@@ -1289,9 +1298,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: assistantResponse,
       });
 
-      // Update session with ALL detected clues
-      if (detectedClues.length > 0) {
-        const updatedClues = [...session.foundClues, ...detectedClues];
+      // Detect clues from Peter's response too (not just from the user's message)
+      const detectedFromResponse = detectClues(assistantResponse, [...session.foundClues, ...detectedClues]);
+      const allDetectedClues = [...detectedClues, ...detectedFromResponse];
+      if (detectedFromResponse.length > 0) {
+        console.log('[Chat API] Additional clues detected from Peter\'s response:', detectedFromResponse);
+      }
+
+      // Update session with ALL detected clues (from user message + from Peter's response)
+      if (allDetectedClues.length > 0) {
+        const updatedClues = [...session.foundClues, ...allDetectedClues];
         await storage.updateSession(sessionId, {
           foundClues: updatedClues,
           score: updatedClues.length,
@@ -1305,8 +1321,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[Chat API] Sending response to client');
       res.json({
         response: assistantResponse,
-        detectedClue: detectedClues.length > 0 ? detectedClues[0] : null, // For backward compatibility
-        foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
+        detectedClue: allDetectedClues.length > 0 ? allDetectedClues[0] : null,
+        foundClues: allDetectedClues.length > 0 ? [...session.foundClues, ...allDetectedClues] : session.foundClues,
       });
     } catch (error) {
       console.error('[Chat API] Error in chat:', {
