@@ -145,31 +145,40 @@ export default function ConversationPanel({
           </Badge>
         </div>
 
-        {/* Indicateur d'état - waveform pilotée par le niveau micro réel (Option C) */}
-        {state === 'recording' && (
-          <div
-            className="flex justify-center gap-1 items-center h-6 sm:h-8 mb-2"
-            data-testid="waveform-recording"
-          >
-            {[0, 1, 2, 3, 4].map((i) => {
-              // Profil "cloche" : barres centrales plus réactives
-              const shape = [0.55, 0.8, 1, 0.8, 0.55][i];
-              const baseHeight = 6;
-              const maxAdditional = 22;
-              // Niveau minimum pour qu'on voie un mouvement même en silence
-              const effectiveLevel = Math.max(audioLevel, 0.05);
-              const height = baseHeight + effectiveLevel * maxAdditional * shape;
-              return (
-                <div
-                  key={i}
-                  className="w-1 sm:w-1.5 bg-primary rounded-full transition-[height] duration-100 ease-out"
-                  style={{ height: `${height}px` }}
-                  data-testid={`waveform-bar-${i}`}
-                />
-              );
-            })}
-          </div>
-        )}
+        {/* Indicateur d'état - waveform pilotée par le niveau micro réel
+            Amplifiée pour montrer clairement que la voix est captée en temps réel */}
+        {state === 'recording' && (() => {
+          // Amplification perceptuelle : la voix réelle (RMS ~0.05-0.25) est très
+          // discrète sans gain. On applique une racine carrée (perception logarithmique)
+          // puis un gain de 2.2× pour rendre l'amplitude bien visible. Clamp à 1.
+          const amplified = Math.min(1, Math.sqrt(Math.max(audioLevel, 0)) * 2.2);
+          // Plancher d'animation pour montrer que le micro est actif même en silence
+          const effectiveLevel = Math.max(amplified, 0.12);
+          // Profil "cloche" : barres centrales plus réactives, étendu à 9 barres
+          const shape = [0.35, 0.55, 0.78, 0.92, 1, 0.92, 0.78, 0.55, 0.35];
+          const baseHeight = 8;
+          const maxAdditional = 56; // max 64px = h-16
+          return (
+            <div
+              className="flex justify-center gap-1 sm:gap-1.5 items-center h-16 sm:h-20 mb-2"
+              data-testid="waveform-recording"
+            >
+              {shape.map((s, i) => {
+                const height = baseHeight + effectiveLevel * maxAdditional * s;
+                // Couleur plus saturée quand l'amplitude monte
+                const opacity = 0.7 + effectiveLevel * 0.3;
+                return (
+                  <div
+                    key={i}
+                    className="w-1.5 sm:w-2 bg-primary rounded-full transition-[height] duration-75 ease-out"
+                    style={{ height: `${height}px`, opacity }}
+                    data-testid={`waveform-bar-${i}`}
+                  />
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {state === 'playing' && (
           <div className="flex justify-center mb-2">
