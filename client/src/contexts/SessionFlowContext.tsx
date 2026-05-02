@@ -79,6 +79,15 @@ function loadFromStorage(): SessionFlowState {
 
     const parsed = readStoredSessionFlow();
     if (parsed) {
+      // Migration legacy : les sessions créées avant l'ajout de l'auth par token
+      // n'ont pas d'accessToken. Le serveur rejetterait toute requête avec 403.
+      // On reset proprement pour forcer la création d'une nouvelle session.
+      if (parsed.sessionId && !parsed.accessToken) {
+        console.warn('[SessionFlow] Legacy session detected (sessionId without accessToken), clearing for fresh start');
+        sessionStorage.removeItem(STORAGE_KEY);
+        return initialState;
+      }
+
       console.log('[SessionFlow] Loaded state from storage:', { 
         userName: parsed.userName, 
         sessionId: parsed.sessionId?.substring(0, 8),
