@@ -492,6 +492,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             .catch(fetchErr => {
               if (streamGenerationRef.current !== currentGeneration) return;
               console.error('[TutorialScreen] Error fetching audio block at index #' + index + ':', fetchErr);
+              captureEvent('sentence_audio_error', { pipeline: 'streaming', sentence_index: index, reason: 'fetch_failed' });
               for (let i = index; i < index + count; i++) audioQueue.skipIndex(i);
             });
         },
@@ -499,6 +500,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         onSentenceAudioError: (index) => {
           if (streamGenerationRef.current !== currentGeneration) return;
           console.warn('[TutorialScreen] Sentence #' + index + ' TTS failed on server, skipping');
+          captureEvent('sentence_audio_error', { pipeline: 'streaming', sentence_index: index });
           audioQueue.skipIndex(index);
         },
 
@@ -569,6 +571,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
         onError: (error) => {
           console.error('[TutorialScreen] Stream error:', error);
+          captureEvent('tts_stream_error', { pipeline: 'streaming' });
           audioQueue.clear();
 
           setMessages(prev => [...prev, {
@@ -636,6 +639,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       console.log('[TutorialScreen] Audio playback completed successfully');
     } catch (error) {
       console.error('[TutorialScreen] TTS or playback failed:', error);
+      captureEvent('sentence_audio_error', { pipeline: 'non-streaming' });
       recoverFromError();
 
       if (!fallbackMode) {
