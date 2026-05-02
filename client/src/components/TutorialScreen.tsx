@@ -233,7 +233,41 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         });
       }
     } else {
+      // Returning user — generate a contextual resumption message from Peter
       hasPlayedWelcome.current = true;
+      setIsThinking(true);
+      try {
+        const resumeRes = await fetch(`/api/sessions/${sessionId}/resume`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accessToken: sessionFlow.accessToken,
+            userName,
+          }),
+        });
+        if (resumeRes.ok) {
+          const { text, audioToken } = await resumeRes.json();
+          setIsThinking(false);
+          setMessages(prev => [...prev, makeMessage('assistant', text)]);
+          try {
+            const audioResponse = await fetch(`/api/tts/play/${audioToken}`);
+            if (audioResponse.ok) {
+              const audioBlob = await audioResponse.blob();
+              if (audioBlob.size >= 100) {
+                await playAudio(audioBlob);
+              }
+            }
+          } catch (audioErr) {
+            console.warn('[TutorialScreen] Resume audio playback failed (silent):', audioErr);
+          }
+        } else {
+          console.warn('[TutorialScreen] Resume endpoint returned', resumeRes.status, '— silent fallback');
+          setIsThinking(false);
+        }
+      } catch (resumeErr) {
+        console.error('[TutorialScreen] Resume request failed (silent):', resumeErr);
+        setIsThinking(false);
+      }
     }
 
     setAudioUnlocked(true);

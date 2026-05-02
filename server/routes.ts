@@ -846,6 +846,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // RESUME: Contextual re-entry message for returning users (does not count as an exchange)
+  app.post('/api/sessions/:id/resume', async (req, res) => {
+    try {
+      const sessionId = req.params.id;
+      if (!sessionId) {
+        return res.status(400).json({ error: 'Missing sessionId' });
+      }
+
+      const session = await verifySessionToken(sessionId, req, res);
+      if (!session) return;
+
+      const userName = (req.body.userName as string | undefined) || 'toi';
+
+      const allTargetKeywords = TARGET_CLUES.map(c => c.keyword);
+      const foundClues = session.foundClues || [];
+      const missingClues = allTargetKeywords.filter(k => !foundClues.includes(k));
+
+      console.log('[Resume API] Session:', { sessionId: sessionId.substring(0, 8), foundClues, missingClues });
+
+      // Build the resumption prompt — injected as a user message to leverage thread history
+      const foundSummary = foundClues.length > 0
+        ? `Il a déjà trouvé ${foundClues.length}/6 indices (${foundClues.join(', ')})`
+        : `Il n'a encore trouvé aucun indice`;
+      const missingSummary = missingClues.length > 0
+        ? `Il lui reste à découvrir : ${missingClues.join(', ')}`
+        : `Il a trouvé tous les indices !`;
+
+      const resumePrompt = `[REPRISE DE SESSION — NE PAS COMPTER COMME ÉCHANGE]\n${userName} revient après une courte pause. ${foundSummary}. ${missingSummary}.\nAccueille-le chaleureusement en 1-2 phrases MAXIMUM. Si la conversation a déjà eu lieu, fais-y référence naturellement. Guide-le subtilement vers un des indices manquants. N'utilise PAS la phrase de bienvenue initiale ("Bienvenue dans cette courte expérience…"). Sois bref et naturel.`;
+
+      // Reuse or create the thread
+      let threadId = session.threadId;
+      if (!threadId) {
+        const thread = await openai.beta.threads.create();
+        threadId = thread.id;
+        await storage.updateSession(sessionId, { threadId });
+        console.log('[Resume API] Thread created:', threadId);
+      } else {
+        console.log('[Resume API] Reusing thread:', threadId);
+      }
+
+      // Inject the resumption prompt into the thread
+      await openai.beta.threads.messages.create(threadId, {
+        role: 'user',
+        content: resumePrompt,
+      });
+
+      // Run the assistant non-streaming (short response — 1-2 sentences)
+      const stream = await openai.beta.threads.runs.stream(threadId, {
+        assistant_id: ASSISTANT_ID,
+      });
+
+      let resumeText = '';
+      for await (const event of stream) {
+        if (event.event === 'thread.message.delta') {
+          const delta = event.data.delta;
+          if (delta.content && delta.content[0]?.type === 'text') {
+            resumeText += delta.content[0].text?.value || '';
+          }
+        }
+        if (event.event === 'thread.run.failed' ||
+            event.event === 'thread.run.cancelled' ||
+            event.event === 'thread.run.expired') {
+          throw new Error(`Resume run failed: ${event.event}`);
+        }
+      }
+
+      if (!resumeText) {
+        resumeText = missingClues.length > 0
+          ? `Bienvenue de retour ! Tu as déjà trouvé ${foundClues.length} indice${foundClues.length !== 1 ? 's' : ''}. Continue à observer l'image — qu'est-ce qui attire ton attention ?`
+          : `Bienvenue de retour ! Tu as trouvé tous les indices, tu peux continuer l'expérience.`;
+      }
+
+      // Pre-generate TTS audio (same pipeline as welcome message)
+      const audioToken = crypto.randomUUID();
+      ttsRequestStore.set(audioToken, {
+        promise: generateTtsAudio(resumeText, undefined, 'quality'),
+        createdAt: Date.now(),
+      });
+
+      console.log('[Resume API] Resume message generated, TTS token:', audioToken.substring(0, 8));
+
+      return res.json({ text: resumeText, audioToken });
+    } catch (error) {
+      console.error('[Resume API] Error:', error);
+      return res.status(500).json({ error: 'Failed to generate resume message' });
+    }
+  });
+
   // PHASE 2 OPTIMIZATION: Streaming chat endpoint with sentence-by-sentence delivery
   // This allows TTS to start generating audio while LLM is still responding
   app.post('/api/chat/stream', async (req, res) => {
