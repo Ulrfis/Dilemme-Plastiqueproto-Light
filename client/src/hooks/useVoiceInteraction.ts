@@ -81,6 +81,11 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   // Non-fatal: if the Web Audio graph cannot be built (e.g. older Safari),
   // recording continues without a waveform indicator.
   const startAudioLevelSampling = useCallback((stream: MediaStream) => {
+    // Idempotency guard: ensure no prior interval/source survives a re-entrant
+    // call (double-tap on the mic button could otherwise orphan the previous
+    // setInterval and leak background state updates until unmount).
+    stopAudioLevelSampling();
+
     try {
       if (!audioContextRef.current) {
         console.warn('[useVoiceInteraction] No AudioContext for level sampling');
