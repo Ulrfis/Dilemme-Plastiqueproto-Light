@@ -169,7 +169,32 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         // Pré-chauffage TTS: lancer un call ultra court en arrière-plan pour remplir les caches CDN
         textToSpeechStreaming("...").catch(() => {});
 
-        const audioBlob = await textToSpeechWithRetry(welcomeMessage);
+        // Try to use the pre-generated welcome audio token (kicked off at session creation)
+        let audioBlob: Blob | null = null;
+        const pregenToken = sessionStorage.getItem('welcomeAudioToken');
+        if (pregenToken) {
+          sessionStorage.removeItem('welcomeAudioToken'); // consume immediately to prevent stale reuse
+          try {
+            console.log('[TutorialScreen] Using pre-generated welcome audio, token:', pregenToken.substring(0, 8));
+            const audioResponse = await fetch(`/api/tts/play/${pregenToken}`);
+            if (audioResponse.ok) {
+              audioBlob = await audioResponse.blob();
+              console.log('[TutorialScreen] Pre-generated welcome audio ready, size:', audioBlob.size);
+            } else {
+              console.warn('[TutorialScreen] Pre-generated token returned', audioResponse.status, '— falling back');
+            }
+          } catch (pregenErr) {
+            console.warn('[TutorialScreen] Pre-generated audio fetch failed, falling back:', pregenErr);
+            audioBlob = null;
+          }
+        }
+
+        // Fallback: generate on-demand if pre-gen token was unavailable or failed
+        if (!audioBlob || audioBlob.size < 100) {
+          console.log('[TutorialScreen] Generating welcome audio on-demand (no pre-gen token)');
+          audioBlob = await textToSpeechWithRetry(welcomeMessage);
+        }
+
         await playAudio(audioBlob);
       } catch (error) {
         console.error('[TutorialScreen] Failed to play welcome audio:', error);

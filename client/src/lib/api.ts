@@ -1,6 +1,6 @@
 import type { TutorialSession, InsertTutorialSession } from "@shared/schema";
 
-export async function createSession(data: InsertTutorialSession): Promise<TutorialSession> {
+export async function createSession(data: InsertTutorialSession): Promise<TutorialSession & { welcomeAudioToken?: string }> {
   const response = await fetch('/api/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

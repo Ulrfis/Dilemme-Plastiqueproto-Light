@@ -403,7 +403,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const data = insertTutorialSessionSchema.parse(req.body);
       const session = await storage.createSession(data);
-      res.json(session);
+
+      // Pre-generate welcome message TTS in background so TutorialScreen can play it immediately
+      // without waiting for an on-demand ElevenLabs call after navigation.
+      const welcomeText = `Bienvenue ${data.userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum 8 échanges pour y parvenir !`;
+      const welcomeAudioToken = crypto.randomUUID();
+      ttsRequestStore.set(welcomeAudioToken, {
+        promise: generateTtsAudio(welcomeText, undefined, 'quality'),
+        createdAt: Date.now(),
+      });
+      console.log('[Session Create] Pre-generating welcome TTS in background, token:', welcomeAudioToken.substring(0, 8));
+
+      res.json({ ...session, welcomeAudioToken });
     } catch (error) {
       console.error('Error creating session:', error);
       res.status(400).json({ error: 'Invalid session data' });
@@ -915,14 +926,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // unnatural micro-segments. Phase 1 fires as soon as the combined buffer reaches
       // MIN_SENTENCE_CHARS, or at stream completion if nothing was long enough.
       // ─────────────────────────────────────────────────────────────────────────
-      const MIN_SENTENCE_CHARS = 80;
+      const MIN_SENTENCE_CHARS = 55;
       const MAX_PHASE1_SENTENCES = 2;  // Prevent Phase 1 from grouping too many short sentences
+      // Phase 2 early dispatch thresholds: fire Phase 2a mid-stream to avoid silence gaps
+      const PHASE2_EARLY_CHARS = 120;      // dispatch Phase 2a when accumulated text reaches this
+      const PHASE2_EARLY_SENTENCES = 3;    // OR when accumulated sentence count reaches this
       let phase1Done = false;
       let phase1Text = "";                        // text sent in Phase 1 (used as previous_text for Phase 2)
       let phase1ShortBuffer: Array<{ text: string; index: number }> = []; // short sentences accumulating before Phase 1 fires
-      let phase2Buffer: string[] = [];            // sentences queued for Phase 2 single call
+      let phase2Buffer: string[] = [];            // sentences queued for Phase 2a (early dispatch)
       let phase2StartIndex = -1;                  // SSE index of the first Phase 2 sentence
-      let phase2Dispatched = false;               // true when Phase 2 TTS call has been dispatched
+      let phase2Dispatched = false;               // true when any Phase 2 TTS call has been dispatched
+      let phase2aDispatched = false;              // true when Phase 2a early TTS has fired
+      let phase2aText = "";                       // text sent in Phase 2a (chained as previous_text for Phase 2b)
+      let phase2bBuffer: string[] = [];           // sentences accumulating after Phase 2a fires
+      let phase2bStartIndex = -1;                 // SSE index of first Phase 2b sentence
 
       const dispatchPhase1Tts = (sentences: Array<{ text: string; index: number }>) => {
         const combined = sentences.map(s => s.text).join(' ');
@@ -960,30 +978,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sentenceTtsPromises.push(ttsPromise);
       };
 
-      const dispatchPhase2Tts = (sentences: string[], startIndex: number) => {
+      // Phase 2a: early dispatch mid-stream when buffer threshold is reached.
+      // Fires with previous_text=phase1Text so prosody continues naturally from Phase 1.
+      const dispatchPhase2aTts = (sentences: string[], startIndex: number) => {
         const combined = sentences.join(' ');
         const count = sentences.length;
+        phase2aDispatched = true;
+        phase2aText = combined;
         phase2Dispatched = true;
 
-        console.log(`[Chat Stream API] Phase 2 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
+        console.log(`[Chat Stream API] Phase 2a TTS (EARLY): ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
 
         const ttsPromise = generateTtsAudio(combined, phase1Text || undefined, 'quality')
           .then((audioBuffer) => {
             const audioToken = crypto.randomUUID();
             ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
-            console.log(`[Chat Stream API] Phase 2 TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
+            console.log(`[Chat Stream API] Phase 2a TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
             if (!res.writableEnded) {
               res.write(`data: ${JSON.stringify({
                 type: 'sentence_audio',
                 index: startIndex,
                 audioToken,
-                count,  // client must skip indices startIndex+1 … startIndex+count-1
+                count,
                 phase: 'phase2',
               })}\n\n`);
             }
           })
           .catch((ttsErr) => {
-            console.error('[Chat Stream API] Phase 2 TTS failed:', ttsErr);
+            console.error('[Chat Stream API] Phase 2a TTS failed:', ttsErr);
+            if (!res.writableEnded) {
+              for (let i = startIndex; i < startIndex + count; i++) {
+                res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
+              }
+            }
+          });
+
+        sentenceTtsPromises.push(ttsPromise);
+      };
+
+      // Phase 2b: sentences that arrived after Phase 2a was dispatched.
+      // Chains previous_text = phase1Text + phase2aText for full prosody continuity.
+      const dispatchPhase2bTts = (sentences: string[], startIndex: number) => {
+        const combined = sentences.join(' ');
+        const count = sentences.length;
+        const prevText = [phase1Text, phase2aText].filter(Boolean).join(' ') || undefined;
+
+        console.log(`[Chat Stream API] Phase 2b TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
+
+        const ttsPromise = generateTtsAudio(combined, prevText, 'quality')
+          .then((audioBuffer) => {
+            const audioToken = crypto.randomUUID();
+            ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
+            console.log(`[Chat Stream API] Phase 2b TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({
+                type: 'sentence_audio',
+                index: startIndex,
+                audioToken,
+                count,
+                phase: 'phase2',
+              })}\n\n`);
+            }
+          })
+          .catch((ttsErr) => {
+            console.error('[Chat Stream API] Phase 2b TTS failed:', ttsErr);
             if (!res.writableEnded) {
               for (let i = startIndex; i < startIndex + count; i++) {
                 res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
@@ -1017,11 +1075,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
           // If still too short and under cap: keep buffering — will be flushed on thread.run.completed
         } else {
-          // Phase 2: accumulate for a single bulk TTS call after LLM finishes
-          if (phase2Buffer.length === 0) {
-            phase2StartIndex = index;
+          // Phase 2: rolling early dispatch — fire Phase 2a when threshold reached,
+          // then accumulate Phase 2b tail for dispatch at thread.run.completed.
+          if (!phase2aDispatched) {
+            if (phase2Buffer.length === 0) {
+              phase2StartIndex = index;
+            }
+            phase2Buffer.push(trimmed);
+            const combined2a = phase2Buffer.join(' ');
+            if (combined2a.length >= PHASE2_EARLY_CHARS || phase2Buffer.length >= PHASE2_EARLY_SENTENCES) {
+              dispatchPhase2aTts(phase2Buffer, phase2StartIndex);
+              phase2Buffer = [];
+            }
+          } else {
+            // Phase 2a already fired — accumulate remainder for Phase 2b
+            if (phase2bBuffer.length === 0) {
+              phase2bStartIndex = index;
+            }
+            phase2bBuffer.push(trimmed);
           }
-          phase2Buffer.push(trimmed);
         }
       };
 
@@ -1063,9 +1135,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             phase1ShortBuffer = [];
           }
 
-          // Dispatch Phase 2 as a single quality TTS call
-          if (phase2Buffer.length > 0) {
-            dispatchPhase2Tts(phase2Buffer, phase2StartIndex);
+          // Flush Phase 2a buffer if early threshold was never reached during streaming
+          if (!phase2aDispatched && phase2Buffer.length > 0) {
+            dispatchPhase2aTts(phase2Buffer, phase2StartIndex);
+            phase2Buffer = [];
+          }
+
+          // Dispatch Phase 2b for any sentences accumulated after Phase 2a fired
+          if (phase2bBuffer.length > 0) {
+            dispatchPhase2bTts(phase2bBuffer, phase2bStartIndex);
           }
         }
 
