@@ -14,8 +14,10 @@ import { db } from "./db";
 import { eq, desc, sql } from "drizzle-orm";
 import { googleSheetsSync } from "./google-sheets-sync";
 
+export type InsertTutorialSessionWithToken = InsertTutorialSession & { accessToken: string };
+
 export interface IStorage {
-  createSession(session: InsertTutorialSession): Promise<TutorialSession>;
+  createSession(session: InsertTutorialSessionWithToken): Promise<TutorialSession>;
   getSession(id: string): Promise<TutorialSession | undefined>;
   updateSession(id: string, updates: Partial<TutorialSession>): Promise<TutorialSession | undefined>;
   addMessage(message: InsertConversationMessage): Promise<ConversationMessage>;
@@ -30,7 +32,7 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  async createSession(insertSession: InsertTutorialSession): Promise<TutorialSession> {
+  async createSession(insertSession: InsertTutorialSessionWithToken): Promise<TutorialSession> {
     const [session] = await db
       .insert(tutorialSessions)
       .values(insertSession)

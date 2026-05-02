@@ -5,6 +5,7 @@ import { z } from "zod";
 
 export const tutorialSessions = pgTable("tutorial_sessions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  accessToken: text("access_token").notNull().default(''),
   userName: text("user_name").notNull(),
   foundClues: jsonb("found_clues").$type<string[]>().default([]).notNull(),
   score: integer("score").default(0).notNull(),
@@ -71,6 +72,7 @@ export const conversationMessages = pgTable("conversation_messages", {
 
 export const insertTutorialSessionSchema = createInsertSchema(tutorialSessions).omit({
   id: true,
+  accessToken: true,
   createdAt: true,
   startedAt: true,
 });

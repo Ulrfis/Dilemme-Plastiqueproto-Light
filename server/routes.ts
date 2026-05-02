@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, type InsertTutorialSessionWithToken } from "./storage";
 import multer from "multer";
 import OpenAI from "openai";
 import { z } from "zod";
@@ -399,10 +399,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  /**
+   * Verify that the request carries the correct access token for the given session.
+   * Returns the session on success, or sends a 401/403/404 response and returns null.
+   */
+  async function verifySessionToken(
+    sessionId: string,
+    req: import('express').Request,
+    res: import('express').Response
+  ): Promise<import('@shared/schema').TutorialSession | null> {
+    const session = await storage.getSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return null;
+    }
+    const provided =
+      (req.headers['x-session-token'] as string | undefined) ||
+      (req.body?.accessToken as string | undefined);
+    if (!provided || provided !== session.accessToken) {
+      res.status(403).json({ error: 'Forbidden' });
+      return null;
+    }
+    return session;
+  }
+
+  /**
+   * Remove `accessToken` from a session object before sending it to the client.
+   * The token is only ever sent once: in the POST /api/sessions creation response.
+   */
+  function sanitizeSession<T extends { accessToken?: string | null }>(session: T): Omit<T, 'accessToken'> {
+    const { accessToken: _removed, ...rest } = session;
+    return rest as Omit<T, 'accessToken'>;
+  }
+
   app.post('/api/sessions', async (req, res) => {
     try {
       const data = insertTutorialSessionSchema.parse(req.body);
-      const session = await storage.createSession(data);
+      const accessToken = crypto.randomBytes(16).toString('hex');
+      const sessionData: InsertTutorialSessionWithToken = { ...data, accessToken };
+      const session = await storage.createSession(sessionData);
 
       // Pre-generate welcome message TTS in background so TutorialScreen can play it immediately
       // without waiting for an on-demand ElevenLabs call after navigation.
@@ -414,6 +449,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       console.log('[Session Create] Pre-generating welcome TTS in background, token:', welcomeAudioToken.substring(0, 8));
 
+      // Return accessToken once so the client can persist it; also include welcomeAudioToken
       res.json({ ...session, welcomeAudioToken });
     } catch (error) {
       console.error('Error creating session:', error);
@@ -423,11 +459,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/sessions/:id', async (req, res) => {
     try {
-      const session = await storage.getSession(req.params.id);
-      if (!session) {
-        return res.status(404).json({ error: 'Session not found' });
-      }
-      res.json(session);
+      const session = await verifySessionToken(req.params.id, req, res);
+      if (!session) return;
+      res.json(sanitizeSession(session));
     } catch (error) {
       console.error('Error fetching session:', error);
       res.status(500).json({ error: 'Server error' });
@@ -436,6 +470,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/sessions/:id', async (req, res) => {
     try {
+      const verified = await verifySessionToken(req.params.id, req, res);
+      if (!verified) return;
+
       const updateSchema = z.object({
         foundClues: z.array(z.string()).optional(),
         score: z.number().int().min(0).max(4).optional(),
@@ -449,7 +486,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!session) {
         return res.status(404).json({ error: 'Session not found' });
       }
-      res.json(session);
+      res.json(sanitizeSession(session));
     } catch (error) {
       console.error('Error updating session:', error);
       if (error instanceof z.ZodError) {
@@ -476,6 +513,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/feedback/:sessionId', async (req, res) => {
     try {
+      const verified = await verifySessionToken(req.params.sessionId, req, res);
+      if (!verified) return;
+
       const feedback = await storage.getFeedbackBySession(req.params.sessionId);
       if (!feedback) {
         return res.status(404).json({ error: 'Feedback not found' });
@@ -490,6 +530,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/sessions/:id/feedback', async (req, res) => {
     try {
       const sessionId = req.params.id;
+
+      const verified = await verifySessionToken(sessionId, req, res);
+      if (!verified) return;
 
       const feedbackSchema = z.object({
         scenarioComprehension: z.number().int().min(1).max(6).optional(),
@@ -525,7 +568,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!session) {
         return res.status(404).json({ error: 'Session not found' });
       }
-      res.json({ success: true, session });
+      res.json({ success: true, session: sanitizeSession(session) });
     } catch (error) {
       console.error('Error updating partial feedback:', error);
       if (error instanceof z.ZodError) {
@@ -831,10 +874,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'userMessage must be a string of at most 2000 characters' });
       }
 
-      const session = await storage.getSession(sessionId);
-      if (!session) {
-        return res.status(404).json({ error: 'Session not found' });
-      }
+      const session = await verifySessionToken(sessionId, req, res);
+      if (!session) return;
 
       console.log('[Chat Stream API] Session found:', { sessionId, foundClues: session.foundClues });
 
@@ -1255,10 +1296,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'userMessage must be a string of at most 2000 characters' });
       }
 
-      const session = await storage.getSession(sessionId);
-      if (!session) {
-        return res.status(404).json({ error: 'Session not found' });
-      }
+      const session = await verifySessionToken(sessionId, req, res);
+      if (!session) return;
 
       console.log('[Chat API] Session found:', { sessionId, foundClues: session.foundClues });
 
@@ -1431,6 +1470,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/sessions/:id/synthesis', async (req, res) => {
     try {
       const { id } = req.params;
+
+      const verified = await verifySessionToken(id, req, res);
+      if (!verified) return;
+
       const { finalSynthesis } = req.body;
 
       if (!finalSynthesis || typeof finalSynthesis !== 'string') {
@@ -1448,7 +1491,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       console.log('[Synthesis API] Synthesis saved for session:', id);
-      res.json(session);
+      res.json(sanitizeSession(session));
     } catch (error) {
       console.error('[Synthesis API] Error saving synthesis:', error);
       res.status(500).json({ error: 'Failed to save synthesis' });
@@ -1466,8 +1509,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         limit: Math.min(limit, 100), // Max 100
       });
 
-      // Filter to only return sessions with finalSynthesis
-      const withSynthesis = syntheses.filter(s => s.finalSynthesis);
+      // Filter to only return sessions with finalSynthesis, strip access tokens
+      const withSynthesis = syntheses
+        .filter(s => s.finalSynthesis)
+        .map(sanitizeSession);
 
       console.log('[Syntheses API] Returning', withSynthesis.length, 'syntheses');
       res.json(withSynthesis);
@@ -1499,10 +1544,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // GET /api/sessions/:id/stats - Stats de la session
   app.get('/api/sessions/:id/stats', async (req, res) => {
     try {
-      const session = await storage.getSession(req.params.id);
-      if (!session) {
-        return res.status(404).json({ error: 'Session not found' });
-      }
+      const session = await verifySessionToken(req.params.id, req, res);
+      if (!session) return;
 
       res.json({
         messageCount: session.messageCount,

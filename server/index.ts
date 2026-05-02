@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import OpenAI from "openai";
 import { elevenLabsFetch } from "./elevenlabs-agent";
+import { backfillSessionTokens } from "./backfill-session-tokens";
 
 const app = express();
 
@@ -34,6 +35,10 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Backfill access tokens synchronously before accepting any requests
+  // This ensures every session has a token before the null-token bypass is removed
+  await backfillSessionTokens();
+
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

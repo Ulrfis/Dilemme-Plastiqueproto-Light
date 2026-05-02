@@ -232,7 +232,7 @@ function VideoPage() {
 
 function WelcomePage() {
   const [, setLocation] = useLocation();
-  const { setUserName, setSessionId, setAudioUnlocked, setMessages, setExchangeCount, setConversationEnded } = useSessionFlow();
+  const { setUserName, setSessionId, setAccessToken, setAudioUnlocked, setMessages, setExchangeCount, setConversationEnded } = useSessionFlow();
 
   const handleComplete = async (name: string) => {
     // CRITICAL: Reset audio and conversation state for new session
@@ -261,9 +261,10 @@ function WelcomePage() {
         completed: 0,
       });
       setSessionId(session.id);
+      setAccessToken(session.accessToken || '');
       // Store the pre-generated welcome audio token so TutorialScreen can play it immediately
-      if (session.welcomeAudioToken) {
-        sessionStorage.setItem('welcomeAudioToken', session.welcomeAudioToken);
+      if ((session as any).welcomeAudioToken) {
+        sessionStorage.setItem('welcomeAudioToken', (session as any).welcomeAudioToken);
       }
       captureFeatureUsed('session_created', { sessionId: session.id, userName: name });
       setLocation('/tutorial');

@@ -8,6 +8,7 @@ export interface StoredSessionFlow {
   }>;
   userName?: string;
   sessionId?: string;
+  accessToken?: string;
   foundClues?: string[];
 }
 

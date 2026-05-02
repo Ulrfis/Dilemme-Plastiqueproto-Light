@@ -1,4 +1,14 @@
 import type { TutorialSession, InsertTutorialSession } from "@shared/schema";
+import { readStoredSessionFlow } from "@/lib/sessionFlowStorage";
+
+function sessionAuthHeaders(): Record<string, string> {
+  const stored = readStoredSessionFlow();
+  const token = stored?.accessToken;
+  if (token) {
+    return { 'X-Session-Token': token };
+  }
+  return {};
+}
 
 export async function createSession(data: InsertTutorialSession): Promise<TutorialSession & { welcomeAudioToken?: string }> {
   const response = await fetch('/api/sessions', {
@@ -15,7 +25,9 @@ export async function createSession(data: InsertTutorialSession): Promise<Tutori
 }
 
 export async function getSession(id: string): Promise<TutorialSession> {
-  const response = await fetch(`/api/sessions/${id}`);
+  const response = await fetch(`/api/sessions/${id}`, {
+    headers: { ...sessionAuthHeaders() },
+  });
 
   if (!response.ok) {
     throw new Error('Failed to fetch session');
@@ -27,7 +39,7 @@ export async function getSession(id: string): Promise<TutorialSession> {
 export async function updateSession(id: string, updates: Partial<InsertTutorialSession>): Promise<TutorialSession> {
   const response = await fetch(`/api/sessions/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...sessionAuthHeaders() },
     body: JSON.stringify(updates),
   });
 
@@ -43,10 +55,11 @@ export async function sendChatMessage(sessionId: string, userMessage: string): P
   detectedClue: string | null;
   foundClues: string[];
 }> {
+  const stored = readStoredSessionFlow();
   const response = await fetch('/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, userMessage }),
+    headers: { 'Content-Type': 'application/json', ...sessionAuthHeaders() },
+    body: JSON.stringify({ sessionId, userMessage, accessToken: stored?.accessToken }),
   });
 
   if (!response.ok) {
@@ -160,12 +173,14 @@ export async function sendChatMessageStreaming(
   callbacks: StreamChatCallbacks,
   options?: StreamChatOptions
 ): Promise<void> {
+  const stored = readStoredSessionFlow();
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...sessionAuthHeaders() },
     body: JSON.stringify({
       sessionId,
       userMessage,
+      accessToken: stored?.accessToken,
       exchangeCount: options?.exchangeCount,
       userName: options?.userName
     }),
