@@ -111,6 +111,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const {
     audioState,
     transcription,
+    audioLevel,
     startRecording,
     stopRecording,
     playAudio,
@@ -775,6 +776,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             onTextInputChange={setTextInput}
             exchangeCount={exchangeCount}
             maxExchanges={MAX_EXCHANGES}
+            audioLevel={audioLevel}
           />
         </div>
       </div>
@@ -796,6 +798,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             onTextInputChange={setTextInput}
             exchangeCount={exchangeCount}
             maxExchanges={MAX_EXCHANGES}
+            audioLevel={audioLevel}
           />
         </div>
 

@@ -10,6 +10,7 @@ interface UseVoiceInteractionOptions {
 interface UseVoiceInteractionResult {
   audioState: AudioState;
   transcription: string;
+  audioLevel: number;
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<string | null>;
   playAudio: (audioBlob: Blob) => Promise<void>;
@@ -26,6 +27,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const { onAudioStart, onAudioStop } = options || {};
   const [audioState, setAudioState] = useState<AudioState>('idle');
   const [transcription, setTranscription] = useState('');
+  const [audioLevel, setAudioLevel] = useState(0);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -34,6 +36,12 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const audioContextRef = useRef<AudioContext | null>(null);
   const keepAliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
+
+  // Audio level sampling (Option C: 10fps RMS volume meter)
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const mediaStreamSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioLevelIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const smoothedLevelRef = useRef(0);
   
   // Utiliser des refs pour stocker les callbacks et éviter les stale closures
   // Les callbacks playAudio/stopAudio seront stables et invoqueront toujours la dernière version
@@ -49,6 +57,71 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     onAudioStopRef.current = onAudioStop;
   }, [onAudioStop]);
 
+  // Stop the audio level sampling loop and disconnect the analyser graph.
+  // Called on stopRecording, reset, and component unmount. Safe to call multiple times.
+  const stopAudioLevelSampling = useCallback(() => {
+    if (audioLevelIntervalRef.current) {
+      clearInterval(audioLevelIntervalRef.current);
+      audioLevelIntervalRef.current = null;
+    }
+    if (mediaStreamSourceRef.current) {
+      try {
+        mediaStreamSourceRef.current.disconnect();
+      } catch (err) {
+        // disconnect can throw if already disconnected — safe to ignore
+      }
+      mediaStreamSourceRef.current = null;
+    }
+    analyserRef.current = null;
+    smoothedLevelRef.current = 0;
+    setAudioLevel(0);
+  }, []);
+
+  // Start sampling the microphone volume at 10fps via an AnalyserNode.
+  // Non-fatal: if the Web Audio graph cannot be built (e.g. older Safari),
+  // recording continues without a waveform indicator.
+  const startAudioLevelSampling = useCallback((stream: MediaStream) => {
+    try {
+      if (!audioContextRef.current) {
+        console.warn('[useVoiceInteraction] No AudioContext for level sampling');
+        return;
+      }
+
+      const source = audioContextRef.current.createMediaStreamSource(stream);
+      const analyser = audioContextRef.current.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.5;
+      source.connect(analyser);
+
+      mediaStreamSourceRef.current = source;
+      analyserRef.current = analyser;
+      smoothedLevelRef.current = 0;
+
+      const buffer = new Uint8Array(analyser.frequencyBinCount);
+
+      audioLevelIntervalRef.current = setInterval(() => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(buffer);
+        // RMS over the frequency bins (normalised 0..1)
+        let sum = 0;
+        for (let i = 0; i < buffer.length; i++) {
+          const v = buffer[i] / 255;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buffer.length);
+        // Low-pass smoothing to avoid jittery bars
+        smoothedLevelRef.current = smoothedLevelRef.current * 0.6 + rms * 0.4;
+        setAudioLevel(smoothedLevelRef.current);
+      }, 100);
+
+      console.log('[useVoiceInteraction] Audio level sampling started');
+    } catch (err) {
+      console.warn('[useVoiceInteraction] Could not start audio level sampling:', err);
+      // Cleanup partial state if anything was created
+      stopAudioLevelSampling();
+    }
+  }, [stopAudioLevelSampling]);
+
   // MOBILE FIX: Cleanup keepalive et audio context au démontage du composant
   useEffect(() => {
     return () => {
@@ -59,6 +132,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         clearInterval(keepAliveIntervalRef.current);
         keepAliveIntervalRef.current = null;
       }
+
+      // Arrêter le sampling de niveau audio
+      stopAudioLevelSampling();
 
       // Nettoyer l'URL blob
       if (currentAudioUrlRef.current) {
@@ -74,7 +150,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         audioContextRef.current = null;
       }
     };
-  }, []);
+  }, [stopAudioLevelSampling]);
 
   // Track if we've already played the initial silent buffer to unlock audio
   const audioUnlockedRef = useRef(false);
@@ -246,13 +322,17 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
       setAudioState('recording');
+
+      // Démarrer le sampling de niveau audio pour la waveform (non-bloquant si échec)
+      startAudioLevelSampling(stream);
+
       console.log('[useVoiceInteraction] Recording started successfully');
     } catch (error) {
       console.error('[useVoiceInteraction] Error starting recording:', error);
       setAudioState('error');
       throw error;
     }
-  }, [initializeAudioElement, unlockAudioContext]);
+  }, [initializeAudioElement, unlockAudioContext, startAudioLevelSampling]);
 
   const stopRecording = useCallback(async (): Promise<string | null> => {
     return new Promise((resolve) => {
@@ -265,6 +345,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       }
 
       console.log('[useVoiceInteraction] stopRecording: stopping recording...');
+
+      // Arrêter le sampling de niveau audio immédiatement (avant le traitement async)
+      stopAudioLevelSampling();
 
       mediaRecorder.onstop = async () => {
         console.log('[useVoiceInteraction] Recording stopped, chunks:', audioChunksRef.current.length);
@@ -312,7 +395,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
       mediaRecorder.stop();
     });
-  }, [unlockAudioContext, startAudioKeepAlive]);
+  }, [unlockAudioContext, startAudioKeepAlive, stopAudioLevelSampling]);
 
   const playAudio = useCallback(async (audioBlob: Blob): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -638,6 +721,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     // Arrêter le keepalive
     stopAudioKeepAlive();
 
+    // Arrêter le sampling de niveau audio
+    stopAudioLevelSampling();
+
     // MOBILE FIX: Properly cleanup MediaRecorder and stream
     if (mediaRecorderRef.current) {
       try {
@@ -678,7 +764,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     setAudioState('idle');
     setTranscription('');
     audioChunksRef.current = [];
-  }, [stopAudioKeepAlive]);
+  }, [stopAudioKeepAlive, stopAudioLevelSampling]);
 
   const recoverFromError = useCallback(() => {
     reset();
@@ -818,6 +904,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   return {
     audioState,
     transcription,
+    audioLevel,
     startRecording,
     stopRecording,
     playAudio,

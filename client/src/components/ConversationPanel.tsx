@@ -25,6 +25,7 @@ interface ConversationPanelProps {
   onTextInputChange: (text: string) => void;
   exchangeCount: number;
   maxExchanges: number;
+  audioLevel?: number;
 }
 
 export default function ConversationPanel({
@@ -40,6 +41,7 @@ export default function ConversationPanel({
   onTextInputChange,
   exchangeCount,
   maxExchanges,
+  audioLevel = 0,
 }: ConversationPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -143,19 +145,29 @@ export default function ConversationPanel({
           </Badge>
         </div>
 
-        {/* Indicateur d'état */}
+        {/* Indicateur d'état - waveform pilotée par le niveau micro réel (Option C) */}
         {state === 'recording' && (
-          <div className="flex justify-center gap-1 items-end h-6 sm:h-8 mb-2">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div
-                key={i}
-                className="w-1 sm:w-1.5 bg-primary rounded-full animate-pulse"
-                style={{
-                  height: `${Math.random() * 15 + 8}px`,
-                  animationDelay: `${i * 0.1}s`
-                }}
-              />
-            ))}
+          <div
+            className="flex justify-center gap-1 items-center h-6 sm:h-8 mb-2"
+            data-testid="waveform-recording"
+          >
+            {[0, 1, 2, 3, 4].map((i) => {
+              // Profil "cloche" : barres centrales plus réactives
+              const shape = [0.55, 0.8, 1, 0.8, 0.55][i];
+              const baseHeight = 6;
+              const maxAdditional = 22;
+              // Niveau minimum pour qu'on voie un mouvement même en silence
+              const effectiveLevel = Math.max(audioLevel, 0.05);
+              const height = baseHeight + effectiveLevel * maxAdditional * shape;
+              return (
+                <div
+                  key={i}
+                  className="w-1 sm:w-1.5 bg-primary rounded-full transition-[height] duration-100 ease-out"
+                  style={{ height: `${height}px` }}
+                  data-testid={`waveform-bar-${i}`}
+                />
+              );
+            })}
           </div>
         )}
 
