@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-05-02 (redesign UI tutoriel + voix uniforme)  
+> **Last Updated**: 2026-05-02 (message de reprise contextuel pour utilisateur qui revient)  
 
 ---
 
@@ -63,6 +63,47 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 ## Feature Chronicle
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
+
+### [2026-05-02] — Peter reprend la conversation au retour sur /tutorial 🔷
+
+**Intent**: Quand un utilisateur revient sur l'écran tutoriel après une navigation, Peter était muet. Il fallait qu'il accueille à nouveau, mais de façon contextuelle — pas la phrase de bienvenue générique, plutôt un mot qui repart de là où on en était.
+
+**Prompt(s)**:
+```
+Dans le contexte d'une session déjà ouverte, avec des indices trouvés, et que
+la personne revient dans la conversation, il faut faire dire à Peter une autre
+phrase que la phrase initiale. Il faut faire une phrase qui idéalement repart
+de la conversation existante — si elle existe en mémoire — et si elle n'existe
+pas, alors il faut simplement que Peter regarde les indices trouvés et guide
+vers le ou les dernier(s) indice(s) qui doivent encore être trouvés.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Nouveau endpoint serveur `POST /api/sessions/:id/resume` : auth → calcul indices manquants → réutilisation thread OpenAI existant → injection prompt de reprise → run assistant → pré-génération TTS → `{ text, audioToken }`
+- Prompt de reprise injecté dans le thread : "[REPRISE DE SESSION — NE PAS COMPTER COMME ÉCHANGE] … accueille en 1-2 phrases MAX, fais référence à la conversation si elle a eu lieu, oriente vers les indices manquants, pas la phrase de bienvenue initiale"
+- Client : `handleUnlockAudio` branche `isReturningUser` → `setIsThinking(true)` → appel resume → guard `text?.trim()` → append message → fetch audio → `playAudio`
+- Zéro impact compteurs : `exchangeCount` client et `messageCount` DB non touchés
+- Fallback texte statique si assistant retourne vide
+- Erreurs silencieuses partout (warn + log, jamais bloquant)
+- Fix code review : accumulation delta robuste (itération tous les blocs `content`, pas seulement `[0]`)
+
+**Architecture**:
+```
+Avant : isReturningUser → silence (hasPlayedWelcome.current = true, rien d'autre)
+Après : isReturningUser → isThinking → POST /resume → thread OpenAI → TTS → playAudio
+```
+
+**Surprise**: Le thread OpenAI conserve tout l'historique de la session — Peter peut donc faire une vraie référence contextuelle ("Tu avais bien observé la statue…") sans que le client ait besoin de renvoyer les messages. La mémoire est déjà là, côté serveur.
+
+**Friction**: Erreur de syntaxe JS après ajout du guard `text?.trim()` — l'accolade fermante du `if` n'était pas alignée avec le `try` englobant. Fix en relisant la structure complète.
+
+**Insight**: Un endpoint "hors-échange" qui utilise le même thread mais n'incrémente aucun compteur est une primitive utile : il permet des interactions Peter sans "consumer" les 8 échanges disponibles.
+
+**Time**: ~20 minutes (plan + implémentation + fix syntaxe + code review)
+
+---
 
 ### [2026-05-02] — Redesign UI Tutoriel : Mobile Collapsible, Tablette, Desktop 🔷
 

@@ -6,6 +6,34 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2.2.0] - 2026-05-02
+
+### Ajouté — Message de reprise contextuel de Peter au retour sur /tutorial
+
+**Problème** : un utilisateur revenant sur `/tutorial` avec une session active (indices trouvés, messages existants) trouvait Peter muet. `handleUnlockAudio` détectait `isReturningUser` mais ne faisait rien vocalement.
+
+**Solution** :
+
+#### Serveur — `POST /api/sessions/:id/resume` (`server/routes.ts`)
+- Authentification via `verifySessionToken` (accessToken dans le body ou header `x-session-token`)
+- Calcul des indices manquants depuis `session.foundClues`
+- Réutilisation du thread OpenAI existant (`session.threadId`) ou création d'un nouveau si absent
+- Injection d'un message "utilisateur" système dans le thread : prompt de reprise demandant à Peter d'accueillir en 1-2 phrases MAX, de faire référence à la conversation existante, et de guider vers les indices manquants — sans répéter la phrase de bienvenue initiale
+- Run assistant via `runs.stream` avec accumulation robuste (itération de **tous** les blocs `delta.content`, pas seulement `[0]`)
+- Texte fallback si l'assistant retourne vide : phrase statique basée sur le nombre d'indices trouvés
+- Pré-génération TTS `eleven_multilingual_v2` via `generateTtsAudio('quality')`, token stocké dans `ttsRequestStore`
+- Retourne `{ text, audioToken }` — **pas d'appel à `storage.addMessage` ni de mise à jour de `messageCount`**
+
+#### Client — `handleUnlockAudio`, branche `isReturningUser` (`TutorialScreen.tsx`)
+- Active `isThinking` (bulle "Peter réfléchit…") dès le début
+- `POST /api/sessions/:id/resume` avec `accessToken` + `userName`
+- Guard `text?.trim()` avant d'ajouter le message (évite les bulles vides en cas d'erreur silencieuse)
+- Append du texte comme message `assistant` via `setMessages` (conserve l'historique existant)
+- Fetch `GET /api/tts/play/:audioToken` + `playAudio` si blob ≥ 100 bytes
+- `catch` silencieux à chaque étape : `setIsThinking(false)` + `console.warn/error`, jamais de toast bloquant
+
+---
+
 ## [2.1.0] - 2026-05-02
 
 ### Ajouté — Redesign UI interface tutoriel (mobile / tablette / desktop)

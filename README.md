@@ -2,7 +2,7 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
@@ -12,7 +12,20 @@
 
 ---
 
-## 🆕 Version Actuelle (v2.1.0 - May 2)
+## 🆕 Version Actuelle (v2.2.0 - May 2)
+
+### 💬 Peter reprend la conversation au retour sur le tutoriel
+
+- **Problème** : quand un utilisateur revenait sur `/tutorial` avec une session déjà active (indices trouvés, messages existants), Peter était muet — la page s'affichait silencieusement sans aucune prise de parole.
+- **Nouveau comportement** : Peter prononce un message de reprise court et contextuel (1-2 phrases), généré en temps réel via le thread OpenAI existant. Il fait référence à ce qui a déjà été dit et guide subtilement vers les indices encore manquants.
+- **Pipeline** : nouvel endpoint `POST /api/sessions/:id/resume` (serveur) → injection d'un prompt de reprise dans le thread OpenAI → réponse non-streaming → TTS `eleven_multilingual_v2` pré-généré → token audio joué côté client via le même mécanisme que le message de bienvenue.
+- **Zéro impact sur les compteurs** : le message de reprise ne compte pas comme un échange (`exchangeCount` client inchangé, `messageCount` DB non incrémenté).
+- **Robustesse** : si le thread n'existe pas encore, un nouveau est créé ; si la génération échoue (réseau, timeout OpenAI), la page s'affiche silencieusement sans bloquer l'utilisateur.
+- **Bulle "Peter réfléchit"** : s'affiche pendant la génération du message de reprise, exactement comme lors d'un échange normal.
+
+---
+
+## 🚀 Améliorations Précédentes (v2.1.0 - May 2)
 
 ### 🎨 Redesign UI Complet de l'Interface Tutoriel
 
