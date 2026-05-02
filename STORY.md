@@ -740,6 +740,52 @@ Stream onComplete → setIsThinking(false) [garde-fou] + setMessages(final)
 
 ---
 
+### [2026-05-02] — Peter suit les indices à chaque échange + fin auto à 6/6 🔷
+
+**Intent**: Corriger deux bugs pédagogiques liés : (1) Peter "oubliait" les indices déjà trouvés aux échanges suivants car le contexte n'était injecté qu'une seule fois dans le thread, (2) la conversation ne se terminait pas automatiquement quand tous les 6 indices étaient trouvés — obligeant les élèves à attendre la fin du quota d'échanges.
+
+**Prompt(s)**:
+```
+Peter oublie les indices déjà trouvés lors d'un échange précédent.
+Aussi : quand tous les 6 indices sont trouvés, la conversation devrait
+se terminer et proposer "Poursuivre" immédiatement, même avant le 8e échange.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- **Suivi continu (serveur)** : `server/routes.ts` injecte désormais sur *chaque* message un bloc de contexte `[Suivi des indices: N/6 trouvés (X, Y) — manquants: A, B, C]`, calculé à partir de `session.foundClues` (DB) fusionné avec les indices détectés dans le message courant. Peter dispose ainsi d'une vue complète à chaque tour.
+- **Instructions adaptatives** selon le nombre de manquants :
+  - 0 manquant → félicitations personnalisées + récap des 6 + invitation « Poursuivre »
+  - 1 manquant → guidage ciblé vers l'indice précis + « Poursuivre » si validé dans la réponse
+  - Échanges 7 et 8 → comportement existant enrichi avec les listes trouvés/manquants
+- **Fin de conversation côté client** : `TutorialScreen.tsx` — dans les callbacks `onComplete` (streaming) et le chemin non-streaming — déclenche `setConversationEnded(true)` dès que `newFoundClues.length >= TOTAL_CLUES`. Le bouton « Poursuivre » (déjà vert + flash quand 6/6) devient la seule action disponible immédiatement.
+- **Fix legacy sessions** : `SessionFlowContext.tsx` détecte les sessions avec `sessionId` sans `accessToken` (créées avant l'auth par token) et les reset proprement pour éviter des 403.
+- Déduplication sans Set spread : `.filter((v, i) => arr.indexOf(v) === i)` pour éviter une erreur TS `--downlevelIteration`.
+
+**Architecture**:
+```
+Avant:
+Message #1 → [contexte indices injecté une fois] → Peter mémorise (peut-être)
+Message #2 → [aucun contexte] → Peter peut "oublier" ou redemander un indice trouvé
+
+Après:
+Message #N → [Suivi: 3/6 trouvés (ADN, Végétation, Homme) — manquants: X, Y, Z]
+           → Peter sait exactement où on en est, à chaque échange
+
+Fin de conversation:
+Avant: attendre le 8e échange ou que l'élève clique manuellement
+Après: onComplete détecte 6/6 → conversationEnded=true → bouton "Poursuivre" s'illumine
+```
+
+**Surprise**: Le calcul `allFoundSoFar = [...session.foundClues, ...detectedInMessage]` (dédupliqué) couvre le cas où l'élève mentionne un indice dans son message courant et que le serveur le détecte *avant* que Peter réponde — Peter peut donc féliciter pour cet indice dès cette même réponse.
+
+**Friction**: Le spread `[...new Set([...])]` ne compile pas avec la config TS du projet (`--downlevelIteration` absent). Solution propre : `.filter((v, i) => arr.indexOf(v) === i)`.
+
+**Time**: ~25 minutes
+
+---
+
 ### [2026-05-02] — Deepgram Live Transcription + Waveform Amplification 🔷
 
 **Intent**: Rendre visible que le micro capte bien quelque chose pendant l'enregistrement (waveform trop discrète), et afficher la transcription en temps réel dans la zone de saisie pendant que l'utilisateur parle — pour réduire la perception d'attente et rassurer sur la captation.
