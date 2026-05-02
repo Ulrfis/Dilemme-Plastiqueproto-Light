@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { HelpCircle, CheckCircle2 } from "lucide-react";
+import { HelpCircle, CheckCircle2, ChevronUp, ChevronDown } from "lucide-react";
 import tutorialImage from "@assets/BURDEN_OF_THE_THINKER_2_retrav_1776145190837.jpg";
 import ConversationPanel from "./ConversationPanel";
 import SuccessFeedback from "./SuccessFeedback";
@@ -99,6 +99,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   // masquée dès la première phrase de la vraie réponse (ou onError/onComplete fallback)
   const [isThinking, setIsThinking] = useState(false);
   const firstSentenceReceivedRef = useRef(false);
+
+  // Image collapsible (mobile) — auto-réduit quand le clavier virtuel s'ouvre
+  const [imageCollapsed, setImageCollapsed] = useState(false);
+  const userCollapsedRef = useRef(false);
 
   // PostHog TTS latency tracking refs
   const exchangeStartTimeRef = useRef<number>(0);
@@ -725,6 +729,22 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Détection clavier virtuel via visualViewport — réduit l'image auto quand le clavier s'ouvre
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const handleVvResize = () => {
+      const keyboardHeight = window.innerHeight - vv.height;
+      if (keyboardHeight > 120) {
+        setImageCollapsed(true);
+      } else if (!userCollapsedRef.current) {
+        setImageCollapsed(false);
+      }
+    };
+    vv.addEventListener('resize', handleVvResize);
+    return () => vv.removeEventListener('resize', handleVvResize);
+  }, []);
+
   const allCluesFound = foundClues.length >= TOTAL_CLUES;
 
   // Animation CSS pour flash limité à 3 fois
@@ -747,78 +767,82 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background overflow-hidden">
-      {/* MOBILE LAYOUT - vertical stacking (default, shown on screens < lg) */}
-      <div className="flex flex-col h-full lg:hidden">
-        {/* Header fixe en haut avec compteur */}
-        <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+      {/* MOBILE LAYOUT — vertical stacking (< 768px) */}
+      <div className="flex flex-col h-full md:hidden">
+        {/* Header compact */}
+        <header className="flex-shrink-0 z-30 bg-card border-b border-card-border px-3 py-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <Badge
               variant="secondary"
-              className="text-sm sm:text-base px-2 sm:px-3 py-1 sm:py-1.5 rounded-full"
+              className="text-sm px-2 py-1 rounded-full flex-shrink-0"
               data-testid="badge-clue-counter"
             >
               <span className="font-bold text-primary">{foundClues.length}</span>
-              <span className="text-muted-foreground">/{TOTAL_CLUES} indices</span>
+              <span className="text-muted-foreground">/{TOTAL_CLUES}</span>
             </Badge>
+            {/* Mini barre de progression */}
+            <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden flex-shrink-0">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-500"
+                style={{ width: `${(foundClues.length / TOTAL_CLUES) * 100}%` }}
+              />
+            </div>
           </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             {FinishButton}
             <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                sessionFlow.resetSession();
-                captureEvent('session_manual_reset');
-                window.location.replace('/?fresh=1');
-              }}
-              className="px-3 h-9 sm:h-10"
-              data-testid="button-reset-session-mobile"
-            >
-              Nouvelle session
-            </Button>
-            <Button
               variant="ghost"
+              size="icon"
               onClick={() => setShowInfoModal(true)}
-              className="flex items-center gap-1 px-2 h-9 sm:h-10"
+              className="h-9 w-9"
               data-testid="button-help"
             >
-              <span className="text-xs sm:text-sm font-medium">Info</span>
-              <HelpCircle className="w-4 h-4 sm:w-5 sm:h-5" />
+              <HelpCircle className="w-4 h-4" />
             </Button>
           </div>
         </header>
 
-        {/* Image zoomable - 100% en horizontal */}
-        <div className="relative w-full bg-muted flex-shrink-0" style={{ height: '26vh', minHeight: '180px' }}>
-          <ZoomableImage
-            src={tutorialImage}
-            alt="Image à analyser"
-          />
-        </div>
-
-        {/* Zone fixe pour les indices trouvés - sans le bouton Poursuivre (qui est dans le header) */}
-        <div className="px-3 sm:px-4 py-2 bg-background border-b border-card-border flex-shrink-0 min-h-[50px] sm:min-h-[60px] flex items-center">
-          <div className="flex flex-wrap gap-1.5 sm:gap-2 w-full">
-            {foundClues.length > 0 ? (
-              foundClues.map((clue, index) => (
+        {/* Image zoomable collapsible */}
+        <div
+          className="relative w-full bg-muted flex-shrink-0 overflow-hidden transition-all duration-300"
+          style={{ height: imageCollapsed ? 0 : '22vh', minHeight: imageCollapsed ? 0 : '160px' }}
+        >
+          <ZoomableImage src={tutorialImage} alt="Image à analyser" />
+          {/* Clues overlay sur l'image */}
+          {foundClues.length > 0 && !imageCollapsed && (
+            <div className="absolute bottom-0 left-0 right-0 px-2 pb-2 pt-4 bg-gradient-to-t from-background/80 to-transparent flex flex-wrap gap-1 pointer-events-none">
+              {foundClues.map((clue, index) => (
                 <Badge
                   key={index}
                   variant="default"
-                  className="animate-scale-in text-xs sm:text-sm"
+                  className="animate-scale-in text-xs pointer-events-auto"
                   data-testid={`badge-clue-${index}`}
                 >
-                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  <CheckCircle2 className="w-2.5 h-2.5 mr-1" />
                   {clue}
                 </Badge>
-              ))
-            ) : (
-              <p className="text-xs sm:text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Zone de conversation - seule partie scrollable */}
+        {/* Toggle masquer/voir l'image */}
+        <button
+          onClick={() => {
+            const next = !imageCollapsed;
+            setImageCollapsed(next);
+            userCollapsedRef.current = next;
+          }}
+          className="flex-shrink-0 w-full bg-card/80 border-b border-card-border py-1 flex items-center justify-center gap-1 text-[11px] text-muted-foreground hover:bg-muted/50 active:bg-muted transition-colors"
+          data-testid="button-toggle-image"
+        >
+          {imageCollapsed
+            ? <><ChevronDown className="w-3 h-3" /> Voir l'image</>
+            : <><ChevronUp className="w-3 h-3" /> Masquer l'image</>
+          }
+        </button>
+
+        {/* Conversation — prend tout l'espace restant */}
         <div className="flex-1 overflow-hidden">
           <ConversationPanel
             messages={messages}
@@ -840,10 +864,88 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         </div>
       </div>
 
-      {/* DESKTOP LAYOUT - two columns side by side (lg and above) */}
+      {/* TABLET LAYOUT — deux colonnes 45/55 (768px–1023px) */}
+      <div className="hidden md:flex lg:hidden h-full">
+        {/* Colonne gauche — Image */}
+        <div className="w-[45%] flex-shrink-0 relative bg-muted overflow-hidden">
+          <ZoomableImage src={tutorialImage} alt="Image à analyser" />
+          {/* Clues overlay bas de l'image */}
+          {foundClues.length > 0 && (
+            <div className="absolute bottom-0 left-0 right-0 px-3 pb-3 pt-6 bg-gradient-to-t from-background/90 to-transparent flex flex-wrap gap-1.5 pointer-events-none">
+              {foundClues.map((clue, index) => (
+                <Badge
+                  key={index}
+                  variant="default"
+                  className="animate-scale-in text-xs pointer-events-auto"
+                  data-testid={`badge-clue-${index}`}
+                >
+                  <CheckCircle2 className="w-2.5 h-2.5 mr-1" />
+                  {clue}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Colonne droite — Conversation */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Mini header conversation */}
+          <div className="flex-shrink-0 bg-card border-b border-card-border px-4 py-2.5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Badge
+                variant="secondary"
+                className="text-sm px-3 py-1 rounded-full"
+                data-testid="badge-clue-counter"
+              >
+                <span className="font-bold text-primary">{foundClues.length}</span>
+                <span className="text-muted-foreground">/{TOTAL_CLUES} indices</span>
+              </Badge>
+              <div className="w-14 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-500"
+                  style={{ width: `${(foundClues.length / TOTAL_CLUES) * 100}%` }}
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {FinishButton}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowInfoModal(true)}
+                data-testid="button-help"
+              >
+                <HelpCircle className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+          {/* Panel conversation */}
+          <div className="flex-1 overflow-hidden">
+            <ConversationPanel
+              messages={messages}
+              userName={userName}
+              onStartRecording={handleStartRecording}
+              onStopRecording={handleStopRecording}
+              onSendText={handleSendText}
+              state={audioState}
+              transcription={transcription}
+              fallbackMode={fallbackMode}
+              textInput={textInput}
+              onTextInputChange={setTextInput}
+              exchangeCount={exchangeCount}
+              maxExchanges={MAX_EXCHANGES}
+              audioLevel={audioLevel}
+              liveTranscript={liveTranscript}
+              isThinking={isThinking}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* DESKTOP LAYOUT — deux colonnes (≥ 1024px) */}
       <div className="hidden lg:flex h-full">
-        {/* LEFT COLUMN - Conversation scrollable (narrower column) */}
-        <div className="w-[26%] xl:w-[24%] flex flex-col border-r border-card-border flex-shrink-0">
+        {/* Colonne gauche — Conversation (34%) */}
+        <div className="w-[34%] xl:w-[32%] flex flex-col border-r border-card-border flex-shrink-0">
           <ConversationPanel
             messages={messages}
             userName={userName}
@@ -863,77 +965,76 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           />
         </div>
 
-        {/* RIGHT COLUMN - Image maximized with info bar on top */}
+        {/* Colonne droite — Image + info bar */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Info bar above image - contains clue counter, found clues, and help */}
-          <div className="flex-shrink-0 bg-card border-b border-card-border px-6 py-3 flex items-center justify-between gap-4">
-            {/* Left section: Clue counter and tags */}
-            <div className="flex items-center gap-3 flex-1 min-w-0">
-              {/* Clue counter badge */}
+          {/* Info bar structurée en 3 zones */}
+          <div className="flex-shrink-0 bg-card border-b border-card-border px-5 py-2.5 flex items-center gap-4">
+            {/* Zone 1 : Progression */}
+            <div className="flex items-center gap-2 flex-shrink-0">
               <Badge
                 variant="secondary"
-                className="text-base px-3 py-1.5 rounded-full flex-shrink-0"
+                className="text-sm px-3 py-1 rounded-full"
                 data-testid="badge-clue-counter"
               >
                 <span className="font-bold text-primary">{foundClues.length}</span>
-                <span className="text-muted-foreground">/{TOTAL_CLUES} indices</span>
+                <span className="text-muted-foreground">/{TOTAL_CLUES}</span>
               </Badge>
+              <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-500"
+                  style={{ width: `${(foundClues.length / TOTAL_CLUES) * 100}%` }}
+                />
+              </div>
+            </div>
 
-              {/* Clue tags */}
+            {/* Zone 2 : Indices trouvés */}
+            <div className="flex flex-wrap gap-2 flex-1 min-w-0">
               {foundClues.length > 0 ? (
-                <div className="flex flex-wrap gap-2 flex-1 min-w-0">
-                  {foundClues.map((clue, index) => (
-                    <Badge
-                      key={index}
-                      variant="default"
-                      className="animate-scale-in text-sm"
-                      data-testid={`badge-clue-${index}`}
-                    >
-                      <CheckCircle2 className="w-3 h-3 mr-1" />
-                      {clue}
-                    </Badge>
-                  ))}
-                </div>
+                foundClues.map((clue, index) => (
+                  <Badge
+                    key={index}
+                    variant="default"
+                    className="animate-scale-in text-sm"
+                    data-testid={`badge-clue-${index}`}
+                  >
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    {clue}
+                  </Badge>
+                ))
               ) : (
-                <p className="text-sm text-muted-foreground">Les indices apparaîtront ici...</p>
+                <p className="text-sm text-muted-foreground">Les indices apparaîtront ici…</p>
               )}
             </div>
 
-            {/* Right section: Help button and Finish button */}
+            {/* Zone 3 : Actions */}
             <div className="flex items-center gap-2 flex-shrink-0">
               {FinishButton}
-
               <Button
                 variant="outline"
+                size="sm"
                 onClick={() => {
                   sessionFlow.resetSession();
                   captureEvent('session_manual_reset');
                   window.location.replace('/?fresh=1');
                 }}
-                className="px-3 h-10"
                 data-testid="button-reset-session-desktop"
               >
                 Nouvelle session
               </Button>
-
               <Button
                 variant="ghost"
+                size="icon"
                 onClick={() => setShowInfoModal(true)}
-                className="flex items-center gap-1.5 px-3 h-10"
                 data-testid="button-help"
               >
-                <span className="text-sm font-medium">Info</span>
                 <HelpCircle className="w-5 h-5" />
               </Button>
             </div>
           </div>
 
-          {/* Image section - maximized to fill remaining space */}
+          {/* Image — remplit l'espace restant */}
           <div className="flex-1 relative bg-background overflow-hidden">
-            <ZoomableImage
-              src={tutorialImage}
-              alt="Image à analyser"
-            />
+            <ZoomableImage src={tutorialImage} alt="Image à analyser" />
           </div>
         </div>
       </div>
