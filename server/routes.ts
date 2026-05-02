@@ -194,15 +194,6 @@ async function generateTtsAudio(text: string, previousText?: string, quality: 'f
   return audioBuffer;
 }
 
-// Helper: Pre-generate TTS and store with a token
-function preGenerateTts(text: string, previousText?: string): string {
-  const token = crypto.randomUUID();
-  const promise = generateTtsAudio(text, previousText);
-  ttsRequestStore.set(token, { promise, createdAt: Date.now() });
-  console.log('[TTS] Pre-generation started, token:', token);
-  return token;
-}
-
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   organization: 'org-z0AK8zYLTeapGaiDZFQ5co2N',
