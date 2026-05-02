@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage, type InsertTutorialSessionWithToken } from "./storage";
+import { attachDeepgramRelay } from "./deepgramRelay";
 import multer from "multer";
 import OpenAI from "openai";
 import { z } from "zod";
@@ -1563,5 +1564,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const httpServer = createServer(app);
+  attachDeepgramRelay(httpServer);
   return httpServer;
 }

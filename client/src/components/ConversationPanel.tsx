@@ -26,6 +26,7 @@ interface ConversationPanelProps {
   exchangeCount: number;
   maxExchanges: number;
   audioLevel?: number;
+  liveTranscript?: string;
 }
 
 export default function ConversationPanel({
@@ -42,6 +43,7 @@ export default function ConversationPanel({
   exchangeCount,
   maxExchanges,
   audioLevel = 0,
+  liveTranscript = '',
 }: ConversationPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -265,16 +267,40 @@ export default function ConversationPanel({
                   </Button>
                 </>
               ) : (
-                <div className="flex-1 bg-card/90 backdrop-blur-sm rounded-2xl px-3 sm:px-4 py-2 sm:py-3 min-h-[40px] sm:min-h-[44px] flex items-center">
-                  <p className="text-xs sm:text-sm text-muted-foreground">
-                    {state === 'idle' && (showTextInput ? 'Écrivez ou parlez' : 'Parlez ou tapez')}
-                    {state === 'recording' && 'Enregistrement...'}
-                    {state === 'processing' && 'Traitement...'}
-                    {state === 'playing' && (
-                      <span className="text-orange-500 font-medium">Peter parle...</span>
-                    )}
-                    {state === 'error' && 'Erreur'}
-                  </p>
+                <div
+                  className="flex-1 bg-card/90 backdrop-blur-sm rounded-2xl px-3 sm:px-4 py-2 sm:py-3 min-h-[40px] sm:min-h-[44px] flex items-center"
+                  data-testid="text-input-status"
+                >
+                  {state === 'recording' ? (
+                    liveTranscript ? (
+                      <p
+                        className="text-sm sm:text-base text-foreground leading-snug max-h-16 sm:max-h-20 overflow-y-auto break-words pr-1"
+                        data-testid="text-live-transcript"
+                      >
+                        {liveTranscript}
+                        <span className="inline-block w-0.5 h-3 sm:h-4 bg-primary ml-0.5 align-middle animate-pulse" />
+                      </p>
+                    ) : (
+                      <p className="text-xs sm:text-sm text-muted-foreground italic">
+                        À l'écoute…
+                      </p>
+                    )
+                  ) : (
+                    <p className="text-xs sm:text-sm text-muted-foreground max-h-16 sm:max-h-20 overflow-y-auto break-words pr-1">
+                      {state === 'idle' && (showTextInput ? 'Écrivez ou parlez' : 'Parlez ou tapez')}
+                      {state === 'processing' && (
+                        liveTranscript ? (
+                          <span className="text-foreground not-italic" data-testid="text-pending-transcript">
+                            {liveTranscript}
+                          </span>
+                        ) : 'Traitement...'
+                      )}
+                      {state === 'playing' && (
+                        <span className="text-orange-500 font-medium">Peter parle...</span>
+                      )}
+                      {state === 'error' && 'Erreur'}
+                    </p>
+                  )}
                 </div>
               )}
 

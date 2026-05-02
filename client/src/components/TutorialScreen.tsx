@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { HelpCircle, CheckCircle2 } from "lucide-react";
@@ -108,6 +108,22 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   // PHASE 2 OPTIMIZATION: Enable streaming by default for better latency
   const useStreaming = useRef(true); // Set to false to use old non-streaming pipeline
 
+  // Live transcript Deepgram pendant l'enregistrement (passe de correction Whisper au stop)
+  // committedRef = somme des transcriptions "is_final" reçues (verrouillées)
+  // currentInterim = dernier interim, remplacé à chaque message
+  const liveCommittedRef = useRef<string>('');
+  const [liveTranscript, setLiveTranscript] = useState<string>('');
+
+  const handleLiveTranscript = useCallback((text: string, isFinal: boolean) => {
+    if (isFinal) {
+      liveCommittedRef.current = (liveCommittedRef.current + ' ' + text).trim();
+      setLiveTranscript(liveCommittedRef.current);
+    } else {
+      const combined = (liveCommittedRef.current + ' ' + text).trim();
+      setLiveTranscript(combined);
+    }
+  }, []);
+
   const {
     audioState,
     transcription,
@@ -133,6 +149,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       console.log('[TutorialScreen] Audio playback stopped');
       setIsAudioPlaying(false);
     },
+    // Transcription temps réel Deepgram → affichée dans la zone d'input
+    onLiveTranscript: handleLiveTranscript,
   });
 
   const audioQueue = useAudioQueue({
@@ -269,6 +287,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   const handleStartRecording = async () => {
     console.log('[TutorialScreen] handleStartRecording called');
+
+    // Réinitialiser le live transcript Deepgram pour cette nouvelle prise de parole
+    liveCommittedRef.current = '';
+    setLiveTranscript('');
 
     // Si Peter est en train de parler, l'interrompre d'abord
     if (audioState === 'playing') {
@@ -781,6 +803,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             exchangeCount={exchangeCount}
             maxExchanges={MAX_EXCHANGES}
             audioLevel={audioLevel}
+            liveTranscript={liveTranscript}
           />
         </div>
       </div>
@@ -800,6 +823,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             fallbackMode={fallbackMode}
             textInput={textInput}
             onTextInputChange={setTextInput}
+            liveTranscript={liveTranscript}
             exchangeCount={exchangeCount}
             maxExchanges={MAX_EXCHANGES}
             audioLevel={audioLevel}

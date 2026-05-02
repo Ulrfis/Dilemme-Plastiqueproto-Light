@@ -1,10 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useDeepgramTranscription } from './useDeepgramTranscription';
 
 export type AudioState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
 
 interface UseVoiceInteractionOptions {
   onAudioStart?: () => void;
   onAudioStop?: () => void;  // Appelé quand l'audio est arrêté ou échoue
+  onLiveTranscript?: (text: string, isFinal: boolean) => void;
 }
 
 interface UseVoiceInteractionResult {
@@ -24,10 +26,16 @@ interface UseVoiceInteractionResult {
 }
 
 export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVoiceInteractionResult {
-  const { onAudioStart, onAudioStop } = options || {};
+  const { onAudioStart, onAudioStop, onLiveTranscript } = options || {};
   const [audioState, setAudioState] = useState<AudioState>('idle');
   const [transcription, setTranscription] = useState('');
   const [audioLevel, setAudioLevel] = useState(0);
+
+  const deepgram = useDeepgramTranscription();
+  const onLiveTranscriptRef = useRef(onLiveTranscript);
+  useEffect(() => {
+    onLiveTranscriptRef.current = onLiveTranscript;
+  }, [onLiveTranscript]);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -331,6 +339,18 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       // Démarrer le sampling de niveau audio pour la waveform (non-bloquant si échec)
       startAudioLevelSampling(stream);
 
+      // Démarrer la transcription Deepgram en parallèle (non-bloquant si échec)
+      // Whisper restera la passe de correction au stop
+      if (onLiveTranscriptRef.current) {
+        try {
+          deepgram.start(stream, (text, isFinal) => {
+            onLiveTranscriptRef.current?.(text, isFinal);
+          });
+        } catch (err) {
+          console.warn('[useVoiceInteraction] Deepgram start failed (non-fatal):', err);
+        }
+      }
+
       console.log('[useVoiceInteraction] Recording started successfully');
     } catch (error) {
       console.error('[useVoiceInteraction] Error starting recording:', error);
@@ -353,6 +373,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
       // Arrêter le sampling de niveau audio immédiatement (avant le traitement async)
       stopAudioLevelSampling();
+
+      // Stopper Deepgram en parallèle pour libérer le WebSocket et le 2e MediaRecorder
+      try { deepgram.stop(); } catch {}
 
       mediaRecorder.onstop = async () => {
         console.log('[useVoiceInteraction] Recording stopped, chunks:', audioChunksRef.current.length);
@@ -728,6 +751,10 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
     // Arrêter le sampling de niveau audio
     stopAudioLevelSampling();
+
+    // Arrêter la transcription live Deepgram (au cas où l'utilisateur
+    // quitte l'écran pendant un enregistrement actif)
+    try { deepgram.stop(); } catch {}
 
     // MOBILE FIX: Properly cleanup MediaRecorder and stream
     if (mediaRecorderRef.current) {

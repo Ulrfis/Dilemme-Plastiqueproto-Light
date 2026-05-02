@@ -78,10 +78,18 @@ Preferred communication style: Simple, everyday language.
 ### AI Integration Architecture
 
 **OpenAI Integration**:
-- **Speech-to-Text**: Whisper-1 model for voice transcription
+- **Speech-to-Text**: Whisper-1 model for voice transcription (correction pass after Deepgram live)
 - **Conversational AI**: GPT Assistant API (Assistant ID: `asst_P9b5PxMd1k9HjBgbyXI1Cvm9`)
 - **Thread Management**: Each session maintains an OpenAI thread for conversation context
 - **Organization**: `org-z0AK8zYLTeapGaiDZFQ5co2N`
+
+**Deepgram Live Transcription**:
+- **Model**: nova-2 (French, `language=fr`, `interim_results=true`, `smart_format=true`, `endpointing=300ms`)
+- **Architecture**: Server WebSocket relay at `/ws/deepgram` (keeps API key server-side) → upstream `wss://api.deepgram.com/v1/listen`
+- **Server**: `server/deepgramRelay.ts` attaches a `WebSocketServer({noServer:true})` via the http.Server `upgrade` event. Forwards binary audio chunks client→Deepgram, parses `Results` JSON Deepgram→client.
+- **Client**: `client/src/hooks/useDeepgramTranscription.ts` opens WS, runs a second `MediaRecorder` on the same MediaStream with `timeslice=250ms`, sends each `dataavailable` chunk as ArrayBuffer.
+- **Integration**: `useVoiceInteraction` accepts `onLiveTranscript(text, isFinal)`. `TutorialScreen` accumulates committed+interim into `liveTranscript` state, displayed in `ConversationPanel`'s text-input area during recording with a blinking cursor.
+- **Whisper correction pass**: After `stopRecording`, the existing Whisper STT call runs on the full audio blob and its result is the actual message sent to Peter (Deepgram is purely visual feedback).
 
 **ElevenLabs Integration**:
 - **Text-to-Speech**: Voice ID `R8IjtpeRZsjoJfq1wwj3` (Peter - nouveau workspace)
