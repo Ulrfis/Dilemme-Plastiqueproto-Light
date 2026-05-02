@@ -901,8 +901,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for await (const event of stream) {
         if (event.event === 'thread.message.delta') {
           const delta = event.data.delta;
-          if (delta.content && delta.content[0]?.type === 'text') {
-            resumeText += delta.content[0].text?.value || '';
+          if (delta.content) {
+            for (const block of delta.content) {
+              if (block.type === 'text') {
+                resumeText += block.text?.value || '';
+              }
+            }
           }
         }
         if (event.event === 'thread.run.failed' ||

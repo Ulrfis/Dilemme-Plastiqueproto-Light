@@ -248,17 +248,19 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         if (resumeRes.ok) {
           const { text, audioToken } = await resumeRes.json();
           setIsThinking(false);
-          setMessages(prev => [...prev, makeMessage('assistant', text)]);
-          try {
-            const audioResponse = await fetch(`/api/tts/play/${audioToken}`);
-            if (audioResponse.ok) {
-              const audioBlob = await audioResponse.blob();
-              if (audioBlob.size >= 100) {
-                await playAudio(audioBlob);
+          if (text?.trim()) {
+            setMessages(prev => [...prev, makeMessage('assistant', text)]);
+            try {
+              const audioResponse = await fetch(`/api/tts/play/${audioToken}`);
+              if (audioResponse.ok) {
+                const audioBlob = await audioResponse.blob();
+                if (audioBlob.size >= 100) {
+                  await playAudio(audioBlob);
+                }
               }
+            } catch (audioErr) {
+              console.warn('[TutorialScreen] Resume audio playback failed (silent):', audioErr);
             }
-          } catch (audioErr) {
-            console.warn('[TutorialScreen] Resume audio playback failed (silent):', audioErr);
           }
         } else {
           console.warn('[TutorialScreen] Resume endpoint returned', resumeRes.status, '— silent fallback');
