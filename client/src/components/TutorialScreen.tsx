@@ -245,9 +245,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       // Returning user — generate a contextual resumption message from Peter
       // Skip if the resume message was already played recently in this browser session
       const RESUME_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+      const resumeKey = `resumePlayedAt:${sessionId}`;
       let skipResume = false;
       try {
-        const resumePlayedAt = sessionStorage.getItem('resumePlayedAt');
+        const resumePlayedAt = sessionStorage.getItem(resumeKey);
         if (resumePlayedAt) {
           const elapsed = Date.now() - parseInt(resumePlayedAt, 10);
           if (elapsed < RESUME_COOLDOWN_MS) {
@@ -281,7 +282,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
                   const audioBlob = await audioResponse.blob();
                   if (audioBlob.size >= 100) {
                     await playAudio(audioBlob);
-                    try { sessionStorage.setItem('resumePlayedAt', Date.now().toString()); } catch (_) {}
+                    try { sessionStorage.setItem(resumeKey, Date.now().toString()); } catch (_) {}
                   }
                 }
               } catch (audioErr) {
