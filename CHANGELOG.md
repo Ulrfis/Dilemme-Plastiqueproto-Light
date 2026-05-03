@@ -6,6 +6,86 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2.5.0] - 2026-05-03
+
+### Ajouté — Observabilité complète : tracking PostHog côté client + côté serveur
+
+#### PostHog full coverage client (Tâche #32)
+- Tous les `captureEvent()` injectent désormais automatiquement `session_id` et `user_name` depuis sessionStorage via `captureWithContext` (alias de `readStoredSessionFlow`).
+- Nouveaux événements instrumentés :
+  - `posthog_health_check` — ~3s après le montage de l'app (SDK status, distinct_id, loaded flag)
+  - `js_error` — handler global `window.onerror` + `unhandledrejection` (stack tronqué)
+  - `mic_permission` — `{ state: granted|denied, source: check|start_recording|synthesis, error_name?, error_message? }`
+  - `audio_interrupted` — dans `useVoiceInteraction` (`audio.onpause` uniquement quand non arrêté explicitement)
+  - `voice_turn_complete` — pour les tours voix : `recording_to_complete_ms`, `stt_to_complete_ms`, `exchange`, `new_clues`
+  - `clue_discovered` — un événement par indice (pipelines streaming + non-streaming) : `clue, total_found, total_clues, exchange, pipeline`
+  - `fallback_mode_activated` — `reason: no_mediarecorder|mic_denied|mic_not_found|mic_unsupported`
+  - `game_started` / `drag_drop_attempt` / `drag_drop_validation` / `game_completed` (enrichi `duration_seconds, attempts`)
+  - `synthesis_input_mode`, `synthesis_submitted` (enrichi `input_mode`)
+  - `video_intro_outcome` — `outcome: completed|skipped|error` + `time_in_video_ms`
+  - `api_error` — dans les `catch` de fetch client : `endpoint, status?, context, error_message?`
+
+#### Dashboard PostHog "Dilemme — Engagement & Reliability" (Tâche #33)
+- Dashboard créé via API PostHog (id=657175) avec 7 insights HogQL :
+  - Voice Turn Latency p50/p95 (`recording_to_complete_ms`)
+  - Clue Discovery Funnel (taux d'atteinte 1…6 indices)
+  - Fallback Mode Rate & Reason (pourcentage sessions dégradées)
+  - Mic Permission Denial Rate
+  - Video Intro Drop-Off (taux completion vs skip)
+  - API Error Rate par endpoint
+  - Drag-Drop Validation Success Rate
+- Fichier : `client/src/lib/posthog.ts`
+
+#### PostHog côté serveur via `posthog-node` (Tâche #34)
+- Nouveau module `server/posthog.ts` : client `posthog-node` EU (`https://eu.i.posthog.com`), initialisation lazy, `flushAt:1` pour faible volume.
+- Helpers exportés : `captureServerEvent`, `captureServerError`, `shutdownPostHog`.
+- Shutdown gracieux sur `SIGTERM`/`SIGINT` dans `server/index.ts`.
+- Instrumentation ajoutée dans `server/routes.ts` pour tous les chemins d'erreur critiques :
+  - `/api/speech-to-text` (Whisper timeout/erreur)
+  - `/api/tts/play` + `/api/text-to-speech` + `/api/text-to-speech/stream`
+  - `/api/sessions` : `.catch` sur la pré-génération TTS bienvenue (erreurs silencieuses exposées)
+  - `/api/sessions/:id/resume` + `/api/sessions/:id/resume-token`
+  - `schedulePregenResume` (erreur fond de génération)
+  - `/api/chat/stream` : timeout 30s, run failed/cancelled/expired, TTS Phase 1/2a/2b/merged, outer catch
+  - `/api/chat` : run failed + outer catch
+- `TtsRequest` étendu avec `sessionId?` + `userName?` : `/api/tts/play` peut ainsi enrichir l'événement avec le contexte de session même depuis un token sans corps HTTP.
+- Chaque événement porte `source:'server'`, `session_id`, `user_name` (quand disponibles), `endpoint`, `context`, `error_name`, `error_message` (tronqué 500 chars).
+
+---
+
+## [2.4.0] - 2026-05-03
+
+### Ajouté — Reprise instantanée + anti-répétition du message de retour
+
+#### Pré-génération du message de reprise (Tâche #30)
+- Après chaque échange de Peter, `schedulePregenResume(sessionId)` tourne en arrière-plan (fire-and-forget) : génère un message de reprise via OpenAI sur un thread éphémère + TTS `eleven_multilingual_v2`, stocke le tout dans `pregenResumeStore` (clé sessionId, TTL 5 min).
+- Nouveau endpoint `GET /api/sessions/:id/resume-token` : retourne `{ text, audioToken }` si un pregen est disponible et frais ; `404` sinon (fallback automatique vers `POST /api/sessions/:id/resume`).
+- Côté client (`TutorialScreen`) : tente d'abord le `GET /resume-token`, se rabat sur le `POST /resume` si 404. Événement PostHog `resume_audio_latency` avec `used_pregen` (bool) et `latency_ms`.
+- Résultat : retour sur `/tutorial` après une conversation → message de Peter joue quasi-instantanément (~150-500ms) au lieu de ~3-5s.
+- Fichiers : `server/routes.ts`, `client/src/components/TutorialScreen.tsx`
+
+#### Anti-répétition du message de reprise (Tâche #31)
+- Flag `sessionStorage('resumePlayedAt')` enregistre le timestamp de la dernière lecture du message de reprise.
+- Si l'utilisateur revient sur `/tutorial` dans la même session navigateur moins de **3 minutes** après l'avoir entendu (ex : navigation rapide vers `/game` puis retour), Peter ne rejoue pas le message — silence direct.
+- Si plus de 3 minutes se sont écoulées, le message se joue normalement (situation réelle de retour après pause).
+- Fichiers : `client/src/components/TutorialScreen.tsx`
+
+---
+
+## [2.3.0] - 2026-05-03
+
+### Amélioré — Fluidité audio Phase 2a + Phase 2b : fusion intelligente
+
+**Problème** : avec le rolling dispatch de Phase 2, deux appels TTS séparés (Phase 2a + Phase 2b) pouvaient générer une légère discontinuité prosodique quand Phase 2b était très court (< 80 chars), ElevenLabs n'ayant pas assez de contexte pour enchaîner naturellement.
+
+**Solution** : si Phase 2b est court ou si Phase 2a n'est pas encore résolue quand Phase 2b est prête à être dispatchée, le serveur fusionne les deux segments en un seul appel TTS (`previous_text = phase1Text`). Le segment merged produit une prosodie continue sur l'ensemble de la réponse Phase 2.
+
+- Logique de décision dans `thread.run.completed` : si `!phase2aResolved || phase2bText.length < 80` → fusion ; sinon → appel Phase 2b séparé avec `previous_text = phase1Text + phase2aText`.
+- Événement SSE `phase2a_cancelled` émis si Phase 2a est annulée au profit du merged (le client ignore le futur `sentence_audio` de Phase 2a annulée).
+- Fichiers : `server/routes.ts`
+
+---
+
 ## [2.2.0] - 2026-05-02
 
 ### Ajouté — Message de reprise contextuel de Peter au retour sur /tutorial

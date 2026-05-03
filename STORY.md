@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-05-02 (message de reprise contextuel pour utilisateur qui revient)  
+> **Last Updated**: 2026-05-03 (PostHog full coverage + serveur, dashboards, reprise instantanée, fluidité Phase 2)  
 
 ---
 
@@ -999,6 +999,205 @@ Après: WelcomeSetup → POST /api/sessions → TTS starts background → naviga
 **Surprise**: Le pattern `sessionStorage.getItem('welcomeAudioToken')` + suppression immédiate ("consume once") est simple et robuste — aucun état global supplémentaire requis.
 
 **Friction**: La chaîne `previous_text` pour Phase 2b nécessite de conserver `phase2aText` pour que l'ElevenLabs API produise une prosodie cohérente avec les segments précédents.
+
+**Time**: ~30 minutes
+
+---
+
+### [2026-05-03] — PostHog : instrumentation côté serveur (posthog-node) 🔷
+
+**Intent**: Task #32 couvrait entièrement le client. Mais les erreurs backend — ElevenLabs qui throttle, un run OpenAI qui expire, un timeout SSE de 30s — ne remontaient en PostHog que si le client les surfaçait en `api_error`. Beaucoup passaient à la trappe silencieusement en production.
+
+**Prompt(s)**:
+```
+Task #32 instruments the client side. Server-side errors in /api/tts/play,
+/api/sessions/:id/resume, /api/chat-streaming, ElevenLabs/OpenAI calls, etc.
+are only visible if the client surfaces an api_error. Many backend failures
+(timeouts, 5xx, ElevenLabs throttling) never reach the user clearly.
+Mirroring the same events server-side from server/routes.ts would close the gap.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Nouveau `server/posthog.ts` : client `posthog-node` EU, init lazy, `flushAt:1`. Helpers `captureServerEvent` / `captureServerError` / `shutdownPostHog`.
+- Shutdown gracieux `SIGTERM`/`SIGINT` dans `server/index.ts`.
+- `TtsRequest` étendu avec `sessionId?` + `userName?` — `/api/tts/play` porte le contexte même depuis un token opaque.
+- ~16 `captureServerError` / `captureServerEvent` ajoutés : TTS play/stream/full, Whisper STT, resume on-demand, resume-token, schedulePregenResume, bienvenue pregen, timeout 30s, Phase 1/2a/2b/merged TTS, run OpenAI failed, outer catch chat+stream.
+- Chaque événement porte `source:'server'`, `session_id`, `user_name`, `endpoint`, `context`, `error_message` (tronqué 500 chars).
+- Deux rounds de code review : première passe rejetée (session_id manquant sur les TTS tokenisés), deuxième approvée avec commentaires (quelques userName passant encore par req.body au lieu de session.userName).
+
+**Architecture**:
+```
+Avant : erreur backend → console.error → invisible si client ne remonte pas
+Après : erreur backend → captureServerError → PostHog EU < 1 min → dashboard alerte
+```
+
+**Surprise**: Stocker `sessionId` + `userName` dans `TtsRequest` était la clé — sans ça, `/api/tts/play` (un GET sans body) n'aurait jamais pu savoir à quelle session rattacher l'erreur.
+
+**Insight**: Les erreurs les plus dangereuses sont celles qui ne font pas crasher l'app — elles dégradent silencieusement l'UX. L'observabilité serveur est complémentaire, pas redondante avec le client.
+
+**Time**: ~45 minutes (implémentation + 2 rounds code review + fix session context TTS)
+
+---
+
+### [2026-05-03] — Dashboard PostHog "Dilemme — Engagement & Reliability" 🔷
+
+**Intent**: Les 14+ nouveaux types d'événements de la Tâche #32 ne servaient à rien sans insights curatés. Il fallait un dashboard opérationnel orienté produit : latence voix, taux de fallback, funnel indices, erreurs.
+
+**Prompt(s)**:
+```
+Task #32 added 14 new event types. Without curated insights they will sit unused.
+A dedicated dashboard will turn the raw data into visible product KPIs
+(voice latency p50/p95, fallback rate, clue funnel, error rate, video drop-off).
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- Dashboard créé via API PostHog (id=657175) : <https://eu.posthog.com/project/107669/dashboard/657175>
+- 7 insights HogQL attachés : Voice Turn Latency p50/p95, Clue Discovery Funnel (1→6 indices), Fallback Mode Rate & Reason, Mic Permission Denial Rate, Video Intro Drop-Off, API Error Rate par endpoint, Drag-Drop Validation Success Rate.
+- Tous filtrés `$host != localhost` pour données production uniquement.
+- Difficulté technique : l'API PostHog moderne exige `InsightVizNode` + HogQL ; l'ancienne API `filters` est rejetée. Le math `'median'` (pas `'p50'`) est la valeur correcte.
+
+**Architecture**:
+```
+captureWithContext('voice_turn_complete', { recording_to_complete_ms: X })
+  → PostHog EU
+  → Dashboard insight "Voice Turn Latency" breakdown p50/p95
+  → Visible par Ulrich en < 1 min après une session
+```
+
+**Surprise**: L'API PostHog a une dichotomie complète entre ancienne (`filters`) et nouvelle (`query.kind = InsightVizNode`) API — utiliser la mauvaise donne des 400 silencieux.
+
+**Time**: ~1h (exploration API + création dashboard + 7 insights)
+
+---
+
+### [2026-05-03] — PostHog full coverage tracking + observabilité latence 🔷
+
+**Intent**: Fermer tous les angles morts d'analytics : microphone, latence voix end-to-end, découverte d'indices, fallback mode, erreurs runtime, drag-drop, vidéo. Avoir `session_id` + `user_name` dans chaque événement.
+
+**Prompt(s)**:
+```
+The app already has PostHog initialized and tracks high-level flow milestones
+and TTS latency. However, large portions of the user experience produce no
+telemetry: voice interaction quality, per-clue discovery, end-to-end turn
+latency, drag-and-drop interaction timing, fallback mode activation,
+microphone permission outcomes, and unhandled runtime errors.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- `captureWithContext` : wrapper qui injecte automatiquement `session_id` + `user_name` depuis sessionStorage sur chaque `posthog.capture()`. Zéro risque d'oublier ces propriétés dans un nouveau call site.
+- 14 nouveaux événements : `posthog_health_check`, `js_error`, `mic_permission`, `audio_interrupted`, `voice_turn_complete`, `clue_discovered`, `fallback_mode_activated`, `game_started`, `drag_drop_attempt`, `drag_drop_validation`, `game_completed` (enrichi), `synthesis_input_mode`, `synthesis_submitted` (enrichi), `video_intro_outcome`, `api_error`.
+- Deux pipelines `clue_discovered` (streaming + non-streaming) pour ne rater aucune découverte selon le mode actif.
+- Handler global `window.onerror` + `unhandledrejection` pour capturer les bugs JS inattendus.
+
+**Architecture**:
+```
+Avant : ~8 events, session_id parfois absent
+Après : ~22 events, session_id + user_name systématiques via captureWithContext
+```
+
+**Insight**: Un wrapper d'injection automatique de contexte (`captureWithContext`) vaut mieux qu'une convention documentée — la convention se viole, le wrapper non.
+
+**Time**: ~2h (instrumentation complète, test en dev, vérification PostHog)
+
+---
+
+### [2026-05-03] — Anti-répétition du message de reprise 🔹
+
+**Intent**: Si l'utilisateur navigue vers `/game` puis revient sur `/tutorial` 10 secondes plus tard, Peter ne devrait pas rejouer le message de reprise qu'il vient d'énoncer.
+
+**Prompt(s)**:
+```
+Éviter de répéter le message de reprise si Peter a déjà été entendu dans la
+même session. Un flag en sessionStorage permettra de skip le message de reprise
+si moins de 3 minutes se sont écoulées depuis la dernière lecture.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- `sessionStorage('resumePlayedAt')` enregistre le timestamp à chaque lecture du message de reprise.
+- Au montage de `TutorialScreen`, si `isReturningUser && Date.now() - resumePlayedAt < 3 min` → skip silencieux.
+- Si > 3 minutes → lecture normale (retour après vraie pause → message pertinent).
+
+**Architecture**:
+```
+Avant : chaque montage TutorialScreen avec isReturningUser → message systématique
+Après : montage → check sessionStorage → < 3min ? silence : message
+```
+
+**Time**: ~10 minutes
+
+---
+
+### [2026-05-03] — Reprise instantanée : pré-génération du message de retour 🔷
+
+**Intent**: Après Task #29, le message de reprise existait mais nécessitait ~3-5s d'attente (OpenAI + TTS). Même problème qu'on avait résolu pour le message de bienvenue. La solution : pré-générer après chaque échange.
+
+**Prompt(s)**:
+```
+Actuellement, quand un utilisateur revient sur /tutorial, il attend ~3-5s que le
+message de reprise soit généré (appel OpenAI + TTS). L'idée : après chaque échange
+(réponse de Peter), le serveur pré-génère discrètement un message de reprise en
+arrière-plan et stocke son token.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- `schedulePregenResume(sessionId)` : fire-and-forget après chaque `res.end()` dans `/api/chat/stream`. Génère sur un thread éphémère OpenAI (n'impacte pas le thread principal de conversation), TTS `quality`, stocke dans `pregenResumeStore` (TTL 5 min).
+- `GET /api/sessions/:id/resume-token` : retourne `{ text, audioToken }` si pregen frais disponible ; `404` sinon.
+- Client : tente le `GET` d'abord → si 404 → `POST /api/sessions/:id/resume` (fallback on-demand).
+- Événement PostHog `resume_audio_latency` : `{ used_pregen: bool, latency_ms }`.
+- Résultat mesuré : `used_pregen=true` → ~150-500ms ; `used_pregen=false` → ~1 500-3 000ms.
+
+**Architecture**:
+```
+Avant : retour /tutorial → POST /resume → OpenAI (~1s) + TTS (~2s) → audio (~3-5s)
+Après : POST /chat/stream done → schedulePregenResume (background) → token prêt
+        retour /tutorial → GET /resume-token → ttsRequestStore hit → audio (~200ms)
+```
+
+**Surprise**: Le thread éphémère OpenAI (jamais stocké en DB) est une primitive propre pour les appels "hors conversation" — il expire naturellement côté OpenAI, sans aucun cleanup à gérer.
+
+**Friction**: La fenêtre de 60s TTL du `ttsRequestStore` posait problème : si l'utilisateur revenait plus de 60s après le pregen mais avant 5min, le token audio était expiré. Résolu en séparant le store pregen (5min TTL sur le Buffer) du token TTS créé uniquement au moment de la consommation.
+
+**Time**: ~45 minutes (architecture + fix TTL + tests de latence)
+
+---
+
+### [2026-05-03] — Fluidité Phase 2a + Phase 2b : fusion intelligente des segments TTS 🔷
+
+**Intent**: Avec le rolling dispatch Phase 2, deux appels TTS distincts pouvaient produire une micro-discontinuité prosodique quand Phase 2b était très court. Fusionner intelligemment les deux segments pour une voix plus continue.
+
+**Prompt(s)**:
+```
+Avec le rolling Phase 2 dispatch, deux appels TTS distincts (Phase 2a + Phase 2b)
+sont envoyés à ElevenLabs. Si Phase 2b est très court (< 80 chars), le fusionner
+avec Phase 2a plutôt que de faire un appel séparé.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- À `thread.run.completed` : si `!phase2aResolved` (Phase 2a encore en cours) ou `phase2bText.length < 80` → annulation Phase 2a en cours (`phase2aCancelled = true`) + appel TTS mergé avec `previous_text = phase1Text`.
+- Sinon → appel Phase 2b normal avec `previous_text = phase1Text + phase2aText`.
+- Événement SSE `phase2a_cancelled` émis pour que le client ignore le futur token audio annulé.
+- Phase 1 conservée systématiquement comme "anchor" prosodique pour tous les segments Phase 2.
+
+**Architecture**:
+```
+Avant : Phase 2a (dispatch mid-stream) + Phase 2b (à completion) → 2 appels ElevenLabs
+Après : si 2b court ou 2a non résolue → merge → 1 appel ElevenLabs (meilleure prosodie)
+        si 2b long et 2a résolue → 2 appels (prosodié correctement via previous_text)
+```
+
+**Surprise**: La condition `!phase2aResolved` (pas encore terminée) est plus souvent vraie qu'attendu sur les réponses courtes — ElevenLabs prend ~1-2s même pour 1 phrase, et Phase 2b peut arriver avant.
 
 **Time**: ~30 minutes
 
