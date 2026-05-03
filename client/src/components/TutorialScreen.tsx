@@ -795,7 +795,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               captureEvent('voice_turn_complete', {
                 recording_duration_ms: recStop > 0 ? recStop - recStart : undefined,
                 stt_latency_ms: sttDone > 0 && recStop > 0 ? sttDone - recStop : undefined,
-                llm_latency_ms: llmFirst > 0 && sttDone > 0 ? llmFirst - sttDone : undefined,
+                llm_latency_ms: llmFirst > 0 && transcriptSent > 0 ? llmFirst - transcriptSent : undefined,
                 tts_phase1_latency_ms: phase1Ready > 0 && llmFirst > 0 ? phase1Ready - llmFirst : undefined,
                 first_audio_ms: firstAudio > 0 && transcriptSent > 0 ? firstAudio - transcriptSent : undefined,
                 first_audio_from_recording_ms: firstAudio > 0 ? firstAudio - recStart : undefined,
@@ -854,7 +854,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               error_message: typeof error === 'string' ? error : String(error),
               recording_duration_ms: recStop > 0 ? recStop - recStart : undefined,
               stt_latency_ms: sttDone > 0 && recStop > 0 ? sttDone - recStop : undefined,
-              llm_latency_ms: llmFirst > 0 && sttDone > 0 ? llmFirst - sttDone : undefined,
+              llm_latency_ms: llmFirst > 0 && turnTranscriptSentAtRef.current > 0 ? llmFirst - turnTranscriptSentAtRef.current : undefined,
               tts_phase1_latency_ms: phase1Ready > 0 && llmFirst > 0 ? phase1Ready - llmFirst : undefined,
               total_ms: now - recStart,
               recording_to_complete_ms: now - recStart,
