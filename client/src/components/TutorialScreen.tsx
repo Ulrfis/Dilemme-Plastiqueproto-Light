@@ -652,6 +652,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               if (streamGenerationRef.current !== currentGeneration) return;
               console.error('[TutorialScreen] Error fetching audio block at index #' + index + ':', fetchErr);
               captureEvent('sentence_audio_error', { pipeline: 'streaming', sentence_index: index, reason: 'fetch_failed' });
+              captureEvent('api_error', {
+                endpoint: '/api/tts/play',
+                context: 'streaming_sentence_block',
+                error_message: fetchErr instanceof Error ? fetchErr.message : String(fetchErr),
+                fallback_triggered: false,
+              });
               for (let i = index; i < index + count; i++) audioQueue.skipIndex(i);
             });
         },
@@ -660,6 +666,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           if (streamGenerationRef.current !== currentGeneration) return;
           console.warn('[TutorialScreen] Sentence #' + index + ' TTS failed on server, skipping');
           captureEvent('sentence_audio_error', { pipeline: 'streaming', sentence_index: index });
+          captureEvent('api_error', {
+            endpoint: '/api/tts/play',
+            context: 'streaming_server_tts',
+            error_message: `Server TTS failed for sentence ${index}`,
+            fallback_triggered: false,
+          });
           audioQueue.skipIndex(index);
         },
 
@@ -891,6 +903,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     } catch (error) {
       console.error('[TutorialScreen] TTS or playback failed:', error);
       captureEvent('sentence_audio_error', { pipeline: 'non-streaming' });
+      captureEvent('api_error', {
+        endpoint: '/api/tts/play',
+        context: 'non_streaming_tts',
+        error_message: error instanceof Error ? error.message : String(error),
+        fallback_triggered: true,
+      });
       recoverFromError();
 
       if (!fallbackMode) {

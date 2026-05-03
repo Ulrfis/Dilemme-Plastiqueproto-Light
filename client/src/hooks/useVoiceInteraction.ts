@@ -306,20 +306,29 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
     console.log('[useVoiceInteraction] MediaRecorder support check:', isSupported);
 
-    // Vérifier aussi si le navigateur supporte les types MIME nécessaires
+    let webmSupported = false, oggSupported = false, mp4Supported = false;
+    let finalSupported = isSupported;
     if (isSupported && MediaRecorder.isTypeSupported) {
-      const webmSupported = MediaRecorder.isTypeSupported('audio/webm');
-      const oggSupported = MediaRecorder.isTypeSupported('audio/ogg');
-      const mp4Supported = MediaRecorder.isTypeSupported('audio/mp4');
-
+      webmSupported = MediaRecorder.isTypeSupported('audio/webm');
+      oggSupported = MediaRecorder.isTypeSupported('audio/ogg');
+      mp4Supported = MediaRecorder.isTypeSupported('audio/mp4');
       console.log('[useVoiceInteraction] MIME type support:', { webmSupported, oggSupported, mp4Supported });
-
-      // Au moins un format doit être supporté
-      return webmSupported || oggSupported || mp4Supported;
+      finalSupported = webmSupported || oggSupported || mp4Supported;
     }
 
-    return isSupported;
-  }, []);
+    const browser_support = {
+      ...browserSupportSummary(),
+      mime_webm: webmSupported,
+      mime_ogg: oggSupported,
+      mime_mp4: mp4Supported,
+    };
+    captureEvent('microphone_permission', {
+      outcome: finalSupported ? 'supported' : 'unavailable',
+      source: 'media_recorder_support_check',
+      browser_support,
+    });
+    return finalSupported;
+  }, [browserSupportSummary]);
 
   const startRecording = useCallback(async () => {
     console.log('[useVoiceInteraction] startRecording called');

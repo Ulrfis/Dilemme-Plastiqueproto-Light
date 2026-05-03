@@ -93,7 +93,9 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
       hls.on(Hls.Events.ERROR, (event, data) => {
         console.error("[VideoIntro] HLS error:", data);
         if (data.fatal) {
-          reportOutcome('error', { hls_error_type: data.type, hls_error_details: data.details });
+          const isTimeout = data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+            (data.details === 'manifestLoadTimeOut' || data.details === 'fragLoadTimeOut' || data.details === 'levelLoadTimeOut');
+          reportOutcome(isTimeout ? 'timed_out' : 'error', { hls_error_type: data.type, hls_error_details: data.details });
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
               console.log("[VideoIntro] Network error, trying to recover...");

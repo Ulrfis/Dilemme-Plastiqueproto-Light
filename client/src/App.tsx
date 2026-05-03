@@ -559,7 +559,13 @@ function App() {
     // PostHog health check — fired ~3s after mount to confirm the SDK is alive in production
     const healthCheckTimer = window.setTimeout(() => {
       const verification = verifyPostHog();
-      const ph: any = window.posthog;
+      const ph = window.posthog as unknown as {
+        config?: { persistence?: string };
+        persistence?: { props_load_type?: string; props?: Record<string, unknown> };
+        _isIdentified?: () => boolean;
+        LIB_VERSION?: string;
+        version?: string;
+      } | undefined;
       let persistenceType: string | undefined;
       try {
         persistenceType = ph?.config?.persistence ?? ph?.persistence?.props_load_type ?? undefined;
