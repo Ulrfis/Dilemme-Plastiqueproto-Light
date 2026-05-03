@@ -71,6 +71,49 @@ const generalLimiter = createRateLimiter(200, 15 * 60 * 1000); // 200 req / 15 m
 const ttsLimiter = createRateLimiter(60, 15 * 60 * 1000); // plus strict pour endpoints coûteux
 const sttLimiter = createRateLimiter(60, 15 * 60 * 1000);
 
+// Track failed session-token verification attempts per IP+sessionId to block
+// brute-force guessing of access tokens. Max 10 failures per minute per
+// (IP, sessionId) pair. Once exceeded, further attempts return 429 until the
+// window expires.
+type AuthFailureEntry = { count: number; resetAt: number };
+const sessionAuthFailures = new Map<string, AuthFailureEntry>();
+const SESSION_AUTH_MAX_FAILURES = 10;
+const SESSION_AUTH_WINDOW_MS = 60 * 1000;
+let lastAuthFailurePurge = Date.now();
+
+function getAuthFailureKey(req: any, sessionId: string): string {
+  const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+  return `${ip}::${sessionId}`;
+}
+
+function isSessionAuthBlocked(req: any, sessionId: string): { blocked: boolean; retryAfter: number } {
+  const now = Date.now();
+  if (now - lastAuthFailurePurge > 5 * 60 * 1000) {
+    for (const [k, v] of sessionAuthFailures) {
+      if (now > v.resetAt) sessionAuthFailures.delete(k);
+    }
+    lastAuthFailurePurge = now;
+  }
+  const key = getAuthFailureKey(req, sessionId);
+  const entry = sessionAuthFailures.get(key);
+  if (!entry || now > entry.resetAt) return { blocked: false, retryAfter: 0 };
+  if (entry.count >= SESSION_AUTH_MAX_FAILURES) {
+    return { blocked: true, retryAfter: Math.max(1, Math.ceil((entry.resetAt - now) / 1000)) };
+  }
+  return { blocked: false, retryAfter: 0 };
+}
+
+function recordSessionAuthFailure(req: any, sessionId: string): void {
+  const now = Date.now();
+  const key = getAuthFailureKey(req, sessionId);
+  const entry = sessionAuthFailures.get(key);
+  if (!entry || now > entry.resetAt) {
+    sessionAuthFailures.set(key, { count: 1, resetAt: now + SESSION_AUTH_WINDOW_MS });
+  } else {
+    entry.count += 1;
+  }
+}
+
 function requireAdmin(req: any, res: any): boolean {
   const adminToken = process.env.ADMIN_TOKEN;
   if (!adminToken) {
@@ -422,8 +465,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     req: import('express').Request,
     res: import('express').Response
   ): Promise<import('@shared/schema').TutorialSession | null> {
+    // Throttle brute-force attempts: if this (IP, sessionId) has already
+    // failed too many times in the current window, refuse immediately
+    // without touching storage or comparing tokens.
+    const blockState = isSessionAuthBlocked(req, sessionId);
+    if (blockState.blocked) {
+      res.set('Retry-After', blockState.retryAfter.toString());
+      res.status(429).json({ error: 'Too many failed attempts' });
+      return null;
+    }
+
     const session = await storage.getSession(sessionId);
     if (!session) {
+      recordSessionAuthFailure(req, sessionId);
       res.status(404).json({ error: 'Session not found' });
       return null;
     }
@@ -431,6 +485,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       (req.headers['x-session-token'] as string | undefined) ||
       (req.body?.accessToken as string | undefined);
     if (!provided || provided !== session.accessToken) {
+      recordSessionAuthFailure(req, sessionId);
       res.status(403).json({ error: 'Forbidden' });
       return null;
     }
