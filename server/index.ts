@@ -4,6 +4,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import OpenAI from "openai";
 import { elevenLabsFetch, recordPoolSample, POOL_SAMPLE_INTERVAL_MS } from "./elevenlabs-agent";
 import { backfillSessionTokens } from "./backfill-session-tokens";
+import { shutdownPostHog } from "./posthog";
 
 const app = express();
 
@@ -33,6 +34,15 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// Flush queued PostHog events before the process exits so production crashes
+// still surface a final api_error event.
+const handleShutdown = (signal: NodeJS.Signals) => {
+  log(`Received ${signal} — flushing PostHog and exiting`);
+  shutdownPostHog().finally(() => process.exit(0));
+};
+process.once('SIGTERM', handleShutdown);
+process.once('SIGINT', handleShutdown);
 
 (async () => {
   // Backfill access tokens synchronously before accepting any requests

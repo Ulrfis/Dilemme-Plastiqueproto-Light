@@ -8,6 +8,7 @@ import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
 import { elevenLabsFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY, POOL_SAMPLE_INTERVAL_MS } from "./elevenlabs-agent";
+import { captureServerError, captureServerEvent } from "./posthog";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -750,8 +751,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // without waiting for an on-demand ElevenLabs call after navigation.
       const welcomeText = `Bienvenue ${data.userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum 8 échanges pour y parvenir !`;
       const welcomeAudioToken = crypto.randomUUID();
+      const welcomePromise = generateTtsAudio(welcomeText, undefined, 'quality');
+      // Capture silent welcome-TTS pregen failures (otherwise they only surface
+      // if /api/tts/play is ever called for this token).
+      welcomePromise.catch((err) => {
+        captureServerError(
+          '/api/sessions',
+          session.id,
+          err,
+          { context: 'welcome_pregen_tts' },
+          data.userName,
+        );
+      });
       ttsRequestStore.set(welcomeAudioToken, {
-        promise: generateTtsAudio(welcomeText, undefined, 'quality'),
+        promise: welcomePromise,
         createdAt: Date.now(),
       });
       console.log('[Session Create] Pre-generating welcome TTS in background, token:', welcomeAudioToken.substring(0, 8));
@@ -903,6 +916,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ text: transcription.text });
     } catch (error) {
       console.error('Error transcribing audio:', error);
+      captureServerError('/api/speech-to-text', null, error, { context: 'whisper_transcription' });
       res.status(500).json({ error: 'Transcription failed' });
     }
   });
@@ -931,6 +945,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(audioBuffer);
     } catch (error) {
       console.error('[TTS Play] Error:', error);
+      captureServerError('/api/tts/play', null, error, { context: 'tts_play_token' });
       ttsRequestStore.delete(token);
       res.status(500).json({
         error: 'TTS generation failed',
@@ -1058,6 +1073,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       console.error('[TTS Stream API] Error:', error);
+      captureServerError('/api/text-to-speech/stream', null, error, { context: 'tts_stream' });
       if (!res.headersSent) {
         res.status(500).json({
           error: 'Speech generation failed',
@@ -1154,6 +1170,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(audioBufferNode);
     } catch (error) {
       console.error('[TTS API] Error generating speech:', error);
+      captureServerError('/api/text-to-speech', null, error, { context: 'tts_full' });
       res.status(500).json({
         error: 'Speech generation failed',
         details: error instanceof Error ? error.message : 'Unknown error'
@@ -1239,6 +1256,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       // Silent — never let background pregen affect the primary chat flow
       console.warn('[Pregen Resume] Background generation failed (silent):', err instanceof Error ? err.message : err);
+      // Mirror to PostHog so we can detect chronic background failures in prod.
+      const sessionForName = await storage.getSession(sessionId).catch(() => null);
+      captureServerError(
+        'pregen_resume_background',
+        sessionId,
+        err,
+        { context: 'schedule_pregen_resume' },
+        sessionForName?.userName,
+      );
     }
   }
 
@@ -1274,6 +1300,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ text: pregen.text, audioToken });
     } catch (error) {
       console.error('[Pregen Resume Token] Error:', error);
+      captureServerError('/api/sessions/:id/resume-token', req.params.id, error, { context: 'pregen_resume_token' });
       return res.status(500).json({ error: 'Failed to retrieve pre-generated resume' });
     }
   });
@@ -1366,6 +1393,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({ text: resumeText, audioToken });
     } catch (error) {
       console.error('[Resume API] Error:', error);
+      captureServerError(
+        '/api/sessions/:id/resume',
+        req.params.id,
+        error,
+        { context: 'resume_on_demand' },
+        (req.body?.userName as string | undefined) ?? null,
+      );
       return res.status(500).json({ error: 'Failed to generate resume message' });
     }
   });
@@ -1467,6 +1501,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Timeout de sécurité pour détecter les streams bloqués
       let streamTimeout: NodeJS.Timeout | null = setTimeout(() => {
         console.error('[Chat Stream API] ⚠️ TIMEOUT: Stream blocked after 30 seconds');
+        captureServerEvent('server_error', sessionId, {
+          endpoint: '/api/chat/stream',
+          context: 'stream_timeout_30s',
+          error_message: 'Assistant stream blocked >30s',
+        }, userName);
         if (!res.writableEnded) {
           res.write(`data: ${JSON.stringify({
             type: 'error',
@@ -1540,6 +1579,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .catch((ttsErr) => {
             console.error('[Chat Stream API] Phase 1 TTS failed:', ttsErr);
+            captureServerError('/api/chat/stream', sessionId, ttsErr, { context: 'phase1_tts' }, userName);
             if (!res.writableEnded) {
               for (const s of sentences) {
                 res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: s.index })}\n\n`);
@@ -1596,6 +1636,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .catch((ttsErr) => {
             phase2aSettled = true;
             console.error('[Chat Stream API] Phase 2a TTS failed:', ttsErr);
+            captureServerError('/api/chat/stream', sessionId, ttsErr, { context: 'phase2a_tts' }, userName);
             if (!phase2aCancelled && !res.writableEnded) {
               for (let i = startIndex; i < startIndex + count; i++) {
                 res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
@@ -1632,6 +1673,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .catch((ttsErr) => {
             console.error('[Chat Stream API] Phase 2b TTS failed:', ttsErr);
+            captureServerError('/api/chat/stream', sessionId, ttsErr, { context: 'phase2b_tts' }, userName);
             if (!res.writableEnded) {
               for (let i = startIndex; i < startIndex + count; i++) {
                 res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
@@ -1759,6 +1801,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 })
                 .catch((ttsErr) => {
                   console.error('[Chat Stream API] Phase 2a+2b merged TTS failed:', ttsErr);
+                  captureServerError('/api/chat/stream', sessionId, ttsErr, { context: 'phase2_merged_tts' }, userName);
                   if (!res.writableEnded) {
                     for (let i = phase2StartIndex; i < phase2StartIndex + mergedCount; i++) {
                       res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
@@ -1776,6 +1819,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             event.event === 'thread.run.cancelled' ||
             event.event === 'thread.run.expired') {
           console.error('[Chat Stream API] ❌ Assistant run failed:', event.event);
+          captureServerEvent('server_error', sessionId, {
+            endpoint: '/api/chat/stream',
+            context: 'assistant_run_failed',
+            error_message: `Assistant run ${event.event}`,
+            run_event: event.event,
+          }, userName);
 
           if (streamTimeout) {
             clearTimeout(streamTimeout);
@@ -1858,6 +1907,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       schedulePregenResume(sessionId).catch(() => { /* already handled inside */ });
     } catch (error) {
       console.error('[Chat Stream API] Error:', error);
+      captureServerError(
+        '/api/chat-streaming',
+        (req.body?.sessionId as string | undefined) ?? null,
+        error,
+        { context: 'stream_outer_catch' },
+        (req.body?.userName as string | undefined) ?? null,
+      );
 
       const isProd = process.env.NODE_ENV === 'production';
       const errorMessage = isProd
@@ -1988,6 +2044,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             assistantId: ASSISTANT_ID,
           };
           console.error('[Chat API] Assistant run failed via stream:', errorDetails);
+          captureServerEvent('server_error', sessionId, {
+            endpoint: '/api/chat',
+            context: 'assistant_run_failed',
+            error_message: `Assistant run ${event.event}`,
+            run_event: event.event,
+            run_id: runId,
+          }, session?.userName);
           throw new Error(`Assistant run failed - Event: ${event.event}, Run ID: ${runId}, Thread ID: ${threadId}`);
         }
       }
@@ -2042,6 +2105,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: error instanceof Error ? error.name : undefined,
         sessionId: req.body.sessionId,
       });
+      {
+        const sid = (req.body?.sessionId as string | undefined) ?? null;
+        const sessionForName = sid ? await storage.getSession(sid).catch(() => null) : null;
+        captureServerError(
+          '/api/chat',
+          sid,
+          error,
+          { context: 'chat_outer_catch' },
+          sessionForName?.userName,
+        );
+      }
 
       const isProd = process.env.NODE_ENV === 'production';
       res.status(500).json({
