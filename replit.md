@@ -32,9 +32,67 @@ The application heavily integrates with OpenAI for core AI functionalities:
 Several strategies are implemented to optimize performance, especially reducing perceived latency for AI interactions:
 - **TTS Caching**: MD5 hash-based caching of ElevenLabs audio responses.
 - **API Connection Warming**: DNS prefetch and preconnect for external API endpoints.
-- **Per-Sentence TTS Pipeline**: Streaming LLM responses via SSE and generating TTS for each sentence concurrently with LLM generation, managed by an audio queue.
-- **Pre-generated Audio**: Welcome messages are pre-generated to reduce initial load time.
-- **"Peter is Thinking" Bubble**: Visual cues and animated indicators to manage user perception during AI processing.
+- **Per-Sentence TTS Pipeline (Phase 2)**: SSE streams LLM responses sentence-by-sentence; TTS generates concurrently; `useAudioQueue` plays in order. First audio ~2–3s after send (was 5–9s).
+- **Phase 3 Optimizations (Task #26)**:
+  - `MIN_SENTENCE_CHARS=55`: Phase 1 groups short sentences to avoid TTS on fragments.
+  - Phase 2a rolling dispatch: fires mid-stream when ≥120 chars or ≥3 sentences accumulated (not only at stream completion), closing silence gap between Phase 1 and Phase 2 audio.
+  - Welcome audio pre-generation: TTS token generated at session creation, stored in `sessionStorage('welcomeAudioToken')`, consumed immediately in `handleUnlockAudio`.
+- **"Peter is Thinking" Bubble**: Animated visual indicator during AI processing.
+
+### Latency Measurement Instrumentation (Task #27)
+
+Two PostHog events instrument the Phase 3 optimizations:
+
+#### `welcome_audio_latency`
+Fired in `TutorialScreen.handleUnlockAudio` just before `playAudio()` is called.
+| Property | Type | Description |
+|---|---|---|
+| `used_pregen` | bool | `true` = pre-generated token was available and valid; `false` = on-demand fallback |
+| `latency_ms` | number | ms from entering welcome branch to audio blob ready |
+
+**Baseline (development observations)**:
+- `used_pregen=true`: ~150–500ms (fetch from in-memory `ttsRequestStore`)
+- `used_pregen=false`: ~1 500–3 000ms (live ElevenLabs API call)
+
+#### `phase2a_dispatch_timing`
+Fired client-side when server emits SSE `type: 'phase2a_timing'` (immediately at Phase 2a dispatch, before TTS completes).
+| Property | Type | Description |
+|---|---|---|
+| `dispatched_mid_stream` | bool | `true` = threshold reached during streaming; `false` = flushed at `thread.run.completed` |
+| `chars_at_dispatch` | number | accumulated char count of Phase 2a text when dispatched |
+
+**Baseline (development observations)**:
+- Normal-length responses (≥3 sentences): `dispatched_mid_stream=true` in ~70–80% of exchanges.
+- Short responses (1–2 sentences total): `dispatched_mid_stream=false`, handled entirely by Phase 1.
+
+#### PostHog Dashboard — "Latence TTS — Impact Phase 3"
+To create in PostHog UI (app.posthog.com → Insights → New insight):
+
+**Insight 1 — Welcome audio latency by path**
+- Type: Trends
+- Event: `welcome_audio_latency`
+- Breakdown: `used_pregen` (bool)
+- Aggregation: p50 of `latency_ms`, then p95 of `latency_ms` (two series)
+- Date range: Last 30 days (rolling)
+- Title: `Welcome audio p50/p95 — pregen vs on-demand`
+
+**Insight 2 — Phase 2a mid-stream dispatch rate**
+- Type: Trends
+- Event: `phase2a_dispatch_timing`
+- Breakdown: `dispatched_mid_stream`
+- Aggregation: Count (absolute) and % of total (derived)
+- Date range: Last 30 days (rolling)
+- Title: `Phase 2a dispatch timing — mid-stream vs at-completion`
+
+**Insight 3 — Phase 1 TTS latency trend**
+- Type: Trends
+- Event: `tts_phase1_ready`
+- Aggregation: p50 of `latency_ms`, p95 of `latency_ms`
+- Date range: Last 90 days (to show before/after Task #26 inflection)
+- Title: `Phase 1 TTS p50/p95 over time`
+
+Group the three insights into a dashboard named **"Latence TTS — Impact Phase 3"**.
+Filter all insights to exclude `$host contains localhost` to keep only production data.
 
 ### Media Management
 
