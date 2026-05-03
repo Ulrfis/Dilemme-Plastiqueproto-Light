@@ -70,6 +70,8 @@ export function getPoolStats(): PoolStatsSnapshot {
   return { origins, ...totals, byOrigin };
 }
 
+// Shared cadence for the ElevenLabs warming tick + pool sampling.
+export const POOL_SAMPLE_INTERVAL_MS = 30_000;
 // Ring buffer of recent pool samples — 60 samples = 30 min at 30s tick.
 export const POOL_HISTORY_CAPACITY = 60;
 const poolHistory: PoolStatsSample[] = [];

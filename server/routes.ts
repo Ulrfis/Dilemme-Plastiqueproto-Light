@@ -7,7 +7,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
-import { elevenLabsFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY } from "./elevenlabs-agent";
+import { elevenLabsFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY, POOL_SAMPLE_INTERVAL_MS } from "./elevenlabs-agent";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -264,7 +264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({
       capacity: POOL_HISTORY_CAPACITY,
       count: samples.length,
-      intervalMs: 30_000,
+      intervalMs: POOL_SAMPLE_INTERVAL_MS,
       samples,
     });
   });

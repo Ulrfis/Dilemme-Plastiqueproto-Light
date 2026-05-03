@@ -2,7 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import OpenAI from "openai";
-import { elevenLabsFetch, recordPoolSample } from "./elevenlabs-agent";
+import { elevenLabsFetch, recordPoolSample, POOL_SAMPLE_INTERVAL_MS } from "./elevenlabs-agent";
 import { backfillSessionTokens } from "./backfill-session-tokens";
 
 const app = express();
@@ -124,10 +124,10 @@ app.use((req, res, next) => {
       // Initial warmup after 6 seconds (staggered from OpenAI warmup at 5s)
       setTimeout(warmElevenLabsConnection, 6000);
 
-      // Then keep warm every 30 seconds
-      setInterval(warmElevenLabsConnection, 30000);
+      // Then keep warm at the shared cadence
+      setInterval(warmElevenLabsConnection, POOL_SAMPLE_INTERVAL_MS);
 
-      log('[Connection Warming] ElevenLabs connection warming enabled (every 30s)');
+      log(`[Connection Warming] ElevenLabs connection warming enabled (every ${POOL_SAMPLE_INTERVAL_MS / 1000}s)`);
     }
   });
 })();
