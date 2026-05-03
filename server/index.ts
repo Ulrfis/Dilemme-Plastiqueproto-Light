@@ -2,7 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import OpenAI from "openai";
-import { elevenLabsFetch } from "./elevenlabs-agent";
+import { elevenLabsFetch, recordPoolSample } from "./elevenlabs-agent";
 import { backfillSessionTokens } from "./backfill-session-tokens";
 
 const app = express();
@@ -115,6 +115,9 @@ app.use((req, res, next) => {
         } catch (error) {
           // Silent fail - don't spam logs if API is down
           // Connection will be established on next real request anyway
+        } finally {
+          // Capture a pool stats snapshot every tick for /api/health/connections/history
+          try { recordPoolSample(); } catch { /* never let telemetry break warming */ }
         }
       };
 

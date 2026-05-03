@@ -7,7 +7,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
-import { elevenLabsFetch } from "./elevenlabs-agent";
+import { elevenLabsFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY } from "./elevenlabs-agent";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -246,6 +246,28 @@ function detectClues(text: string, alreadyFound: string[]): string[] {
 export async function registerRoutes(app: Express): Promise<Server> {
   // Rate-limit global API
   app.use('/api', generalLimiter);
+
+  // Snapshot of the undici connection pool used for ElevenLabs (point-in-time).
+  app.get('/api/health/connections', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.json({
+      timestamp: Date.now(),
+      stats: getPoolStats(),
+    });
+  });
+
+  // Time-series of recent pool snapshots (one per connection-warming tick,
+  // ~every 30s, capped at the last POOL_HISTORY_CAPACITY samples).
+  app.get('/api/health/connections/history', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const samples = getPoolHistory();
+    res.json({
+      capacity: POOL_HISTORY_CAPACITY,
+      count: samples.length,
+      intervalMs: 30_000,
+      samples,
+    });
+  });
 
   // Endpoint de diagnostic pour vérifier les services AI
   app.get('/api/health/ai', async (req, res) => {
