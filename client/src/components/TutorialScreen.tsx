@@ -193,12 +193,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       setMessages([makeMessage('assistant', welcomeMessage)]);
       hasPlayedWelcome.current = true;
       
+      const welcomeStartTime = Date.now();
       try {
         // Pré-chauffage TTS: lancer un call ultra court en arrière-plan pour remplir les caches CDN
         textToSpeechStreaming("...").catch(() => {});
 
         // Try to use the pre-generated welcome audio token (kicked off at session creation)
         let audioBlob: Blob | null = null;
+        let usedPregen = false;
         const pregenToken = sessionStorage.getItem('welcomeAudioToken');
         if (pregenToken) {
           sessionStorage.removeItem('welcomeAudioToken'); // consume immediately to prevent stale reuse
@@ -221,7 +223,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         if (!audioBlob || audioBlob.size < 100) {
           console.log('[TutorialScreen] Generating welcome audio on-demand (no pre-gen token)');
           audioBlob = await textToSpeechWithRetry(welcomeMessage);
+        } else {
+          usedPregen = true;
         }
+
+        captureEvent('welcome_audio_latency', {
+          used_pregen: usedPregen,
+          latency_ms: Date.now() - welcomeStartTime,
+        });
 
         await playAudio(audioBlob);
       } catch (error) {
@@ -580,6 +589,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           console.warn('[TutorialScreen] Sentence #' + index + ' TTS failed on server, skipping');
           captureEvent('sentence_audio_error', { pipeline: 'streaming', sentence_index: index });
           audioQueue.skipIndex(index);
+        },
+
+        onPhase2aTiming: (dispatchedMidStream, charsAtDispatch) => {
+          if (streamGenerationRef.current !== currentGeneration) return;
+          captureEvent('phase2a_dispatch_timing', {
+            dispatched_mid_stream: dispatchedMidStream,
+            chars_at_dispatch: charsAtDispatch,
+          });
         },
 
         onComplete: async (finalResponse, newFoundClues, detectedClue, phase2Dispatched) => {

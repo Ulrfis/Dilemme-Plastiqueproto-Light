@@ -160,6 +160,8 @@ export interface StreamChatCallbacks {
   onSentenceAudioError?: (index: number) => void;
   onComplete?: (fullResponse: string, foundClues: string[], detectedClue: string | null, phase2Dispatched?: boolean) => void;
   onError?: (error: string) => void;
+  /** Fired when Phase 2a TTS is dispatched; carries mid-stream flag and accumulated char count. */
+  onPhase2aTiming?: (dispatchedMidStream: boolean, charsAtDispatch: number) => void;
 }
 
 export interface StreamChatOptions {
@@ -226,6 +228,8 @@ export async function sendChatMessageStreaming(
             callbacks.onComplete(data.fullResponse, data.foundClues, data.detectedClue, data.phase2Dispatched);
           } else if (data.type === 'error' && callbacks.onError) {
             callbacks.onError(data.message);
+          } else if (data.type === 'phase2a_timing' && callbacks.onPhase2aTiming) {
+            callbacks.onPhase2aTiming(data.dispatched_mid_stream, data.chars_at_dispatch);
           }
         } catch (parseError) {
           console.error('[API] Error parsing SSE message:', parseError, message);

@@ -1116,14 +1116,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Phase 2a: early dispatch mid-stream when buffer threshold is reached.
       // Fires with previous_text=phase1Text so prosody continues naturally from Phase 1.
-      const dispatchPhase2aTts = (sentences: string[], startIndex: number) => {
+      const dispatchPhase2aTts = (sentences: string[], startIndex: number, dispatchedMidStream = false) => {
         const combined = sentences.join(' ');
         const count = sentences.length;
         phase2aDispatched = true;
         phase2aText = combined;
         phase2Dispatched = true;
 
-        console.log(`[Chat Stream API] Phase 2a TTS (EARLY): ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
+        console.log(`[Chat Stream API] Phase 2a TTS (${dispatchedMidStream ? 'MID-STREAM' : 'AT-COMPLETION'}): ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
+
+        // Emit timing metadata immediately so the client can fire a PostHog event
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({
+            type: 'phase2a_timing',
+            dispatched_mid_stream: dispatchedMidStream,
+            chars_at_dispatch: combined.length,
+          })}\n\n`);
+        }
 
         const ttsPromise = generateTtsAudio(combined, phase1Text || undefined, 'quality')
           .then((audioBuffer) => {
@@ -1220,7 +1229,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             phase2Buffer.push(trimmed);
             const combined2a = phase2Buffer.join(' ');
             if (combined2a.length >= PHASE2_EARLY_CHARS || phase2Buffer.length >= PHASE2_EARLY_SENTENCES) {
-              dispatchPhase2aTts(phase2Buffer, phase2StartIndex);
+              dispatchPhase2aTts(phase2Buffer, phase2StartIndex, true);
               phase2Buffer = [];
             }
           } else {
@@ -1273,7 +1282,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Flush Phase 2a buffer if early threshold was never reached during streaming
           if (!phase2aDispatched && phase2Buffer.length > 0) {
-            dispatchPhase2aTts(phase2Buffer, phase2StartIndex);
+            dispatchPhase2aTts(phase2Buffer, phase2StartIndex, false);
             phase2Buffer = [];
           }
 

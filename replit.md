@@ -2,15 +2,7 @@
 
 ## Overview
 
-Dilemme is a mobile-first educational web application that enables students to discover environmental issues through AI-guided image analysis. Users engage in voice-based conversations with an AI assistant named "Peter" to find hidden clues within images, learning about plastic pollution and environmental topics through interactive dialogue.
-
-**Core Purpose**: Educational tool for classroom settings enabling students to analyze images through natural voice conversations with an AI assistant, discovering environmental clues and synthesizing their findings.
-
-**Target Environment**: 
-- Mobile-first (320px-428px viewport priority)
-- Classroom deployment (24+ concurrent sessions)
-- Session duration: ≤5 minutes for tutorial
-- Primary interaction: Voice-based (Speech-to-Text and Text-to-Speech)
+Dilemme is a mobile-first educational web application designed for classroom use. It enables students to explore environmental issues, particularly plastic pollution, through AI-guided image analysis. Users interact with an AI assistant named "Peter" via voice to discover hidden clues in images and synthesize their findings, fostering an interactive and engaging learning experience. The project aims to provide an accessible, interactive, and effective educational tool for environmental literacy.
 
 ## User Preferences
 
@@ -18,217 +10,67 @@ Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
-### Frontend Stack
+### Frontend
 
-**Framework**: React 18 with TypeScript, built using Vite for optimal development and production performance.
+The frontend is built with React 18, TypeScript, and Vite, prioritizing a mobile-first responsive design (320px-428px viewport). It uses Wouter for lightweight routing and SessionFlowContext with sessionStorage for state management, complemented by TanStack Query for server state. UI components are developed with Shadcn/ui based on Radix UI and styled using Tailwind CSS, adhering to Material Design 3 principles. Accessibility is a core consideration, with ARIA labels and keyboard navigation.
 
-**Routing**: Wouter for lightweight client-side routing with multi-route navigation:
-- `/`: Title screen with start button
-- `/video`: Video introduction with skip option
-- `/welcome`: User name input and session creation
-- `/tutorial`: Main AI conversation interface with image analysis
-- `/game`: Drag-drop game for clue organization
-- `/synthesis`: User synthesis writing screen
-- `/feedback`: Feedback survey
-- `/complete`: Completion screen
-- `/syntheses`: Community page displaying user synthesis submissions with upvoting
+### Backend
 
-**State Management**: 
-- SessionFlowContext for centralized session state with sessionStorage persistence
-- TanStack Query v5 for server state synchronization and caching
-- Hybrid session validation (React state + sessionStorage) to handle navigation race conditions
-- Custom hooks for complex stateful logic (voice recording, audio playback, streaming)
+The backend is an Express.js application with TypeScript running on Node.js. It uses PostgreSQL (Neon serverless) with Drizzle ORM for data persistence. Key tables store tutorial session data, conversation messages, and user feedback. The system uses UUID-based session identification to manage the lifecycle from creation to completion.
 
-**UI Architecture**:
-- Shadcn/ui component library built on Radix UI primitives
-- Material Design 3 principles adapted for educational context
-- Tailwind CSS for styling with custom design system
-- CSS variables for theming (light/dark mode support)
-- Mobile-first responsive design with touch-friendly targets (minimum 44px)
+### AI Integration
 
-**Design System**:
-- Primary font: Inter (400-700 weights)
-- Secondary font: Space Grotesk (branding, 500-700)
-- Color system using HSL values with CSS custom properties
-- Spacing scale: 2, 4, 6, 8, 12, 16, 20, 24 (Tailwind units)
-
-**Key Frontend Patterns**:
-- Screen-based navigation flow with explicit state management
-- Component composition with examples directory for isolated development
-- Progressive enhancement with text fallback for voice interactions
-- Accessibility-first approach with ARIA labels and keyboard navigation
-
-### Backend Stack
-
-**Server**: Express.js with TypeScript running on Node.js 20.x
-
-**Database**: PostgreSQL (Neon serverless) with Drizzle ORM for type-safe database operations
-
-**Core Tables**:
-1. `tutorial_sessions`: User sessions with clues found, score, synthesis, questionnaire responses
-2. `conversation_messages`: Chat history between user and AI assistant
-3. `feedback_surveys`: User feedback data (deprecated - merged into tutorial_sessions)
-
-**Session Architecture**:
-- UUID-based session identification
-- Session lifecycle: creation → message tracking → completion → feedback collection
-- All data tied to user name with unified structure in `tutorial_sessions` table
-- Real-time message count tracking and clue detection
-
-### AI Integration Architecture
-
-**OpenAI Integration**:
-- **Speech-to-Text**: Whisper-1 model for voice transcription (correction pass after Deepgram live)
-- **Conversational AI**: GPT Assistant API (Assistant ID: `asst_P9b5PxMd1k9HjBgbyXI1Cvm9`)
-- **Thread Management**: Each session maintains an OpenAI thread for conversation context
-- **Organization**: `org-z0AK8zYLTeapGaiDZFQ5co2N`
-
-**Deepgram Live Transcription**:
-- **Model**: nova-2 (French, `language=fr`, `interim_results=true`, `smart_format=true`, `endpointing=300ms`)
-- **Architecture**: Server WebSocket relay at `/ws/deepgram` (keeps API key server-side) → upstream `wss://api.deepgram.com/v1/listen`
-- **Server**: `server/deepgramRelay.ts` attaches a `WebSocketServer({noServer:true})` via the http.Server `upgrade` event. Forwards binary audio chunks client→Deepgram, parses `Results` JSON Deepgram→client.
-- **Client**: `client/src/hooks/useDeepgramTranscription.ts` opens WS, runs a second `MediaRecorder` on the same MediaStream with `timeslice=250ms`, sends each `dataavailable` chunk as ArrayBuffer.
-- **Integration**: `useVoiceInteraction` accepts `onLiveTranscript(text, isFinal)`. `TutorialScreen` accumulates committed+interim into `liveTranscript` state, displayed in `ConversationPanel`'s text-input area during recording with a blinking cursor.
-- **Whisper correction pass**: After `stopRecording`, the existing Whisper STT call runs on the full audio blob and its result is the actual message sent to Peter (Deepgram is purely visual feedback).
-
-**ElevenLabs Integration**:
-- **Text-to-Speech**: Voice ID `R8IjtpeRZsjoJfq1wwj3` (Peter - nouveau workspace)
-- **Model**: eleven_multilingual_v2
-- **API Key**: Updated to new workspace (`sk_22fdaffb...`)
-- **Caching Strategy**: MD5 hash-based TTS response caching (max 100 entries) for repeated phrases
-
-**Streaming Architecture (Per-Sentence TTS Pipeline)**:
-- Server-Sent Events (SSE) for streaming LLM responses sentence-by-sentence
-- Per-sentence TTS: Each sentence gets its own ElevenLabs TTS call with `previous_text` context for prosody continuity
-- `sentence` SSE events include `audioToken` — client fetches audio from `/api/tts/play/{token}` (blocks until ready)
-- Audio queue (`useAudioQueue`) manages sequential playback: inserts in sorted order, plays in sequence
-- First sentence audio starts playing as soon as its TTS completes (~2-3s), while LLM + TTS continue for remaining sentences
-- User can interrupt Peter mid-playback (clears audio queue + stops current audio)
-
-**Clue Detection System**:
-- Target clues: ADN, bébé, penseur de Rodin, plastique
-- Variant matching for flexible user input (e.g., "génétique" matches "ADN")
-- Real-time detection during conversation with session state updates
+The application heavily integrates with OpenAI for core AI functionalities:
+- **Speech-to-Text**: Whisper-1 for transcribing user voice input (with Deepgram for live, interim transcription feedback).
+- **Conversational AI**: GPT Assistant API manages dialogue context and responses.
+- **Text-to-Speech**: ElevenLabs (voice ID `R8IjtpeRZsjoJfq1wwj3` for "Peter") synthesizes AI responses.
+- **Streaming Architecture**: Server-Sent Events (SSE) deliver LLM responses sentence-by-sentence, enabling per-sentence TTS and an audio queue for sequential playback, significantly reducing perceived latency.
+- **Clue Detection**: Real-time detection of specific environmental clues within user conversations.
 
 ### Performance Optimizations
 
-**Phase 1 - Quick Wins**:
-1. **TTS Response Caching**: MD5-based cache for audio responses (1-3s savings on repeated phrases)
-2. **API Connection Warming**: DNS prefetch and preconnect for OpenAI/ElevenLabs endpoints (300-800ms reduction)
-
-**Phase 2 - Per-Sentence TTS Pipeline**:
-1. **SSE Streaming**: LLM responses streamed sentence-by-sentence via `/api/chat/stream` endpoint
-2. **Per-Sentence TTS**: Each sentence triggers immediate ElevenLabs TTS with `previous_text` for prosody continuity
-3. **Audio Queue**: `useAudioQueue` hook manages sequential playback of per-sentence audio blobs
-4. **Latency**: First sentence audio plays ~2-3s after user sends message (was 5-9s with full-text TTS)
-
-**Frontend Performance**:
-- Lazy loading and code splitting via Vite
-- Image optimization with proper responsive images
-- Audio context management with proper cleanup
-- Mobile-specific optimizations for touch interactions
+Several strategies are implemented to optimize performance, especially reducing perceived latency for AI interactions:
+- **TTS Caching**: MD5 hash-based caching of ElevenLabs audio responses.
+- **API Connection Warming**: DNS prefetch and preconnect for external API endpoints.
+- **Per-Sentence TTS Pipeline**: Streaming LLM responses via SSE and generating TTS for each sentence concurrently with LLM generation, managed by an audio queue.
+- **Pre-generated Audio**: Welcome messages are pre-generated to reduce initial load time.
+- **"Peter is Thinking" Bubble**: Visual cues and animated indicators to manage user perception during AI processing.
 
 ### Media Management
 
-**Audio Context Handling**:
-- Centralized MediaContext for audio unlock management
-- User gesture-based audio unlock (required for mobile browsers)
-- Audio keep-alive mechanism to prevent context suspension
-- Proper cleanup of audio resources on component unmount
-
-**Voice Interaction Flow**:
-1. User initiates recording via microphone button
-2. Audio captured via MediaRecorder API (WebM format)
-3. Sent to `/api/speech-to-text` for Whisper transcription
-4. Text sent to `/api/chat/stream` for AI response
-5. AI response streamed via SSE, each `sentence` event includes `audioToken`
-6. Client fetches `/api/tts/play/{audioToken}` for each sentence (blocks until TTS ready)
-7. Audio blobs enqueued in `useAudioQueue`, played sequentially starting from sentence #1
-
-**"Peter is Thinking" Bubble (perceived latency reduction, Claude-inspired)**:
-- Component: `ThinkingBubble` in `ConversationPanel.tsx` — visually distinct ephemeral bubble (italic, dashed border, `bg-card/40`, 3 animated dots staggered 0/150/300ms, avatar with `animate-bounce-subtle`)
-- 12 rotating phrases shuffled at mount, switching every 2.8s via `key={phrase}` to retrigger `animate-thinking-fade`. Mix of generic ("Peter réfléchit", "Peter analyse les indices") and plastic-themed ("Peter cherche au fond du sac plastique", "Peter trie les microplastiques", "Peter remonte la chaîne du plastique")
-- State: `isThinking` in `TutorialScreen` activated on user message send, cleared on first streaming `onSentence` (via `firstSentenceReceivedRef` guard) or `onComplete`/`onError`/global `catch`. All terminal callbacks generation-scoped (`streamGenerationRef.current === currentGeneration`) to prevent stale stream callbacks from desynchronizing the bubble state
-- Accessibility: `role="status" aria-live="polite" aria-label="{currentPhrase}…"`, `motion-reduce:animate-none` on all animations
-- Tailwind: new keyframes `thinking-dot` (1.2s) and `thinking-fade` (0.35s) in `tailwind.config.ts`
-
-**Fallback Mechanisms**:
-- Text input mode if microphone permissions denied
-- Non-streaming endpoints available if SSE fails
-- Error recovery with user-friendly messaging
-
-### Video Integration
-
-**Provider**: Gumlet video hosting
-- Video ID: `69a5bb9c9c8c64404a782d85`
-- HLS Stream: `https://video.gumlet.io/653feb38beac1fa13f8fa8e5/69a5bb9c9c8c64404a782d85/main.m3u8`
-- Autoplay attempt with fullscreen on mobile
-- Landscape orientation lock (when supported)
-- Skip button for quick navigation
-- Single video (replaces previous 2-video sequence)
+The application manages audio context for recording and playback, requiring user gesture-based unlock on mobile. Voice interaction involves MediaRecorder for audio capture, Whisper for transcription, and ElevenLabs for synthesis. Video content is hosted on Gumlet, supporting HLS streaming, autoplay, and fullscreen.
 
 ## External Dependencies
 
 ### Third-Party APIs
 
-1. **OpenAI Platform** (`api.openai.com`)
-   - Purpose: Speech-to-Text (Whisper), Conversational AI (GPT Assistant)
-   - Authentication: API key via `OPENAI_API_KEY` environment variable
-   - Organization: `org-z0AK8zYLTeapGaiDZFQ5co2N`
-   - Critical dependency for core functionality
-
-2. **ElevenLabs** (`api.elevenlabs.io`)
-   - Purpose: Text-to-Speech voice synthesis
-   - Authentication: API key via `ELEVENLABS_API_KEY` environment variable
-   - Voice: Peter (ID: `R8IjtpeRZsjoJfq1wwj3`)
-   - Workspace: New workspace with updated API key
-   - Critical dependency for voice output
-
-3. **Google Sheets API**
-   - Purpose: Real-time data synchronization for analytics
-   - Authentication: Replit connector via `REPLIT_CONNECTORS_HOSTNAME`
-   - Auto-sync: Tutorial sessions and feedback responses
-   - Non-blocking: Failures logged but don't interrupt user flow
-
-4. **Gumlet Video Hosting**
-   - Purpose: Intro video delivery
-   - Embedded via iframe with autoplay controls
-   - Non-critical: Skippable by users
+- **OpenAI Platform**: For Speech-to-Text (Whisper), and Conversational AI (GPT Assistant API).
+- **ElevenLabs**: For Text-to-Speech synthesis.
+- **Google Sheets API**: For real-time data synchronization and analytics via Replit Connectors.
+- **Gumlet Video Hosting**: For serving introductory video content.
+- **Deepgram**: For live, interim speech-to-text transcription during user input.
 
 ### Database
 
-**PostgreSQL (Neon Serverless)**:
-- Provisioned via Replit deployment
-- Connection string: `DATABASE_URL` environment variable
-- ORM: Drizzle with type-safe schema definitions
-- WebSocket support via `@neondatabase/serverless` with ws polyfill
+- **PostgreSQL (Neon Serverless)**: Primary data store, provisioned via Replit, accessed using Drizzle ORM.
 
 ### UI Component Libraries
 
-1. **Radix UI**: Accessible component primitives (accordion, dialog, dropdown, etc.)
-2. **Shadcn/ui**: Pre-built component system with Radix UI foundation
-3. **Lucide React**: Icon library for consistent iconography
-4. **React Zoom Pan Pinch**: Image zoom/pan functionality for tutorial image
+- **Radix UI**: Foundational accessible UI primitives.
+- **Shadcn/ui**: Pre-built UI components based on Radix UI.
+- **Lucide React**: Icon library.
+- **React Zoom Pan Pinch**: For image interaction in the tutorial.
 
 ### Build and Development Tools
 
-1. **Vite**: Frontend build tool with HMR and optimized production builds
-2. **esbuild**: Backend bundling for production deployment
-3. **Drizzle Kit**: Database migration and schema management
-4. **TypeScript**: Type safety across frontend and backend
-5. **Tailwind CSS**: Utility-first CSS framework
-6. **PostCSS**: CSS processing with autoprefixer
+- **Vite**: Frontend build tool.
+- **esbuild**: Backend bundling.
+- **Drizzle Kit**: Database migration and schema management.
+- **TypeScript**: For type safety.
+- **Tailwind CSS**: Utility-first CSS framework.
 
 ### Replit-Specific Integrations
 
-1. **Replit Connectors**: Google Sheets integration via connector API
-2. **Replit Development Plugins**: Runtime error modal, cartographer, dev banner
-3. **Environment Variables**: Replit-managed secrets for API keys
-4. **Database Provisioning**: Automatic Neon PostgreSQL setup
-
-### Media APIs
-
-1. **MediaRecorder API**: Browser-native audio recording
-2. **Web Audio API**: Audio context management and playback control
-3. **Screen Orientation API**: Landscape lock for video viewing (when supported)
-4. **Fullscreen API**: Immersive video experience on mobile
+- **Replit Connectors**: Facilitates Google Sheets integration.
+- **Environment Variables**: For managing API keys and secrets.
+- **Database Provisioning**: Automatic setup of Neon PostgreSQL.
