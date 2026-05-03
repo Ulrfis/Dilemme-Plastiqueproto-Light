@@ -270,6 +270,7 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
       errors,
       success: errors === 0,
       validation_attempt: validationCountRef.current,
+      total_attempts: attemptCountRef.current,
       attempts: attemptCountRef.current,
     });
 
@@ -414,12 +415,17 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
           ) : (
             <Button
               onClick={() => {
-                captureEvent("game_completed", {
-                  userName,
-                  duration_seconds: (Date.now() - gameStartedAtRef.current) / 1000,
-                  attempts: attemptCountRef.current,
-                  validation_attempts: validationCountRef.current,
-                });
+                {
+                  const elapsedMs = Date.now() - gameStartedAtRef.current;
+                  captureEvent("game_completed", {
+                    userName,
+                    time_to_complete_ms: elapsedMs,
+                    total_attempts: attemptCountRef.current,
+                    duration_seconds: elapsedMs / 1000,
+                    attempts: attemptCountRef.current,
+                    validation_attempts: validationCountRef.current,
+                  });
+                }
                 onComplete();
               }}
               size="lg"

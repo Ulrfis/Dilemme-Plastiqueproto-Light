@@ -39,14 +39,14 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
 
   const mountedAtRef = useRef<number>(Date.now());
   const outcomeReportedRef = useRef<boolean>(false);
-  const reportOutcome = useCallback((outcome: 'completed' | 'skipped' | 'error', extra?: Record<string, unknown>) => {
+  const reportOutcome = useCallback((outcome: 'completed' | 'skipped' | 'error' | 'timed_out', extra?: Record<string, unknown>) => {
     if (outcomeReportedRef.current) return;
     outcomeReportedRef.current = true;
     const video = videoRef.current;
     const watch_duration_ms = Date.now() - mountedAtRef.current;
     captureEvent('video_intro_outcome', {
       outcome,
-      timed_out: outcome === 'error',
+      timed_out: outcome === 'timed_out',
       watch_duration_ms,
       time_in_video_ms: watch_duration_ms,
       video_current_time: video?.currentTime,

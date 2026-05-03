@@ -559,6 +559,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     // Reset PostHog latency tracking for this exchange
     exchangeStartTimeRef.current = Date.now();
+    turnTranscriptSentAtRef.current = Date.now();
     phase1ReadyTimeRef.current = 0;
     phase1ReportedRef.current = false;
 
@@ -759,7 +760,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               stt_latency_ms: sttDone > 0 && recStop > 0 ? sttDone - recStop : undefined,
               llm_latency_ms: llmFirst > 0 && sttDone > 0 ? llmFirst - sttDone : undefined,
               tts_phase1_latency_ms: phase1Ready > 0 && llmFirst > 0 ? phase1Ready - llmFirst : undefined,
-              first_audio_ms: firstAudio > 0 && recStart > 0 ? firstAudio - recStart : undefined,
+              first_audio_ms: firstAudio > 0 && turnTranscriptSentAtRef.current > 0 ? firstAudio - turnTranscriptSentAtRef.current : undefined,
+              first_audio_from_recording_ms: firstAudio > 0 && recStart > 0 ? firstAudio - recStart : undefined,
               total_ms: now - recStart,
               recording_to_complete_ms: now - recStart,
               stt_to_complete_ms: sttDone > 0 ? now - sttDone : undefined,
@@ -774,6 +776,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             turnLlmFirstAtRef.current = 0;
             turnPhase1ReadyAtRef.current = 0;
             turnFirstAudioAtRef.current = 0;
+            turnTranscriptSentAtRef.current = 0;
           }
 
           audioQueue.resume();
@@ -792,6 +795,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           setIsThinking(false);
           console.error('[TutorialScreen] Stream error:', error);
           captureEvent('tts_stream_error', { pipeline: 'streaming' });
+          captureEvent('api_error', {
+            endpoint: '/api/chat-stream',
+            context: 'streaming_pipeline',
+            error_message: typeof error === 'string' ? error : String(error),
+            fallback_triggered: false,
+          });
           audioQueue.clear();
 
           setMessages(prev => [...prev, {
@@ -908,6 +917,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const turnRecordingStartedAtRef = useRef<number>(0);
   const turnRecordingStoppedAtRef = useRef<number>(0);
   const turnSttDoneAtRef = useRef<number>(0);
+  const turnTranscriptSentAtRef = useRef<number>(0);
   const turnLlmFirstAtRef = useRef<number>(0);
   const turnPhase1ReadyAtRef = useRef<number>(0);
   const turnFirstAudioAtRef = useRef<number>(0);

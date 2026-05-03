@@ -138,13 +138,15 @@ export default function SynthesisScreen({
         getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
       };
       const isUnavailable = err?.name === 'NotFoundError' || err?.name === 'NotSupportedError';
-      captureEvent('mic_permission', {
-        state: isUnavailable ? 'unavailable' : 'denied',
-        source: 'synthesis',
+      const outcome = isUnavailable ? 'unavailable' : 'denied';
+      const baseProps = {
+        source: 'synthesis' as const,
         browser_support,
         error_name: err?.name,
         error_message: err?.message,
-      });
+      };
+      captureEvent('mic_permission', { state: outcome, outcome, ...baseProps });
+      captureEvent('microphone_permission', { outcome, ...baseProps });
       toast({
         title: "Erreur d'enregistrement",
         description: "Impossible d'accéder au microphone.",

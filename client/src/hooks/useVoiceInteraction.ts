@@ -279,18 +279,21 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(track => track.stop());
-      captureEvent('mic_permission', { state: 'granted', source: 'check', browser_support });
+      captureEvent('mic_permission', { state: 'granted', outcome: 'granted', source: 'check', browser_support });
+      captureEvent('microphone_permission', { outcome: 'granted', source: 'check', browser_support });
       return true;
     } catch (error) {
       console.error('Microphone permission denied:', error);
       const err = error as Error;
-      captureEvent('mic_permission', {
-        state: 'denied',
-        source: 'check',
+      const props = {
+        outcome: 'denied' as const,
+        source: 'check' as const,
         browser_support,
         error_name: err?.name,
         error_message: err?.message,
-      });
+      };
+      captureEvent('mic_permission', { state: 'denied', ...props });
+      captureEvent('microphone_permission', props);
       return false;
     }
   }, [browserSupportSummary]);
@@ -383,12 +386,24 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
             stage: 'start',
             error_message: err instanceof Error ? err.message : String(err),
           });
+          captureEvent('api_error', {
+            endpoint: 'deepgram/listen',
+            context: 'deepgram_start',
+            error_message: err instanceof Error ? err.message : String(err),
+            fallback_triggered: true,
+          });
         }
       }
 
       console.log('[useVoiceInteraction] Recording started successfully');
       captureEvent('mic_permission', {
         state: 'granted',
+        outcome: 'granted',
+        source: 'start_recording',
+        browser_support: browserSupportSummary(),
+      });
+      captureEvent('microphone_permission', {
+        outcome: 'granted',
         source: 'start_recording',
         browser_support: browserSupportSummary(),
       });
@@ -396,13 +411,15 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       console.error('[useVoiceInteraction] Error starting recording:', error);
       const err = error as Error;
       const isUnavailable = err?.name === 'NotFoundError' || err?.name === 'NotSupportedError';
-      captureEvent('mic_permission', {
-        state: isUnavailable ? 'unavailable' : 'denied',
-        source: 'start_recording',
+      const outcome = isUnavailable ? 'unavailable' : 'denied';
+      const propsBase = {
+        source: 'start_recording' as const,
         browser_support: browserSupportSummary(),
         error_name: err?.name,
         error_message: err?.message,
-      });
+      };
+      captureEvent('mic_permission', { state: outcome, outcome, ...propsBase });
+      captureEvent('microphone_permission', { outcome, ...propsBase });
       setAudioState('error');
       throw error;
     }
