@@ -995,6 +995,10 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       // Handle mobile interruptions
       audio.onpause = () => {
         if (!audioExplicitlyStoppedRef.current && !audio.ended) {
+          const source: 'tab_hidden' | 'os_pause' =
+            typeof document !== 'undefined' && document.hidden ? 'tab_hidden' : 'os_pause';
+          interruptionPendingRef.current = { source, at: Date.now() };
+          captureEvent('audio_interrupted', { source, resumed: false, context: 'play_from_url' });
           audio.play().catch(() => {
             setTimeout(() => {
               if (audio.paused && !audioExplicitlyStoppedRef.current && !audio.ended) {

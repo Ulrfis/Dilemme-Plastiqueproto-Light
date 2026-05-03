@@ -162,10 +162,16 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     onLiveTranscript: handleLiveTranscript,
   });
 
+  const pendingVoiceTurnRef = useRef<null | (() => void)>(null);
   const audioQueue = useAudioQueue({
     playAudio,
     onQueueEmpty: () => {
       console.log('[TutorialScreen] Audio queue empty - all sentences played');
+      const fn = pendingVoiceTurnRef.current;
+      if (fn) {
+        pendingVoiceTurnRef.current = null;
+        fn();
+      }
     },
     onPlaybackStart: () => {
       console.log('[TutorialScreen] First sentence audio started playing');
@@ -770,37 +776,46 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             setTimeout(() => setShowSuccess(false), 4500);
           }
 
-          // Voice turn timing — only meaningful for voice turns (not text-only)
+          // Voice turn timing — only meaningful for voice turns (not text-only).
+          // Snapshot timestamps now; emit voice_turn_complete from onQueueEmpty
+          // so the metric reflects FULL audio playback, not just stream completion.
           if (turnRecordingStartedAtRef.current > 0) {
-            const now = Date.now();
             const recStart = turnRecordingStartedAtRef.current;
             const recStop = turnRecordingStoppedAtRef.current;
             const sttDone = turnSttDoneAtRef.current;
             const llmFirst = turnLlmFirstAtRef.current;
             const phase1Ready = turnPhase1ReadyAtRef.current;
-            const firstAudio = turnFirstAudioAtRef.current;
-            captureEvent('voice_turn_complete', {
-              recording_duration_ms: recStop > 0 ? recStop - recStart : undefined,
-              stt_latency_ms: sttDone > 0 && recStop > 0 ? sttDone - recStop : undefined,
-              llm_latency_ms: llmFirst > 0 && sttDone > 0 ? llmFirst - sttDone : undefined,
-              tts_phase1_latency_ms: phase1Ready > 0 && llmFirst > 0 ? phase1Ready - llmFirst : undefined,
-              first_audio_ms: firstAudio > 0 && turnTranscriptSentAtRef.current > 0 ? firstAudio - turnTranscriptSentAtRef.current : undefined,
-              first_audio_from_recording_ms: firstAudio > 0 && recStart > 0 ? firstAudio - recStart : undefined,
-              total_ms: now - recStart,
-              recording_to_complete_ms: now - recStart,
-              stt_to_complete_ms: sttDone > 0 ? now - sttDone : undefined,
-              exchange_index: currentExchange,
-              exchange: currentExchange,
-              new_clues: detectedNewClues.length,
-              pipeline: 'streaming',
-            });
-            turnRecordingStartedAtRef.current = 0;
-            turnRecordingStoppedAtRef.current = 0;
-            turnSttDoneAtRef.current = 0;
-            turnLlmFirstAtRef.current = 0;
-            turnPhase1ReadyAtRef.current = 0;
-            turnFirstAudioAtRef.current = 0;
-            turnTranscriptSentAtRef.current = 0;
+            const transcriptSent = turnTranscriptSentAtRef.current;
+            const newCluesCount = detectedNewClues.length;
+            const exchangeAtComplete = currentExchange;
+
+            pendingVoiceTurnRef.current = () => {
+              const now = Date.now();
+              const firstAudio = turnFirstAudioAtRef.current;
+              captureEvent('voice_turn_complete', {
+                recording_duration_ms: recStop > 0 ? recStop - recStart : undefined,
+                stt_latency_ms: sttDone > 0 && recStop > 0 ? sttDone - recStop : undefined,
+                llm_latency_ms: llmFirst > 0 && sttDone > 0 ? llmFirst - sttDone : undefined,
+                tts_phase1_latency_ms: phase1Ready > 0 && llmFirst > 0 ? phase1Ready - llmFirst : undefined,
+                first_audio_ms: firstAudio > 0 && transcriptSent > 0 ? firstAudio - transcriptSent : undefined,
+                first_audio_from_recording_ms: firstAudio > 0 ? firstAudio - recStart : undefined,
+                full_playback_latency_ms: firstAudio > 0 ? now - firstAudio : undefined,
+                total_ms: now - recStart,
+                recording_to_complete_ms: now - recStart,
+                stt_to_complete_ms: sttDone > 0 ? now - sttDone : undefined,
+                exchange_index: exchangeAtComplete,
+                exchange: exchangeAtComplete,
+                new_clues: newCluesCount,
+                pipeline: 'streaming',
+              });
+              turnRecordingStartedAtRef.current = 0;
+              turnRecordingStoppedAtRef.current = 0;
+              turnSttDoneAtRef.current = 0;
+              turnLlmFirstAtRef.current = 0;
+              turnPhase1ReadyAtRef.current = 0;
+              turnFirstAudioAtRef.current = 0;
+              turnTranscriptSentAtRef.current = 0;
+            };
           }
 
           audioQueue.resume();
