@@ -15,6 +15,7 @@ import DragDropGame from "@/components/DragDropGame";
 import SynthesisScreen from "@/components/SynthesisScreen";
 import FeedbackSurvey from "@/components/FeedbackSurvey";
 import Syntheses from "@/pages/Syntheses";
+import AdminConnections from "@/pages/AdminConnections";
 import NotFound from "@/pages/not-found";
 import { createSession } from "@/lib/api";
 import { readStoredSessionFlow } from "@/lib/sessionFlowStorage";
@@ -536,6 +537,7 @@ function Router() {
         <Route path="/feedback" component={FeedbackPage} />
         <Route path="/complete" component={CompletePage} />
         <Route path="/syntheses" component={Syntheses} />
+        <Route path="/admin/connections" component={AdminConnections} />
         <Route component={NotFound} />
       </Switch>
     </MediaProvider>
