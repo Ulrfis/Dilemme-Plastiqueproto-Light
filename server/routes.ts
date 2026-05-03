@@ -180,6 +180,10 @@ const TTS_CACHE_MAX_SIZE = 100; // Limit cache to 100 entries to prevent memory 
 interface TtsRequest {
   promise: Promise<Buffer>;
   createdAt: number;
+  // Task #34: carry session context so /api/tts/play error captures can
+  // populate session_id + user_name in PostHog.
+  sessionId?: string | null;
+  userName?: string | null;
 }
 const ttsRequestStore = new Map<string, TtsRequest>();
 const TTS_REQUEST_TTL = 60000; // 60 seconds TTL for pre-generated audio
@@ -766,6 +770,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ttsRequestStore.set(welcomeAudioToken, {
         promise: welcomePromise,
         createdAt: Date.now(),
+        sessionId: session.id,
+        userName: data.userName,
       });
       console.log('[Session Create] Pre-generating welcome TTS in background, token:', welcomeAudioToken.substring(0, 8));
 
@@ -916,7 +922,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ text: transcription.text });
     } catch (error) {
       console.error('Error transcribing audio:', error);
-      captureServerError('/api/speech-to-text', null, error, { context: 'whisper_transcription' });
+      const sttBody = (req as unknown as { body?: { sessionId?: string; userName?: string } }).body;
+      captureServerError(
+        '/api/speech-to-text',
+        sttBody?.sessionId ?? null,
+        error,
+        { context: 'whisper_transcription' },
+        sttBody?.userName ?? null,
+      );
       res.status(500).json({ error: 'Transcription failed' });
     }
   });
@@ -945,7 +958,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(audioBuffer);
     } catch (error) {
       console.error('[TTS Play] Error:', error);
-      captureServerError('/api/tts/play', null, error, { context: 'tts_play_token' });
+      captureServerError(
+        '/api/tts/play',
+        ttsRequest.sessionId ?? null,
+        error,
+        { context: 'tts_play_token' },
+        ttsRequest.userName ?? null,
+      );
       ttsRequestStore.delete(token);
       res.status(500).json({
         error: 'TTS generation failed',
@@ -1073,7 +1092,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     } catch (error) {
       console.error('[TTS Stream API] Error:', error);
-      captureServerError('/api/text-to-speech/stream', null, error, { context: 'tts_stream' });
+      captureServerError(
+        '/api/text-to-speech/stream',
+        (req.body?.sessionId as string | undefined) ?? null,
+        error,
+        { context: 'tts_stream' },
+        (req.body?.userName as string | undefined) ?? null,
+      );
       if (!res.headersSent) {
         res.status(500).json({
           error: 'Speech generation failed',
@@ -1170,7 +1195,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(audioBufferNode);
     } catch (error) {
       console.error('[TTS API] Error generating speech:', error);
-      captureServerError('/api/text-to-speech', null, error, { context: 'tts_full' });
+      captureServerError(
+        '/api/text-to-speech',
+        (req.body?.sessionId as string | undefined) ?? null,
+        error,
+        { context: 'tts_full' },
+        (req.body?.userName as string | undefined) ?? null,
+      );
       res.status(500).json({
         error: 'Speech generation failed',
         details: error instanceof Error ? error.message : 'Unknown error'
@@ -1294,13 +1325,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ttsRequestStore.set(audioToken, {
         promise: Promise.resolve(pregen.audioBuffer),
         createdAt: Date.now(),
+        sessionId,
+        userName: session.userName,
       });
 
       console.log('[Pregen Resume] Consumed for session:', sessionId.substring(0, 8), '— token:', audioToken.substring(0, 8));
       return res.json({ text: pregen.text, audioToken });
     } catch (error) {
       console.error('[Pregen Resume Token] Error:', error);
-      captureServerError('/api/sessions/:id/resume-token', req.params.id, error, { context: 'pregen_resume_token' });
+      {
+        const sessionForName = await storage.getSession(req.params.id).catch(() => null);
+        captureServerError(
+          '/api/sessions/:id/resume-token',
+          req.params.id,
+          error,
+          { context: 'pregen_resume_token' },
+          sessionForName?.userName,
+        );
+      }
       return res.status(500).json({ error: 'Failed to retrieve pre-generated resume' });
     }
   });
@@ -1386,6 +1428,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ttsRequestStore.set(audioToken, {
         promise: generateTtsAudio(resumeText, undefined, 'quality'),
         createdAt: Date.now(),
+        sessionId,
+        userName: session.userName,
       });
 
       console.log('[Resume API] Resume message generated, TTS token:', audioToken.substring(0, 8));
@@ -1565,7 +1609,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ttsPromise = generateTtsAudio(combined, undefined, 'quality')
           .then((audioBuffer) => {
             const audioToken = crypto.randomUUID();
-            ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
+            ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now(), sessionId, userName });
             console.log(`[Chat Stream API] Phase 1 TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
             if (!res.writableEnded) {
               res.write(`data: ${JSON.stringify({
@@ -1621,7 +1665,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               return;
             }
             const audioToken = crypto.randomUUID();
-            ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
+            ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now(), sessionId, userName });
             console.log(`[Chat Stream API] Phase 2a TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
             if (!res.writableEnded) {
               res.write(`data: ${JSON.stringify({
@@ -1659,7 +1703,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ttsPromise = generateTtsAudio(combined, prevText, 'quality')
           .then((audioBuffer) => {
             const audioToken = crypto.randomUUID();
-            ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
+            ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now(), sessionId, userName });
             console.log(`[Chat Stream API] Phase 2b TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
             if (!res.writableEnded) {
               res.write(`data: ${JSON.stringify({
@@ -1787,7 +1831,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const ttsPromise = generateTtsAudio(mergedText, phase1Text || undefined, 'quality')
                 .then((audioBuffer) => {
                   const audioToken = crypto.randomUUID();
-                  ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
+                  ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now(), sessionId, userName });
                   console.log(`[Chat Stream API] Phase 2a+2b merged TTS ready (index=${phase2StartIndex}, count=${mergedCount}), token:`, audioToken);
                   if (!res.writableEnded) {
                     res.write(`data: ${JSON.stringify({
@@ -1908,7 +1952,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('[Chat Stream API] Error:', error);
       captureServerError(
-        '/api/chat-streaming',
+        '/api/chat/stream',
         (req.body?.sessionId as string | undefined) ?? null,
         error,
         { context: 'stream_outer_catch' },
