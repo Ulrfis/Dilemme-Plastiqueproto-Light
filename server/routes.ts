@@ -1504,6 +1504,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let phase2Dispatched = false;               // true when any Phase 2 TTS call has been dispatched
       let phase2aDispatched = false;              // true when Phase 2a early TTS has fired
       let phase2aText = "";                       // text sent in Phase 2a (chained as previous_text for Phase 2b)
+      let phase2aSentenceCount = 0;               // number of sentences in Phase 2a (for merged count)
+      let phase2aResolved = false;                // true when Phase 2a TTS promise resolved successfully
+      let phase2aSettled = false;                 // true when Phase 2a TTS promise settled (success or failure)
+      let phase2aCancelled = false;               // true when Phase 2a SSE is suppressed for merging with 2b
       let phase2bBuffer: string[] = [];           // sentences accumulating after Phase 2a fires
       let phase2bStartIndex = -1;                 // SSE index of first Phase 2b sentence
 
@@ -1553,6 +1557,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const count = sentences.length;
         phase2aDispatched = true;
         phase2aText = combined;
+        phase2aSentenceCount = count;
         phase2Dispatched = true;
 
         console.log(`[Chat Stream API] Phase 2a TTS (${dispatchedMidStream ? 'MID-STREAM' : 'AT-COMPLETION'}): ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
@@ -1568,6 +1573,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const ttsPromise = generateTtsAudio(combined, phase1Text || undefined, 'quality')
           .then((audioBuffer) => {
+            phase2aResolved = true;
+            phase2aSettled = true;
+            if (phase2aCancelled) {
+              // Phase 2a was merged with 2b — discard this result silently
+              console.log(`[Chat Stream API] Phase 2a TTS resolved but cancelled (merged with 2b) — discarding`);
+              return;
+            }
             const audioToken = crypto.randomUUID();
             ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
             console.log(`[Chat Stream API] Phase 2a TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
@@ -1582,8 +1594,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           })
           .catch((ttsErr) => {
+            phase2aSettled = true;
             console.error('[Chat Stream API] Phase 2a TTS failed:', ttsErr);
-            if (!res.writableEnded) {
+            if (!phase2aCancelled && !res.writableEnded) {
               for (let i = startIndex; i < startIndex + count; i++) {
                 res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
               }
@@ -1718,9 +1731,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
             phase2Buffer = [];
           }
 
-          // Dispatch Phase 2b for any sentences accumulated after Phase 2a fired
+          // Dispatch Phase 2b for any sentences accumulated after Phase 2a fired.
+          // If Phase 2b is very short (< 80 chars) AND Phase 2a hasn't settled yet (success or failure),
+          // merge them into a single TTS call to avoid prosodic discontinuity.
           if (phase2bBuffer.length > 0) {
-            dispatchPhase2bTts(phase2bBuffer, phase2bStartIndex);
+            const phase2bText = phase2bBuffer.join(' ');
+            const shouldMerge = phase2bText.length < 80 && phase2aDispatched && !phase2aSettled;
+            if (shouldMerge) {
+              phase2aCancelled = true;
+              const mergedText = [phase2aText, phase2bText].filter(Boolean).join(' ');
+              const mergedCount = phase2aSentenceCount + phase2bBuffer.length;
+              console.log(`[Chat Stream API] Phase 2a+2b MERGED (2b was ${phase2bText.length} chars, 2a unresolved): "${mergedText.substring(0, 80)}..." (${mergedCount} sentences)`);
+              const ttsPromise = generateTtsAudio(mergedText, phase1Text || undefined, 'quality')
+                .then((audioBuffer) => {
+                  const audioToken = crypto.randomUUID();
+                  ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now() });
+                  console.log(`[Chat Stream API] Phase 2a+2b merged TTS ready (index=${phase2StartIndex}, count=${mergedCount}), token:`, audioToken);
+                  if (!res.writableEnded) {
+                    res.write(`data: ${JSON.stringify({
+                      type: 'sentence_audio',
+                      index: phase2StartIndex,
+                      audioToken,
+                      count: mergedCount,
+                      phase: 'phase2',
+                    })}\n\n`);
+                  }
+                })
+                .catch((ttsErr) => {
+                  console.error('[Chat Stream API] Phase 2a+2b merged TTS failed:', ttsErr);
+                  if (!res.writableEnded) {
+                    for (let i = phase2StartIndex; i < phase2StartIndex + mergedCount; i++) {
+                      res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
+                    }
+                  }
+                });
+              sentenceTtsPromises.push(ttsPromise);
+            } else {
+              dispatchPhase2bTts(phase2bBuffer, phase2bStartIndex);
+            }
           }
         }
 
