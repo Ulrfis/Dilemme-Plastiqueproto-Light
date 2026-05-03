@@ -34,10 +34,10 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-start pt-10 px-6 pb-10 bg-gradient-to-br from-primary/10 via-background to-chart-2/10">
-      <div className="flex flex-col items-center gap-8 w-full max-w-xl">
+    <div className="min-h-screen flex flex-col items-center justify-start pt-8 sm:pt-10 px-4 sm:px-6 pb-10 bg-gradient-to-br from-primary/10 via-background to-chart-2/10">
+      <div className="flex flex-col items-center gap-6 sm:gap-8 w-full max-w-xl">
 
-        <h1 className="font-heading font-bold text-center w-full bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent whitespace-nowrap" style={{ fontSize: "clamp(2.5rem, 9.2vw, 4rem)" }}>
+        <h1 className="font-heading font-bold text-center w-full bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent whitespace-nowrap leading-tight" style={{ fontSize: "clamp(1.75rem, 8vw, 3.5rem)" }}>
           Dilemme Plastique
         </h1>
 
@@ -47,18 +47,18 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
             alt="Place des Nations - Dilemme Plastique"
             className="w-full object-cover rounded-xl shadow-md"
           />
-          <div className="absolute -bottom-20 right-2 select-none pointer-events-none">
-            <div className="absolute inset-x-0 bottom-0 h-10 rounded-full bg-black/10 blur-md mx-4" />
+          <div className="absolute -bottom-14 sm:-bottom-20 right-2 select-none pointer-events-none">
+            <div className="absolute inset-x-0 bottom-0 h-8 sm:h-10 rounded-full bg-black/10 blur-md mx-3 sm:mx-4" />
             <img
               src={peterAvatar}
               alt="Peter, ton guide IA"
-              className="relative h-36 w-auto object-contain"
+              className="relative h-24 sm:h-36 w-auto object-contain"
               style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.18)) drop-shadow(0 1px 2px rgba(0,0,0,0.10))" }}
             />
           </div>
         </div>
 
-        <div className="flex flex-col items-center gap-2 pt-16 text-center">
+        <div className="flex flex-col items-center gap-2 pt-10 sm:pt-16 text-center">
           <p className="text-base text-foreground/80 leading-relaxed">
             Explore cette image avec Peter et découvre les 6 indices cachés sur l'impact du plastique dans notre corps.
           </p>
