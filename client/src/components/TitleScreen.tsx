@@ -34,8 +34,8 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-10 bg-gradient-to-br from-primary/10 via-background to-chart-2/10">
-      <div className="flex flex-col items-center gap-5 w-full max-w-xl">
+    <div className="min-h-screen flex flex-col items-center justify-start pt-10 px-6 pb-10 bg-gradient-to-br from-primary/10 via-background to-chart-2/10">
+      <div className="flex flex-col items-center gap-8 w-full max-w-xl">
 
         <h1 className="font-heading font-bold text-center w-full bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent whitespace-nowrap" style={{ fontSize: "clamp(2.5rem, 9.2vw, 4rem)" }}>
           Dilemme Plastique
