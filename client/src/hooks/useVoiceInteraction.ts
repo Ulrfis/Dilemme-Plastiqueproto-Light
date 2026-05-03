@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useDeepgramTranscription } from './useDeepgramTranscription';
+import { captureEvent } from '@/App';
 
 export type AudioState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
 
@@ -257,9 +258,17 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(track => track.stop());
+      captureEvent('mic_permission', { state: 'granted', source: 'check' });
       return true;
     } catch (error) {
       console.error('Microphone permission denied:', error);
+      const err = error as Error;
+      captureEvent('mic_permission', {
+        state: 'denied',
+        source: 'check',
+        error_name: err?.name,
+        error_message: err?.message,
+      });
       return false;
     }
   }, []);
@@ -352,8 +361,16 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       }
 
       console.log('[useVoiceInteraction] Recording started successfully');
+      captureEvent('mic_permission', { state: 'granted', source: 'start_recording' });
     } catch (error) {
       console.error('[useVoiceInteraction] Error starting recording:', error);
+      const err = error as Error;
+      captureEvent('mic_permission', {
+        state: 'denied',
+        source: 'start_recording',
+        error_name: err?.name,
+        error_message: err?.message,
+      });
       setAudioState('error');
       throw error;
     }
@@ -416,6 +433,12 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
           resolve(data.text);
         } catch (error) {
           console.error('[useVoiceInteraction] Error transcribing audio:', error);
+          const err = error as Error;
+          captureEvent('api_error', {
+            endpoint: '/api/speech-to-text',
+            context: 'stop_recording',
+            error_message: err?.message,
+          });
           setAudioState('idle'); // MOBILE FIX: Retourner à idle même en cas d'erreur
           resolve(null);
         }
@@ -573,6 +596,13 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       // MOBILE FIX: Gérer l'interruption audio (appel entrant, changement d'app, etc.)
       audio.onpause = () => {
         console.log('[useVoiceInteraction] Audio paused (possibly interrupted on mobile)');
+        if (!audioExplicitlyStoppedRef.current && !audio.ended) {
+          captureEvent('audio_interrupted', {
+            current_time: audio.currentTime,
+            duration: audio.duration,
+            visibility: document.visibilityState,
+          });
+        }
         console.log('[useVoiceInteraction] Audio state:', {
           paused: audio.paused,
           ended: audio.ended,

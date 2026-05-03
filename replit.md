@@ -94,6 +94,30 @@ To create in PostHog UI (app.posthog.com → Insights → New insight):
 Group the three insights into a dashboard named **"Latence TTS — Impact Phase 3"**.
 Filter all insights to exclude `$host contains localhost` to keep only production data.
 
+### Comprehensive PostHog Tracking (Task #32)
+
+All client-side `captureEvent()` calls now auto-inject `session_id` and `user_name`
+read from sessionStorage via `readStoredSessionFlow()`. `captureWithContext` is
+exported as an alias for clarity at call sites. Events added in Task #32:
+
+- `posthog_health_check` — fired ~3s after app mount with SDK status, distinct_id, loaded flag.
+- `js_error` — global `window.error` + `unhandledrejection` handlers (truncated stack).
+- `mic_permission` — `{ state: granted|denied, source: check|start_recording|synthesis, error_name?, error_message? }`. May fire from both check and start paths in one flow; analyze by `source`.
+- `audio_interrupted` — fired in `useVoiceInteraction` `audio.onpause` only when not explicitly stopped.
+- `voice_turn_complete` — fired in streaming `onComplete` for voice turns: `recording_to_complete_ms`, `stt_to_complete_ms`, `exchange`, `new_clues`.
+- `clue_discovered` — one event per new clue (both streaming + non-streaming pipelines): `clue, total_found, total_clues, exchange, pipeline`.
+- `fallback_mode_activated` — `reason: no_mediarecorder|mic_denied|mic_not_found|mic_unsupported`.
+- `game_started` — DragDropGame mount.
+- `drag_drop_attempt` — every word placement: `slot_id, word, correct, attempt_number`.
+- `drag_drop_validation` — every "Valider" click: `errors, success, validation_attempt, attempts`.
+- `game_completed` (enriched) — adds `duration_seconds, attempts, validation_attempts`.
+- `synthesis_input_mode` — first input (voice or text) per submission.
+- `synthesis_submitted` (enriched) — adds `input_mode`.
+- `video_intro_outcome` — `outcome: completed|skipped|error` with `time_in_video_ms, video_current_time, video_duration`.
+- `api_error` — captured in `catch` of fetches: `endpoint, status?, context, error_message?`.
+  Endpoints instrumented: `/api/tts/play` (welcome_pregen, resume, streaming_sentence_block),
+  `/api/sessions/{id}/resume`, `/api/sessions/{id}/synthesis`, `/api/speech-to-text`.
+
 ### Media Management
 
 The application manages audio context for recording and playback, requiring user gesture-based unlock on mobile. Voice interaction involves MediaRecorder for audio capture, Whisper for transcription, and ElevenLabs for synthesis. Video content is hosted on Gumlet, supporting HLS streaming, autoplay, and fullscreen.

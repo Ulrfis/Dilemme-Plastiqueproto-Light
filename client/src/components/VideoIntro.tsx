@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { ChevronRight, Volume2, VolumeX, Play } from "lucide-react";
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { useMedia } from "@/contexts/MediaContext";
+import { captureEvent } from "@/App";
 import Hls from "hls.js";
 
 interface VideoIntroProps {
@@ -35,6 +36,21 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
   const [showLandscapeBanner, setShowLandscapeBanner] = useState(true);
   const [isMobile] = useState(() => isMobileDevice());
   const [showPlayButton, setShowPlayButton] = useState(true);
+
+  const mountedAtRef = useRef<number>(Date.now());
+  const outcomeReportedRef = useRef<boolean>(false);
+  const reportOutcome = useCallback((outcome: 'completed' | 'skipped' | 'error', extra?: Record<string, unknown>) => {
+    if (outcomeReportedRef.current) return;
+    outcomeReportedRef.current = true;
+    const video = videoRef.current;
+    captureEvent('video_intro_outcome', {
+      outcome,
+      time_in_video_ms: Date.now() - mountedAtRef.current,
+      video_current_time: video?.currentTime,
+      video_duration: video?.duration,
+      ...extra,
+    });
+  }, []);
 
   const playlist = useMemo(() => [
     VIDEO_URLS.main,
@@ -74,6 +90,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
       hls.on(Hls.Events.ERROR, (event, data) => {
         console.error("[VideoIntro] HLS error:", data);
         if (data.fatal) {
+          reportOutcome('error', { hls_error_type: data.type, hls_error_details: data.details });
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
               console.log("[VideoIntro] Network error, trying to recover...");
@@ -127,11 +144,12 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     } else {
       console.log("[VideoIntro] Playlist complete");
       if (!videoEnded) {
+        reportOutcome('completed');
         setVideoEnded(true);
         onComplete();
       }
     }
-  }, [currentVideoIndex, playlist, videoEnded, onComplete, loadVideo]);
+  }, [currentVideoIndex, playlist, videoEnded, onComplete, loadVideo, reportOutcome]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -328,6 +346,7 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         onClick={() => {
           console.log("[VideoIntro] Skip button clicked");
           if (!videoEnded) {
+            reportOutcome('skipped');
             setVideoEnded(true);
             onComplete();
           }

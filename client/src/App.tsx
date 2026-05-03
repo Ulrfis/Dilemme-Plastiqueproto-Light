@@ -61,7 +61,21 @@ function ensureSessionTracking() {
   }
 }
 
-// Helper function to safely capture PostHog events
+// Read session_id + user_name from sessionStorage so every event is enriched
+function readPostHogContext(): { session_id?: string; user_name?: string } {
+  try {
+    const stored = readStoredSessionFlow();
+    return {
+      session_id: stored?.sessionId || undefined,
+      user_name: stored?.userName || undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+// Helper function to safely capture PostHog events.
+// Automatically enriches every event with session_id + user_name from sessionStorage.
 export function captureEvent(event: string, properties?: Record<string, unknown>) {
   ensureSessionTracking();
 
@@ -69,9 +83,12 @@ export function captureEvent(event: string, properties?: Record<string, unknown>
   if (window.dilemmeActionsCount !== undefined) {
     window.dilemmeActionsCount++;
   }
-  
+
+  const ctx = readPostHogContext();
+
   if (window.posthog) {
     window.posthog.capture(event, {
+      ...ctx,
       ...properties,
       timestamp: new Date().toISOString(),
     });
@@ -82,6 +99,9 @@ export function captureEvent(event: string, properties?: Record<string, unknown>
     return false;
   }
 }
+
+// Alias — kept for clarity at call sites that explicitly want context-enriched capture.
+export const captureWithContext = captureEvent;
 
 // Track specific feature usage
 export function captureFeatureUsed(featureName: string, additionalProps?: Record<string, unknown>) {
@@ -499,6 +519,41 @@ function App() {
       }
     }, 1000);
 
+    // PostHog health check — fired ~3s after mount to confirm the SDK is alive in production
+    const healthCheckTimer = window.setTimeout(() => {
+      const verification = verifyPostHog();
+      captureEvent("posthog_health_check", {
+        status: verification.status,
+        has_distinct_id: Boolean(verification.details?.distinctId),
+        loaded: Boolean(verification.details?.__loaded),
+        url: window.location.href,
+        user_agent: navigator.userAgent,
+      });
+    }, 3000);
+
+    // Global JS error tracking
+    const handleError = (event: ErrorEvent) => {
+      captureEvent("js_error", {
+        message: event.message,
+        source: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+        stack: event.error?.stack?.substring(0, 1000),
+        url: window.location.href,
+      });
+    };
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      captureEvent("js_error", {
+        message: reason instanceof Error ? reason.message : String(reason),
+        kind: "unhandled_rejection",
+        stack: reason instanceof Error ? reason.stack?.substring(0, 1000) : undefined,
+        url: window.location.href,
+      });
+    };
+    window.addEventListener("error", handleError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+
     // Capture page view when app mounts
     captureEvent("page_view", {
       page: window.location.pathname,
@@ -511,6 +566,9 @@ function App() {
 
     return () => {
       window.clearTimeout(posthogInitTimer);
+      window.clearTimeout(healthCheckTimer);
+      window.removeEventListener("error", handleError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
     };
   }, []);
 

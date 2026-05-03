@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -145,7 +145,16 @@ function DroppableSlot({ id, placedWord, onRemove, onPlace, hasSelectedWord }: D
 
 export default function DragDropGame({ userName, onComplete }: DragDropGameProps) {
   const sessionFlow = useSessionFlow();
-  
+
+  const gameStartedAtRef = useRef<number>(Date.now());
+  const attemptCountRef = useRef<number>(0);
+  const validationCountRef = useRef<number>(0);
+
+  useEffect(() => {
+    captureEvent('game_started', { userName });
+    gameStartedAtRef.current = Date.now();
+  }, [userName]);
+
   const [placements, setPlacementsLocal] = useState<Record<string, string>>(() => sessionFlow.dragDropPlacements);
   const [validationResult, setValidationResult] = useState<{ errors: number; validated: boolean } | null>(() => 
     sessionFlow.dragDropValidated ? { errors: 0, validated: true } : null
@@ -200,6 +209,17 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
   };
 
   const placeWordInSlot = (wordText: string, slotId: string) => {
+    attemptCountRef.current += 1;
+    const blank = SENTENCE_PARTS.find(p => p.id === slotId);
+    const isCorrect = blank?.correctAnswer
+      ? blank.correctAnswer.toLowerCase() === wordText.toLowerCase()
+      : false;
+    captureEvent('drag_drop_attempt', {
+      slot_id: slotId,
+      word: wordText,
+      correct: isCorrect,
+      attempt_number: attemptCountRef.current,
+    });
     setPlacements(prev => ({
       ...prev,
       [slotId]: wordText,
@@ -243,6 +263,14 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
       if (!placed || placed.toLowerCase() !== blank.correctAnswer?.toLowerCase()) {
         errors++;
       }
+    });
+
+    validationCountRef.current += 1;
+    captureEvent('drag_drop_validation', {
+      errors,
+      success: errors === 0,
+      validation_attempt: validationCountRef.current,
+      attempts: attemptCountRef.current,
     });
 
     setValidationResult({ errors, validated: true });
@@ -386,7 +414,12 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
           ) : (
             <Button
               onClick={() => {
-                captureEvent("game_completed", { userName });
+                captureEvent("game_completed", {
+                  userName,
+                  duration_seconds: (Date.now() - gameStartedAtRef.current) / 1000,
+                  attempts: attemptCountRef.current,
+                  validation_attempts: validationCountRef.current,
+                });
                 onComplete();
               }}
               size="lg"

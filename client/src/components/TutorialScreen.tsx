@@ -211,9 +211,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               audioBlob = await audioResponse.blob();
               console.log('[TutorialScreen] Pre-generated welcome audio ready, size:', audioBlob.size);
             } else {
+              captureEvent('api_error', { endpoint: '/api/tts/play', status: audioResponse.status, context: 'welcome_pregen' });
               console.warn('[TutorialScreen] Pre-generated token returned', audioResponse.status, '— falling back');
             }
           } catch (pregenErr) {
+            captureEvent('api_error', {
+              endpoint: '/api/tts/play',
+              context: 'welcome_pregen',
+              error_message: pregenErr instanceof Error ? pregenErr.message : String(pregenErr),
+            });
             console.warn('[TutorialScreen] Pre-generated audio fetch failed, falling back:', pregenErr);
             audioBlob = null;
           }
@@ -284,16 +290,33 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
                     await playAudio(audioBlob);
                     try { sessionStorage.setItem(resumeKey, Date.now().toString()); } catch (_) {}
                   }
+                } else {
+                  captureEvent('api_error', { endpoint: '/api/tts/play', status: audioResponse.status, context: 'resume' });
                 }
               } catch (audioErr) {
+                captureEvent('api_error', {
+                  endpoint: '/api/tts/play',
+                  context: 'resume',
+                  error_message: audioErr instanceof Error ? audioErr.message : String(audioErr),
+                });
                 console.warn('[TutorialScreen] Resume audio playback failed (silent):', audioErr);
               }
             }
           } else {
+            captureEvent('api_error', {
+              endpoint: `/api/sessions/${sessionId}/resume`,
+              status: resumeRes.status,
+              context: 'resume',
+            });
             console.warn('[TutorialScreen] Resume endpoint returned', resumeRes.status, '— silent fallback');
             setIsThinking(false);
           }
         } catch (resumeErr) {
+          captureEvent('api_error', {
+            endpoint: `/api/sessions/${sessionId}/resume`,
+            context: 'resume',
+            error_message: resumeErr instanceof Error ? resumeErr.message : String(resumeErr),
+          });
           console.error('[TutorialScreen] Resume request failed (silent):', resumeErr);
           setIsThinking(false);
         }
@@ -311,6 +334,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     if (!isSupported) {
       console.warn('[TutorialScreen] MediaRecorder NOT supported - activating text fallback mode');
+      captureEvent('fallback_mode_activated', { reason: 'no_mediarecorder' });
       setFallbackMode(true);
       toast({
         title: "Mode texte activé",
@@ -361,6 +385,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const handleStartRecording = async () => {
     console.log('[TutorialScreen] handleStartRecording called');
 
+    turnRecordingStartedAtRef.current = Date.now();
+    turnSttDoneAtRef.current = 0;
+
     // Réinitialiser le live transcript Deepgram pour cette nouvelle prise de parole
     liveCommittedRef.current = '';
     setLiveTranscript('');
@@ -399,6 +426,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       if (isPermanentError) {
         // Basculer en fallbackMode pour les erreurs définitives
         console.log('[TutorialScreen] Permanent error detected - switching to text mode');
+        captureEvent('fallback_mode_activated', {
+          reason: errorName === 'NotAllowedError' || errorMessage.includes('denied') || errorMessage.includes('permission')
+            ? 'mic_denied'
+            : (errorName === 'NotFoundError' || errorMessage.includes('NotFound') || errorMessage.includes('not found'))
+              ? 'mic_not_found'
+              : 'mic_unsupported',
+          error_name: errorName,
+        });
         // IMPORTANT: Réinitialiser l'état audio AVANT de passer en mode texte
         // Sinon audioState peut rester bloqué et désactiver le bouton d'envoi
         recoverFromError();
@@ -424,6 +459,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   const handleStopRecording = async () => {
     const text = await stopRecording();
+    turnSttDoneAtRef.current = Date.now();
     if (text) {
       await processMessage(text);
     }
@@ -584,6 +620,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               if (audioResponse.ok) {
                 return audioResponse.blob();
               }
+              captureEvent('api_error', {
+                endpoint: '/api/tts/play',
+                status: audioResponse.status,
+                context: 'streaming_sentence_block',
+                sentence_index: index,
+              });
               throw new Error(`HTTP ${audioResponse.status}`);
             })
             .then(audioBlob => {
@@ -672,10 +714,33 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
           if (detectedNewClues.length > 0) {
             console.log('[TutorialScreen] New clues detected — showing animation before audio');
+            detectedNewClues.forEach((clue) => {
+              captureEvent('clue_discovered', {
+                clue,
+                total_found: newFoundClues.length,
+                total_clues: TOTAL_CLUES,
+                exchange: currentExchange,
+                pipeline: 'streaming',
+              });
+            });
             setFoundClues(newFoundClues);
             setNewClues(detectedNewClues);
             setShowSuccess(true);
             setTimeout(() => setShowSuccess(false), 4500);
+          }
+
+          // Voice turn timing — only meaningful for voice turns (not text-only)
+          if (turnRecordingStartedAtRef.current > 0) {
+            const now = Date.now();
+            captureEvent('voice_turn_complete', {
+              recording_to_complete_ms: now - turnRecordingStartedAtRef.current,
+              stt_to_complete_ms: turnSttDoneAtRef.current > 0 ? now - turnSttDoneAtRef.current : undefined,
+              exchange: currentExchange,
+              new_clues: detectedNewClues.length,
+              pipeline: 'streaming',
+            });
+            turnRecordingStartedAtRef.current = 0;
+            turnSttDoneAtRef.current = 0;
           }
 
           audioQueue.resume();
@@ -736,6 +801,15 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     if (detectedNewClues.length > 0) {
       console.log('[TutorialScreen] New clues detected:', detectedNewClues);
+      detectedNewClues.forEach((clue) => {
+        captureEvent('clue_discovered', {
+          clue,
+          total_found: result.foundClues.length,
+          total_clues: TOTAL_CLUES,
+          exchange: exchangeCount,
+          pipeline: 'non-streaming',
+        });
+      });
       setFoundClues(result.foundClues);
       setNewClues(detectedNewClues);
       setShowSuccess(true);
@@ -790,6 +864,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     });
     onComplete(foundClues.length, foundClues);
   };
+
+  // Voice turn timing refs — set in handleStartRecording, consumed in onComplete
+  const turnRecordingStartedAtRef = useRef<number>(0);
+  const turnSttDoneAtRef = useRef<number>(0);
 
   // Auto-démarrage audio dès le montage (le clic précédent “Démarrer le tutoriel” suffit comme geste utilisateur)
   const autoStartedRef = useRef(false);

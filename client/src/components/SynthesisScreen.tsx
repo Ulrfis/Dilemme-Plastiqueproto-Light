@@ -23,7 +23,14 @@ export default function SynthesisScreen({
   onShowFeedback 
 }: SynthesisScreenProps) {
   const sessionFlow = useSessionFlow();
-  
+
+  const inputModeReportedRef = useRef<'voice' | 'text' | null>(null);
+  const reportInputMode = useCallback((mode: 'voice' | 'text') => {
+    if (inputModeReportedRef.current) return;
+    inputModeReportedRef.current = mode;
+    captureEvent('synthesis_input_mode', { mode, userName });
+  }, [userName]);
+
   const [synthesis, setSynthesisLocal] = useState(() => sessionFlow.synthesis);
   const [isSaving, setIsSaving] = useState(false);
   const [hasSaved, setHasSaved] = useState(false);
@@ -42,6 +49,7 @@ export default function SynthesisScreen({
   }, [sessionFlow]);
 
   const startRecording = async () => {
+    reportInputMode('voice');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -97,10 +105,15 @@ export default function SynthesisScreen({
               });
             }
           } else {
-            throw new Error('Transcription failed');
+            throw new Error(`Transcription failed with status ${response.status}`);
           }
         } catch (error) {
           console.error('Transcription error:', error);
+          captureEvent('api_error', {
+            endpoint: '/api/speech-to-text',
+            context: 'synthesis',
+            error_message: error instanceof Error ? error.message : String(error),
+          });
           toast({
             title: "Erreur de transcription",
             description: "Impossible de transcrire votre message vocal.",
@@ -116,6 +129,13 @@ export default function SynthesisScreen({
       setIsRecording(true);
     } catch (error) {
       console.error('Recording error:', error);
+      const err = error as Error;
+      captureEvent('mic_permission', {
+        state: 'denied',
+        source: 'synthesis',
+        error_name: err?.name,
+        error_message: err?.message,
+      });
       toast({
         title: "Erreur d'enregistrement",
         description: "Impossible d'accéder au microphone.",
@@ -163,6 +183,7 @@ export default function SynthesisScreen({
       captureEvent("synthesis_submitted", {
         userName,
         synthesisLength: synthesis.trim().length,
+        input_mode: inputModeReportedRef.current ?? 'text',
       });
       
       setHasSaved(true);
@@ -173,6 +194,11 @@ export default function SynthesisScreen({
       });
     } catch (error) {
       console.error('Error saving synthesis:', error);
+      captureEvent('api_error', {
+        endpoint: `/api/sessions/${sessionId}/synthesis`,
+        context: 'save_synthesis',
+        error_message: error instanceof Error ? error.message : String(error),
+      });
       toast({
         title: "Erreur",
         description: "Impossible de sauvegarder votre synthèse.",
@@ -207,7 +233,10 @@ export default function SynthesisScreen({
             <Textarea
               placeholder="Ex: L'œuvre montre comment le plastique menace notre santé et notre planète..."
               value={synthesis}
-              onChange={(e) => setSynthesis(e.target.value)}
+              onChange={(e) => {
+                if (e.target.value.length > synthesis.length) reportInputMode('text');
+                setSynthesis(e.target.value);
+              }}
               className="min-h-[120px] resize-none rounded-xl pr-14 text-base"
               maxLength={1200}
               disabled={isRecording || isTranscribing || hasSaved}
