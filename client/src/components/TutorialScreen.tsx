@@ -840,6 +840,37 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             error_message: typeof error === 'string' ? error : String(error),
             fallback_triggered: false,
           });
+
+          // Emit aborted voice_turn_complete so per-exchange telemetry is never silent
+          if (turnRecordingStartedAtRef.current > 0) {
+            const now = Date.now();
+            const recStart = turnRecordingStartedAtRef.current;
+            const recStop = turnRecordingStoppedAtRef.current;
+            const sttDone = turnSttDoneAtRef.current;
+            const llmFirst = turnLlmFirstAtRef.current;
+            const phase1Ready = turnPhase1ReadyAtRef.current;
+            captureEvent('voice_turn_complete', {
+              status: 'aborted',
+              error_message: typeof error === 'string' ? error : String(error),
+              recording_duration_ms: recStop > 0 ? recStop - recStart : undefined,
+              stt_latency_ms: sttDone > 0 && recStop > 0 ? sttDone - recStop : undefined,
+              llm_latency_ms: llmFirst > 0 && sttDone > 0 ? llmFirst - sttDone : undefined,
+              tts_phase1_latency_ms: phase1Ready > 0 && llmFirst > 0 ? phase1Ready - llmFirst : undefined,
+              total_ms: now - recStart,
+              recording_to_complete_ms: now - recStart,
+              exchange_index: currentExchange,
+              exchange: currentExchange,
+              pipeline: 'streaming',
+            });
+            turnRecordingStartedAtRef.current = 0;
+            turnRecordingStoppedAtRef.current = 0;
+            turnSttDoneAtRef.current = 0;
+            turnLlmFirstAtRef.current = 0;
+            turnPhase1ReadyAtRef.current = 0;
+            turnFirstAudioAtRef.current = 0;
+            turnTranscriptSentAtRef.current = 0;
+            pendingVoiceTurnRef.current = null;
+          }
           audioQueue.clear();
 
           setMessages(prev => [...prev, {

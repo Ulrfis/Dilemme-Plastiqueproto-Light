@@ -260,7 +260,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     return {
       mediaRecorder: hasMR,
       getUserMedia: hasGUM,
-      audioContext: typeof (window.AudioContext || (window as any).webkitAudioContext) !== 'undefined',
+      audioContext: typeof (window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext) !== 'undefined',
     };
   }, []);
 
