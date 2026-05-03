@@ -269,11 +269,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const checkMicrophonePermission = useCallback(async (): Promise<boolean> => {
     const browser_support = browserSupportSummary();
     if (!browser_support.getUserMedia || !browser_support.mediaRecorder) {
-      captureEvent('mic_permission', {
-        state: 'unavailable',
-        source: 'check',
-        browser_support,
-      });
+      const props = { outcome: 'unavailable' as const, source: 'check' as const, browser_support };
+      captureEvent('mic_permission', { state: 'unavailable', ...props });
+      captureEvent('microphone_permission', props);
       return false;
     }
     try {
@@ -323,7 +321,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       mime_mp4: mp4Supported,
     };
     captureEvent('microphone_permission', {
-      outcome: finalSupported ? 'supported' : 'unavailable',
+      outcome: finalSupported ? 'granted' : 'unavailable',
       source: 'media_recorder_support_check',
       browser_support,
     });

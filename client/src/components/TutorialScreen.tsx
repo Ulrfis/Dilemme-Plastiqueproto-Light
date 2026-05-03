@@ -843,6 +843,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   // Legacy non-streaming message processing (kept for fallback)
   const processMessageNonStreaming = async (userMessage: string) => {
+    if (turnTranscriptSentAtRef.current === 0) {
+      turnTranscriptSentAtRef.current = Date.now();
+    }
     const result = await sendChatMessage(sessionId, userMessage);
 
     console.log('[TutorialScreen] ========== API RESPONSE ==========');
@@ -898,8 +901,33 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       }
 
       console.log('[TutorialScreen] Starting audio playback...');
+      const firstAudioReadyAt = Date.now();
       await playAudio(audioBlob);
       console.log('[TutorialScreen] Audio playback completed successfully');
+
+      // Mirror voice_turn_complete for non-streaming fallback turns to preserve
+      // end-to-end pipeline observability when streaming is unavailable.
+      const recStart = turnRecordingStartedAtRef.current;
+      const recStop = turnRecordingStoppedAtRef.current;
+      const sttDone = turnSttDoneAtRef.current;
+      const transcriptSent = turnTranscriptSentAtRef.current;
+      const now = Date.now();
+      if (recStart > 0) {
+        captureEvent('voice_turn_complete', {
+          pipeline: 'non-streaming',
+          recording_duration_ms: recStop > 0 ? recStop - recStart : undefined,
+          stt_latency_ms: sttDone > 0 && recStop > 0 ? sttDone - recStop : undefined,
+          first_audio_ms: transcriptSent > 0 ? firstAudioReadyAt - transcriptSent : undefined,
+          first_audio_from_recording_ms: firstAudioReadyAt - recStart,
+          total_ms: now - recStart,
+          recording_to_complete_ms: now - recStart,
+          stt_to_complete_ms: sttDone > 0 ? now - sttDone : undefined,
+        });
+      }
+      turnRecordingStartedAtRef.current = 0;
+      turnRecordingStoppedAtRef.current = 0;
+      turnSttDoneAtRef.current = 0;
+      turnTranscriptSentAtRef.current = 0;
     } catch (error) {
       console.error('[TutorialScreen] TTS or playback failed:', error);
       captureEvent('sentence_audio_error', { pipeline: 'non-streaming' });
