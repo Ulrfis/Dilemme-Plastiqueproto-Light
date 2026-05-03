@@ -193,6 +193,28 @@ setInterval(() => {
   });
 }, 30000);
 
+// TASK #30: Pre-generated resume message store.
+// After each chat exchange, the server silently generates the next resume
+// message so it is instantly available when the user navigates back.
+// Keyed by sessionId; one slot per session (newest generation overwrites).
+interface PregenResume {
+  token: string;
+  text: string;
+  createdAt: number;
+}
+const pregenResumeStore = new Map<string, PregenResume>();
+const PREGEN_RESUME_TTL = 5 * 60 * 1000; // 5 minutes — covers typical session-switch time
+
+// Cleanup stale pregen resume entries every minute
+setInterval(() => {
+  const now = Date.now();
+  pregenResumeStore.forEach((entry, sid) => {
+    if (now - entry.createdAt > PREGEN_RESUME_TTL) {
+      pregenResumeStore.delete(sid);
+    }
+  });
+}, 60_000);
+
 // Helper: Generate TTS audio from ElevenLabs (returns Buffer)
 // previousText: text spoken before this segment, used by ElevenLabs to maintain prosody continuity
 // quality: 'fast' uses eleven_flash_v2_5 for lowest latency (Phase 1)
@@ -1134,6 +1156,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // TASK #30: Background pre-generation of the resume message.
+  // Called fire-and-forget at the end of every chat stream so that, if the user
+  // navigates away and comes back, the message is already ready.
+  async function schedulePregenResume(sessionId: string): Promise<void> {
+    try {
+      const session = await storage.getSession(sessionId);
+      if (!session) return;
+
+      const allTargetKeywords = TARGET_CLUES.map(c => c.keyword);
+      const foundClues = session.foundClues || [];
+      const missingClues = allTargetKeywords.filter(k => !foundClues.includes(k));
+      const userName = session.userName || 'toi';
+
+      const foundSummary = foundClues.length > 0
+        ? `Il a déjà trouvé ${foundClues.length}/6 indices (${foundClues.join(', ')})`
+        : `Il n'a encore trouvé aucun indice`;
+      const missingSummary = missingClues.length > 0
+        ? `Il lui reste à découvrir : ${missingClues.join(', ')}`
+        : `Il a trouvé tous les indices !`;
+
+      const resumePrompt = `[REPRISE DE SESSION — NE PAS COMPTER COMME ÉCHANGE]\n${userName} revient après une courte pause. ${foundSummary}. ${missingSummary}.\nAccueille-le chaleureusement en 1-2 phrases MAXIMUM. Si la conversation a déjà eu lieu, fais-y référence naturellement. Guide-le subtilement vers un des indices manquants. N'utilise PAS la phrase de bienvenue initiale ("Bienvenue dans cette courte expérience…"). Sois bref et naturel.`;
+
+      let threadId = session.threadId;
+      if (!threadId) {
+        const thread = await openai.beta.threads.create();
+        threadId = thread.id;
+        await storage.updateSession(sessionId, { threadId });
+      }
+
+      await openai.beta.threads.messages.create(threadId, {
+        role: 'user',
+        content: resumePrompt,
+      });
+
+      const stream = await openai.beta.threads.runs.stream(threadId, {
+        assistant_id: ASSISTANT_ID,
+      });
+
+      let resumeText = '';
+      for await (const event of stream) {
+        if (event.event === 'thread.message.delta') {
+          const delta = event.data.delta;
+          if (delta.content) {
+            for (const block of delta.content) {
+              if (block.type === 'text') {
+                resumeText += block.text?.value || '';
+              }
+            }
+          }
+        }
+        if (event.event === 'thread.run.failed' ||
+            event.event === 'thread.run.cancelled' ||
+            event.event === 'thread.run.expired') {
+          throw new Error(`Pregen resume run failed: ${event.event}`);
+        }
+      }
+
+      if (!resumeText) {
+        resumeText = missingClues.length > 0
+          ? `Bienvenue de retour ! Tu as déjà trouvé ${foundClues.length} indice${foundClues.length !== 1 ? 's' : ''}. Continue à observer l'image — qu'est-ce qui attire ton attention ?`
+          : `Bienvenue de retour ! Tu as trouvé tous les indices, tu peux continuer l'expérience.`;
+      }
+
+      const audioToken = crypto.randomUUID();
+      ttsRequestStore.set(audioToken, {
+        promise: generateTtsAudio(resumeText, undefined, 'quality'),
+        createdAt: Date.now(),
+      });
+
+      pregenResumeStore.set(sessionId, { token: audioToken, text: resumeText, createdAt: Date.now() });
+      console.log('[Pregen Resume] Ready for session:', sessionId.substring(0, 8), '— token:', audioToken.substring(0, 8));
+    } catch (err) {
+      // Silent — never let background pregen affect the primary chat flow
+      console.warn('[Pregen Resume] Background generation failed (silent):', err instanceof Error ? err.message : err);
+    }
+  }
+
+  // TASK #30: Consume pre-generated resume token (if ready).
+  // Returns { text, audioToken } if a fresh pre-gen exists; 404 if not (client
+  // must fall back to POST /resume for on-demand generation).
+  app.get('/api/sessions/:id/resume-token', async (req, res) => {
+    try {
+      const sessionId = req.params.id;
+      if (!sessionId) return res.status(400).json({ error: 'Missing sessionId' });
+
+      const session = await verifySessionToken(sessionId, req, res);
+      if (!session) return;
+
+      const pregen = pregenResumeStore.get(sessionId);
+      if (!pregen || Date.now() - pregen.createdAt > PREGEN_RESUME_TTL) {
+        pregenResumeStore.delete(sessionId);
+        return res.status(404).json({ error: 'No pre-generated resume available' });
+      }
+
+      // Consume: remove so a second call (e.g. page refresh) falls through to POST
+      pregenResumeStore.delete(sessionId);
+
+      console.log('[Pregen Resume] Consumed for session:', sessionId.substring(0, 8));
+      return res.json({ text: pregen.text, audioToken: pregen.token });
+    } catch (error) {
+      console.error('[Pregen Resume Token] Error:', error);
+      return res.status(500).json({ error: 'Failed to retrieve pre-generated resume' });
+    }
+  });
+
   // RESUME: Contextual re-entry message for returning users (does not count as an exchange)
   app.post('/api/sessions/:id/resume', async (req, res) => {
     try {
@@ -1660,6 +1787,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.end();
       console.log('[Chat Stream API] Stream ended successfully');
+
+      // TASK #30: Pre-generate resume message in background so it's ready if the
+      // user navigates away and comes back. Fire-and-forget; never blocks the response.
+      schedulePregenResume(sessionId).catch(() => { /* already handled inside */ });
     } catch (error) {
       console.error('[Chat Stream API] Error:', error);
 

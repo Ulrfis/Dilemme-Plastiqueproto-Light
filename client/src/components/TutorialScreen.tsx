@@ -276,48 +276,86 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
       if (!skipResume) {
         setIsThinking(true);
+        const resumeStartTime = Date.now();
         try {
-          const resumeRes = await fetch(`/api/sessions/${sessionId}/resume`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              accessToken: sessionFlow.accessToken,
-              userName,
-            }),
-          });
-          if (resumeRes.ok) {
-            const { text, audioToken } = await resumeRes.json();
-            setIsThinking(false);
-            if (text?.trim()) {
-              setMessages(prev => [...prev, makeMessage('assistant', text)]);
-              try {
-                const audioResponse = await fetch(`/api/tts/play/${audioToken}`);
-                if (audioResponse.ok) {
-                  const audioBlob = await audioResponse.blob();
-                  if (audioBlob.size >= 100) {
-                    await playAudio(audioBlob);
-                    try { sessionStorage.setItem(resumeKey, Date.now().toString()); } catch (_) {}
-                  }
-                } else {
-                  captureEvent('api_error', { endpoint: '/api/tts/play', status: audioResponse.status, context: 'resume' });
-                }
-              } catch (audioErr) {
-                captureEvent('api_error', {
-                  endpoint: '/api/tts/play',
-                  context: 'resume',
-                  error_message: audioErr instanceof Error ? audioErr.message : String(audioErr),
-                });
-                console.warn('[TutorialScreen] Resume audio playback failed (silent):', audioErr);
+          // TASK #30: Try the pre-generated resume token first (zero wait if ready).
+          let resumeText: string | null = null;
+          let resumeAudioToken: string | null = null;
+          let usedPregen = false;
+
+          try {
+            const pregenRes = await fetch(`/api/sessions/${sessionId}/resume-token`, {
+              headers: {
+                'X-Session-Token': sessionFlow.accessToken,
+              },
+            });
+            if (pregenRes.ok) {
+              const data = await pregenRes.json() as { text: string; audioToken: string };
+              if (data.text?.trim() && data.audioToken) {
+                resumeText = data.text;
+                resumeAudioToken = data.audioToken;
+                usedPregen = true;
+                console.log('[TutorialScreen] Using pre-generated resume, token:', data.audioToken.substring(0, 8));
               }
             }
-          } else {
-            captureEvent('api_error', {
-              endpoint: `/api/sessions/${sessionId}/resume`,
-              status: resumeRes.status,
-              context: 'resume',
+            // 404 = not ready yet — fall through to on-demand below
+          } catch (_pregenErr) {
+            // Network error trying pregen — fall through silently
+          }
+
+          // Fallback: generate on-demand if pregen was unavailable
+          if (!resumeText || !resumeAudioToken) {
+            console.log('[TutorialScreen] No pregen resume available — generating on demand');
+            const resumeRes = await fetch(`/api/sessions/${sessionId}/resume`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                accessToken: sessionFlow.accessToken,
+                userName,
+              }),
             });
-            console.warn('[TutorialScreen] Resume endpoint returned', resumeRes.status, '— silent fallback');
+            if (resumeRes.ok) {
+              const data = await resumeRes.json() as { text: string; audioToken: string };
+              resumeText = data.text;
+              resumeAudioToken = data.audioToken;
+            } else {
+              captureEvent('api_error', {
+                endpoint: `/api/sessions/${sessionId}/resume`,
+                status: resumeRes.status,
+                context: 'resume',
+              });
+              console.warn('[TutorialScreen] Resume endpoint returned', resumeRes.status, '— silent fallback');
+              setIsThinking(false);
+            }
+          }
+
+          captureEvent('resume_audio_latency', {
+            used_pregen: usedPregen,
+            latency_ms: Date.now() - resumeStartTime,
+          });
+
+          if (resumeText?.trim() && resumeAudioToken) {
             setIsThinking(false);
+            setMessages(prev => [...prev, makeMessage('assistant', resumeText as string)]);
+            try {
+              const audioResponse = await fetch(`/api/tts/play/${resumeAudioToken}`);
+              if (audioResponse.ok) {
+                const audioBlob = await audioResponse.blob();
+                if (audioBlob.size >= 100) {
+                  await playAudio(audioBlob);
+                  try { sessionStorage.setItem(resumeKey, Date.now().toString()); } catch (_) {}
+                }
+              } else {
+                captureEvent('api_error', { endpoint: '/api/tts/play', status: audioResponse.status, context: 'resume' });
+              }
+            } catch (audioErr) {
+              captureEvent('api_error', {
+                endpoint: '/api/tts/play',
+                context: 'resume',
+                error_message: audioErr instanceof Error ? audioErr.message : String(audioErr),
+              });
+              console.warn('[TutorialScreen] Resume audio playback failed (silent):', audioErr);
+            }
           }
         } catch (resumeErr) {
           captureEvent('api_error', {
