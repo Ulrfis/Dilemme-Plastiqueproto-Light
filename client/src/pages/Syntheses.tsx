@@ -183,7 +183,11 @@ export default function Syntheses() {
             </Button>
           </Link>
           <h1 className="font-semibold text-lg" data-testid="text-page-title">Synthèses</h1>
-          <div className="w-20" />
+          <Link href="/admin/connections">
+            <Button variant="ghost" size="sm" data-testid="link-admin-connections">
+              Admin
+            </Button>
+          </Link>
         </div>
       </header>
 

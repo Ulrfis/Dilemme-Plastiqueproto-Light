@@ -109,20 +109,28 @@ export default function AdminConnections() {
   const refresh = async (currentToken: string) => {
     if (!currentToken) return;
     setLoading(true);
-    setError(null);
-    try {
-      const [snap, hist] = await Promise.all([
-        fetchAdmin<SnapshotResponse>("/api/health/connections", currentToken),
-        fetchAdmin<HistoryResponse>("/api/health/connections/history", currentToken),
-      ]);
-      setSnapshot(snap);
-      setHistory(hist);
-      setLastFetched(Date.now());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
+    // Fetch snapshot + history independently so a history failure does not
+    // hide the (more important) live snapshot.
+    const [snapResult, histResult] = await Promise.allSettled([
+      fetchAdmin<SnapshotResponse>("/api/health/connections", currentToken),
+      fetchAdmin<HistoryResponse>("/api/health/connections/history", currentToken),
+    ]);
+
+    let snapshotErr: string | null = null;
+    if (snapResult.status === "fulfilled") {
+      setSnapshot(snapResult.value);
+    } else {
+      snapshotErr = snapResult.reason instanceof Error ? snapResult.reason.message : String(snapResult.reason);
     }
+    if (histResult.status === "fulfilled") {
+      setHistory(histResult.value);
+    } else {
+      // History is non-critical; keep last successful history (if any) but log.
+      console.warn("[AdminConnections] history fetch failed:", histResult.reason);
+    }
+    setError(snapshotErr);
+    setLastFetched(Date.now());
+    setLoading(false);
   };
 
   useEffect(() => {
