@@ -35,9 +35,9 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-6 py-10 bg-gradient-to-br from-primary/10 via-background to-chart-2/10">
-      <div className="flex flex-col items-center gap-5 w-full max-w-sm">
+      <div className="flex flex-col items-center gap-5 w-full max-w-xl">
 
-        <h1 className="font-heading text-4xl font-bold text-center bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent">
+        <h1 className="font-heading text-5xl font-bold text-center bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent">
           Dilemme Plastique
         </h1>
 
@@ -50,11 +50,11 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
           <img
             src={peterAvatar}
             alt="Peter, ton guide IA"
-            className="absolute -bottom-10 right-4 h-28 w-auto object-contain drop-shadow-lg select-none pointer-events-none"
+            className="absolute -bottom-14 right-4 h-36 w-auto object-contain drop-shadow-lg select-none pointer-events-none"
           />
         </div>
 
-        <div className="flex flex-col items-center gap-2 pt-6 text-center">
+        <div className="flex flex-col items-center gap-2 pt-10 text-center">
           <p className="text-base text-foreground/80 leading-relaxed">
             Explore cette image avec Peter et découvre les 6 indices cachés sur l'impact du plastique dans notre corps.
           </p>
@@ -65,8 +65,7 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
 
         <Button
           onClick={handleStart}
-          size="lg"
-          className="w-full rounded-2xl text-lg py-6"
+          className="w-full rounded-2xl"
           data-testid="button-start"
         >
           Commencer
