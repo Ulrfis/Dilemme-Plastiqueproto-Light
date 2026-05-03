@@ -789,7 +789,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             const newCluesCount = detectedNewClues.length;
             const exchangeAtComplete = currentExchange;
 
-            pendingVoiceTurnRef.current = () => {
+            const emitFn = () => {
               const now = Date.now();
               const firstAudio = turnFirstAudioAtRef.current;
               captureEvent('voice_turn_complete', {
@@ -816,9 +816,17 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               turnFirstAudioAtRef.current = 0;
               turnTranscriptSentAtRef.current = 0;
             };
+            pendingVoiceTurnRef.current = emitFn;
           }
 
           audioQueue.resume();
+          // Edge case: if queue is already empty (no Phase 2/2a audio enqueued yet),
+          // emit immediately so per-exchange telemetry is never silent.
+          if (pendingVoiceTurnRef.current && audioQueue.queueLength === 0 && !audioQueue.isPlaying) {
+            const fn = pendingVoiceTurnRef.current;
+            pendingVoiceTurnRef.current = null;
+            fn();
+          }
           
           const maxExchangesReached = currentExchange >= MAX_EXCHANGES;
           const allCluesNowFound = newFoundClues.length >= TOTAL_CLUES;
