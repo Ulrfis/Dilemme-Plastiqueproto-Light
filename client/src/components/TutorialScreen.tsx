@@ -347,6 +347,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
                 }
               } else {
                 captureEvent('api_error', { endpoint: '/api/tts/play', status: audioResponse.status, context: 'resume' });
+                // If the pregen token was expired/missing, fall back to on-demand TTS
+                if (usedPregen) {
+                  console.warn('[TutorialScreen] Pregen audio token invalid, falling back to on-demand TTS');
+                  const textToSpeak = resumeText as string;
+                  try {
+                    const fallbackBlob = await (await import('@/lib/api')).textToSpeech(textToSpeak);
+                    if (fallbackBlob && fallbackBlob.size >= 100) {
+                      await playAudio(fallbackBlob);
+                      try { sessionStorage.setItem(resumeKey, Date.now().toString()); } catch (_) {}
+                    }
+                  } catch (_fallback) { /* silent */ }
+                }
               }
             } catch (audioErr) {
               captureEvent('api_error', {

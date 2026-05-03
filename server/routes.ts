@@ -197,9 +197,14 @@ setInterval(() => {
 // After each chat exchange, the server silently generates the next resume
 // message so it is instantly available when the user navigates back.
 // Keyed by sessionId; one slot per session (newest generation overwrites).
+//
+// Stores the resolved audio Buffer — NOT a ttsRequestStore token — so lifetime
+// is independent of TTS_REQUEST_TTL (60s). A fresh ttsRequestStore entry is
+// only created at the moment the client calls GET /resume-token, resetting the
+// 60s clock exactly when needed.
 interface PregenResume {
-  token: string;
   text: string;
+  audioBuffer: Buffer;
   createdAt: number;
 }
 const pregenResumeStore = new Map<string, PregenResume>();
@@ -1159,6 +1164,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // TASK #30: Background pre-generation of the resume message.
   // Called fire-and-forget at the end of every chat stream so that, if the user
   // navigates away and comes back, the message is already ready.
+  //
+  // Uses an ISOLATED EPHEMERAL THREAD (not the session's main thread) so that
+  // the hidden resume prompt never pollutes the live conversation history.
+  // The ephemeral thread is created, used, and never referenced again.
   async function schedulePregenResume(sessionId: string): Promise<void> {
     try {
       const session = await storage.getSession(sessionId);
@@ -1178,19 +1187,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const resumePrompt = `[REPRISE DE SESSION — NE PAS COMPTER COMME ÉCHANGE]\n${userName} revient après une courte pause. ${foundSummary}. ${missingSummary}.\nAccueille-le chaleureusement en 1-2 phrases MAXIMUM. Si la conversation a déjà eu lieu, fais-y référence naturellement. Guide-le subtilement vers un des indices manquants. N'utilise PAS la phrase de bienvenue initiale ("Bienvenue dans cette courte expérience…"). Sois bref et naturel.`;
 
-      let threadId = session.threadId;
-      if (!threadId) {
-        const thread = await openai.beta.threads.create();
-        threadId = thread.id;
-        await storage.updateSession(sessionId, { threadId });
-      }
-
-      await openai.beta.threads.messages.create(threadId, {
+      // Create an isolated ephemeral thread — never touches the session's main thread.
+      const ephemeralThread = await openai.beta.threads.create();
+      await openai.beta.threads.messages.create(ephemeralThread.id, {
         role: 'user',
         content: resumePrompt,
       });
 
-      const stream = await openai.beta.threads.runs.stream(threadId, {
+      const stream = await openai.beta.threads.runs.stream(ephemeralThread.id, {
         assistant_id: ASSISTANT_ID,
       });
 
@@ -1212,6 +1216,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           throw new Error(`Pregen resume run failed: ${event.event}`);
         }
       }
+      // Ephemeral thread is not stored — it will expire on OpenAI's end naturally.
 
       if (!resumeText) {
         resumeText = missingClues.length > 0
@@ -1219,14 +1224,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           : `Bienvenue de retour ! Tu as trouvé tous les indices, tu peux continuer l'expérience.`;
       }
 
-      const audioToken = crypto.randomUUID();
-      ttsRequestStore.set(audioToken, {
-        promise: generateTtsAudio(resumeText, undefined, 'quality'),
-        createdAt: Date.now(),
-      });
-
-      pregenResumeStore.set(sessionId, { token: audioToken, text: resumeText, createdAt: Date.now() });
-      console.log('[Pregen Resume] Ready for session:', sessionId.substring(0, 8), '— token:', audioToken.substring(0, 8));
+      // Resolve and store the audio Buffer directly — NOT a ttsRequestStore token.
+      // This decouples pregen lifetime from TTS_REQUEST_TTL (60s). A fresh
+      // ttsRequestStore entry is created only when the client calls GET /resume-token.
+      const audioBuffer = await generateTtsAudio(resumeText, undefined, 'quality');
+      pregenResumeStore.set(sessionId, { text: resumeText, audioBuffer, createdAt: Date.now() });
+      console.log('[Pregen Resume] Ready for session:', sessionId.substring(0, 8), '(', resumeText.length, 'chars,', audioBuffer.byteLength, 'bytes)');
     } catch (err) {
       // Silent — never let background pregen affect the primary chat flow
       console.warn('[Pregen Resume] Background generation failed (silent):', err instanceof Error ? err.message : err);
@@ -1253,8 +1256,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Consume: remove so a second call (e.g. page refresh) falls through to POST
       pregenResumeStore.delete(sessionId);
 
-      console.log('[Pregen Resume] Consumed for session:', sessionId.substring(0, 8));
-      return res.json({ text: pregen.text, audioToken: pregen.token });
+      // Create a fresh ttsRequestStore entry now — 60s clock starts at client request time,
+      // not at background generation time, so the token is always valid for the client.
+      const audioToken = crypto.randomUUID();
+      ttsRequestStore.set(audioToken, {
+        promise: Promise.resolve(pregen.audioBuffer),
+        createdAt: Date.now(),
+      });
+
+      console.log('[Pregen Resume] Consumed for session:', sessionId.substring(0, 8), '— token:', audioToken.substring(0, 8));
+      return res.json({ text: pregen.text, audioToken });
     } catch (error) {
       console.error('[Pregen Resume Token] Error:', error);
       return res.status(500).json({ error: 'Failed to retrieve pre-generated resume' });
