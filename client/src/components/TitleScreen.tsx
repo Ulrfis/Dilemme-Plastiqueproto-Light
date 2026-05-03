@@ -37,7 +37,7 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
     <div className="min-h-screen flex flex-col items-center justify-center px-6 py-10 bg-gradient-to-br from-primary/10 via-background to-chart-2/10">
       <div className="flex flex-col items-center gap-5 w-full max-w-xl">
 
-        <h1 className="font-heading text-5xl font-bold text-center bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent">
+        <h1 className="font-heading font-bold text-center w-full bg-gradient-to-r from-primary to-chart-2 bg-clip-text text-transparent whitespace-nowrap" style={{ fontSize: "clamp(2rem, 8.5vw, 3.75rem)" }}>
           Dilemme Plastique
         </h1>
 
@@ -53,7 +53,7 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
               src={peterAvatar}
               alt="Peter, ton guide IA"
               className="relative h-36 w-auto object-contain"
-              style={{ filter: "drop-shadow(0 8px 20px rgba(0,0,0,0.45)) drop-shadow(0 2px 6px rgba(0,0,0,0.3))" }}
+              style={{ filter: "drop-shadow(0 4px 14px rgba(0,0,0,0.22)) drop-shadow(0 1px 4px rgba(0,0,0,0.12))" }}
             />
           </div>
         </div>
