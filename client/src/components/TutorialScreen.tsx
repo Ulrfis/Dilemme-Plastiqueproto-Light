@@ -392,7 +392,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     console.log('[TutorialScreen] handleStartRecording called');
 
     turnRecordingStartedAtRef.current = Date.now();
+    turnRecordingStoppedAtRef.current = 0;
     turnSttDoneAtRef.current = 0;
+    turnTranscriptSentAtRef.current = 0;
+    turnLlmFirstAtRef.current = 0;
+    turnPhase1ReadyAtRef.current = 0;
+    turnFirstAudioAtRef.current = 0;
 
     // Réinitialiser le live transcript Deepgram pour cette nouvelle prise de parole
     liveCommittedRef.current = '';
@@ -533,6 +538,13 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       // Extract detailed error information
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorResponse = (error as any)?.response?.data;
+
+      captureEvent('api_error', {
+        endpoint: '/api/chat',
+        context: 'process_message',
+        error_message: errorMessage,
+        fallback_triggered: false,
+      });
 
       let detailedDescription = errorMessage;
       if (errorResponse) {
