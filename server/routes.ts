@@ -86,6 +86,45 @@ function getAuthFailureKey(req: any, sessionId: string): string {
   return `${ip}::${sessionId}`;
 }
 
+// Visibility into unauthorized session-token attempts. Keeps an in-memory
+// counter and a bounded ring buffer of recent events so the admin dashboard
+// can surface curious students probing other UUIDs / wrong tokens.
+// Reset on server restart by design (no persistence).
+type UnauthorizedEvent = {
+  timestamp: number;
+  sessionId: string;
+  ip: string;
+  reason: 'token-mismatch' | 'session-not-found' | 'missing-token';
+};
+const UNAUTHORIZED_EVENT_CAPACITY = 50;
+const unauthorizedEvents: UnauthorizedEvent[] = [];
+const unauthorizedCounts = {
+  total: 0,
+  tokenMismatch: 0,
+  sessionNotFound: 0,
+  missingToken: 0,
+};
+const UNAUTHORIZED_BY_SESSION_CAPACITY = 500;
+const unauthorizedBySession = new Map<string, number>();
+
+function recordUnauthorizedAccess(req: any, sessionId: string, reason: UnauthorizedEvent['reason']): void {
+  const ip = String(req.ip || req.headers["x-forwarded-for"] || "unknown");
+  unauthorizedCounts.total += 1;
+  if (reason === 'token-mismatch') unauthorizedCounts.tokenMismatch += 1;
+  else if (reason === 'session-not-found') unauthorizedCounts.sessionNotFound += 1;
+  else if (reason === 'missing-token') unauthorizedCounts.missingToken += 1;
+  // Bounded LRU-ish: when at capacity and adding a new key, evict the oldest insertion.
+  if (!unauthorizedBySession.has(sessionId) && unauthorizedBySession.size >= UNAUTHORIZED_BY_SESSION_CAPACITY) {
+    const oldestKey = unauthorizedBySession.keys().next().value as string | undefined;
+    if (oldestKey) unauthorizedBySession.delete(oldestKey);
+  }
+  unauthorizedBySession.set(sessionId, (unauthorizedBySession.get(sessionId) || 0) + 1);
+  unauthorizedEvents.push({ timestamp: Date.now(), sessionId, ip, reason });
+  if (unauthorizedEvents.length > UNAUTHORIZED_EVENT_CAPACITY) {
+    unauthorizedEvents.splice(0, unauthorizedEvents.length - UNAUTHORIZED_EVENT_CAPACITY);
+  }
+}
+
 function isSessionAuthBlocked(req: any, sessionId: string): { blocked: boolean; retryAfter: number } {
   const now = Date.now();
   if (now - lastAuthFailurePurge > 5 * 60 * 1000) {
@@ -290,6 +329,176 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Rate-limit global API
   app.use('/api', generalLimiter);
 
+  // Counter + recent events for unauthorized session access attempts.
+  // Useful in a school setting to spot students probing other UUIDs / wrong tokens.
+  app.get('/api/health/unauthorized', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const topSessions = Array.from(unauthorizedBySession.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([sessionId, count]) => ({ sessionId, count }));
+    res.json({
+      timestamp: Date.now(),
+      counts: unauthorizedCounts,
+      capacity: UNAUTHORIZED_EVENT_CAPACITY,
+      recent: [...unauthorizedEvents].reverse(),
+      topSessions,
+    });
+  });
+
+  // Minimal HTML admin dashboard. Token is supplied via ?token=... and sent
+  // back as the x-admin-token header on the health calls.
+  app.get('/admin', async (_req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Admin dashboard</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 24px; background: #0b0d10; color: #e6e8eb; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  h2 { font-size: 15px; margin: 24px 0 8px; color: #9aa4ad; text-transform: uppercase; letter-spacing: .04em; }
+  .card { background: #14181d; border: 1px solid #1f2630; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .stat { flex: 1 1 140px; background: #0f1418; border: 1px solid #1f2630; border-radius: 6px; padding: 12px; }
+  .stat .label { font-size: 11px; color: #9aa4ad; text-transform: uppercase; letter-spacing: .04em; }
+  .stat .value { font-size: 24px; font-weight: 600; margin-top: 4px; }
+  .stat.warn .value { color: #f0a14a; }
+  .stat.bad .value { color: #ef6b6b; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1f2630; font-family: ui-monospace, monospace; }
+  th { color: #9aa4ad; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .reason-token-mismatch { color: #ef6b6b; }
+  .reason-session-not-found { color: #f0a14a; }
+  .reason-missing-token { color: #9aa4ad; }
+  input[type=password] { background: #0f1418; color: #e6e8eb; border: 1px solid #1f2630; border-radius: 4px; padding: 6px 8px; font-size: 13px; }
+  button { background: #2563eb; color: white; border: 0; border-radius: 4px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  button:hover { background: #1d4fd1; }
+  .muted { color: #9aa4ad; font-size: 12px; }
+  .empty { color: #9aa4ad; font-style: italic; padding: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>Admin dashboard</h1>
+<div class="card">
+  <form id="auth-form" onsubmit="return setToken(event)">
+    <label class="muted" for="token">Admin token</label><br/>
+    <input id="token" type="password" placeholder="x-admin-token" autocomplete="off" />
+    <button type="submit">Connect</button>
+    <span id="auth-status" class="muted" style="margin-left:8px;"></span>
+  </form>
+</div>
+
+<h2>Unauthorized session access</h2>
+<div class="card">
+  <div class="row">
+    <div class="stat bad"><div class="label">Total attempts</div><div class="value" id="u-total">—</div></div>
+    <div class="stat bad"><div class="label">Token mismatch (403)</div><div class="value" id="u-mismatch">—</div></div>
+    <div class="stat warn"><div class="label">Unknown session (404)</div><div class="value" id="u-notfound">—</div></div>
+    <div class="stat"><div class="label">Missing token</div><div class="value" id="u-missing">—</div></div>
+  </div>
+  <p class="muted" style="margin-top:12px;">Counters reset when the server restarts. Auto-refreshes every 5s.</p>
+</div>
+
+<h2>Top targeted sessions</h2>
+<div class="card">
+  <table id="top-sessions"><thead><tr><th>Session ID</th><th>Attempts</th></tr></thead><tbody></tbody></table>
+  <div id="top-sessions-empty" class="empty">No unauthorized attempts yet.</div>
+</div>
+
+<h2>Recent attempts (latest first)</h2>
+<div class="card">
+  <table id="recent"><thead><tr><th>Time</th><th>Reason</th><th>IP</th><th>Session ID</th></tr></thead><tbody></tbody></table>
+  <div id="recent-empty" class="empty">No unauthorized attempts yet.</div>
+</div>
+
+<script>
+  const urlObj = new URL(location.href);
+  const urlToken = urlObj.searchParams.get('token');
+  let adminToken = sessionStorage.getItem('adminToken') || urlToken || '';
+  if (urlToken) {
+    // Avoid leaking token via browser history / referrers.
+    sessionStorage.setItem('adminToken', urlToken);
+    urlObj.searchParams.delete('token');
+    history.replaceState(null, '', urlObj.toString());
+  }
+  if (adminToken) document.getElementById('token').value = adminToken;
+
+  function setToken(e) {
+    e.preventDefault();
+    adminToken = document.getElementById('token').value.trim();
+    sessionStorage.setItem('adminToken', adminToken);
+    refresh();
+    return false;
+  }
+
+  function fmtTime(ts) {
+    const d = new Date(ts);
+    return d.toLocaleTimeString() + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  }
+
+  async function refresh() {
+    const status = document.getElementById('auth-status');
+    if (!adminToken) { status.textContent = 'Enter the admin token to load data.'; return; }
+    try {
+      const r = await fetch('/api/health/unauthorized', { headers: { 'x-admin-token': adminToken } });
+      if (r.status === 403 || r.status === 404) {
+        status.textContent = 'Invalid or missing admin token.';
+        return;
+      }
+      const data = await r.json();
+      status.textContent = 'Last update: ' + new Date(data.timestamp).toLocaleTimeString();
+      document.getElementById('u-total').textContent = data.counts.total;
+      document.getElementById('u-mismatch').textContent = data.counts.tokenMismatch;
+      document.getElementById('u-notfound').textContent = data.counts.sessionNotFound;
+      document.getElementById('u-missing').textContent = data.counts.missingToken;
+
+      function cell(text, className) {
+        const td = document.createElement('td');
+        td.textContent = text == null ? '' : String(text);
+        if (className) td.className = className;
+        return td;
+      }
+
+      const tsBody = document.querySelector('#top-sessions tbody');
+      tsBody.replaceChildren();
+      document.getElementById('top-sessions-empty').style.display = data.topSessions.length ? 'none' : 'block';
+      document.getElementById('top-sessions').style.display = data.topSessions.length ? 'table' : 'none';
+      for (const row of data.topSessions) {
+        const tr = document.createElement('tr');
+        tr.appendChild(cell(row.sessionId));
+        tr.appendChild(cell(row.count));
+        tsBody.appendChild(tr);
+      }
+
+      const allowedReasons = { 'token-mismatch': 1, 'session-not-found': 1, 'missing-token': 1 };
+      const rBody = document.querySelector('#recent tbody');
+      rBody.replaceChildren();
+      document.getElementById('recent-empty').style.display = data.recent.length ? 'none' : 'block';
+      document.getElementById('recent').style.display = data.recent.length ? 'table' : 'none';
+      for (const ev of data.recent) {
+        const tr = document.createElement('tr');
+        const reasonClass = allowedReasons[ev.reason] ? 'reason-' + ev.reason : '';
+        tr.appendChild(cell(fmtTime(ev.timestamp)));
+        tr.appendChild(cell(ev.reason, reasonClass));
+        tr.appendChild(cell(ev.ip));
+        tr.appendChild(cell(ev.sessionId));
+        rBody.appendChild(tr);
+      }
+    } catch (err) {
+      status.textContent = 'Error: ' + err.message;
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 5000);
+</script>
+</body>
+</html>`);
+  });
+
   // Snapshot of the undici connection pool used for ElevenLabs (point-in-time).
   app.get('/api/health/connections', async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -478,6 +687,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const session = await storage.getSession(sessionId);
     if (!session) {
       recordSessionAuthFailure(req, sessionId);
+      recordUnauthorizedAccess(req, sessionId, 'session-not-found');
       res.status(404).json({ error: 'Session not found' });
       return null;
     }
@@ -486,6 +696,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       (req.body?.accessToken as string | undefined);
     if (!provided || provided !== session.accessToken) {
       recordSessionAuthFailure(req, sessionId);
+      recordUnauthorizedAccess(req, sessionId, provided ? 'token-mismatch' : 'missing-token');
       res.status(403).json({ error: 'Forbidden' });
       return null;
     }
