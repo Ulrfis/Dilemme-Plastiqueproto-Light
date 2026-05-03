@@ -1228,7 +1228,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // This decouples pregen lifetime from TTS_REQUEST_TTL (60s). A fresh
       // ttsRequestStore entry is created only when the client calls GET /resume-token.
       const audioBuffer = await generateTtsAudio(resumeText, undefined, 'quality');
-      pregenResumeStore.set(sessionId, { text: resumeText, audioBuffer, createdAt: Date.now() });
+      const generatedAt = Date.now();
+      // Guard against out-of-order completion: only store if this job is newer
+      // than any currently stored entry (concurrent exchange spam edge case).
+      const existing = pregenResumeStore.get(sessionId);
+      if (!existing || generatedAt >= existing.createdAt) {
+        pregenResumeStore.set(sessionId, { text: resumeText, audioBuffer, createdAt: generatedAt });
+      }
       console.log('[Pregen Resume] Ready for session:', sessionId.substring(0, 8), '(', resumeText.length, 'chars,', audioBuffer.byteLength, 'bytes)');
     } catch (err) {
       // Silent — never let background pregen affect the primary chat flow
