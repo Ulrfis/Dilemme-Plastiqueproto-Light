@@ -43,9 +43,12 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
     if (outcomeReportedRef.current) return;
     outcomeReportedRef.current = true;
     const video = videoRef.current;
+    const watch_duration_ms = Date.now() - mountedAtRef.current;
     captureEvent('video_intro_outcome', {
       outcome,
-      time_in_video_ms: Date.now() - mountedAtRef.current,
+      timed_out: outcome === 'error',
+      watch_duration_ms,
+      time_in_video_ms: watch_duration_ms,
       video_current_time: video?.currentTime,
       video_duration: video?.duration,
       ...extra,

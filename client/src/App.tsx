@@ -74,8 +74,32 @@ function readPostHogContext(): { session_id?: string; user_name?: string } {
   }
 }
 
+// Infer the upstream service from an API endpoint path.
+function serviceFromEndpoint(endpoint?: string): string | undefined {
+  if (!endpoint || typeof endpoint !== 'string') return undefined;
+  if (endpoint.includes('/tts/')) return 'elevenlabs';
+  if (endpoint.includes('/speech-to-text')) return 'whisper';
+  if (endpoint.includes('/chat') || endpoint.includes('/sessions/') || endpoint.includes('/synthesis') || endpoint.includes('/resume')) return 'openai';
+  if (endpoint.includes('deepgram')) return 'deepgram';
+  return 'app_backend';
+}
+
+function errorReasonFromStatus(status?: number, errorMessage?: string): string | undefined {
+  if (typeof status === 'number') {
+    if (status >= 500) return '5xx';
+    if (status >= 400) return '4xx';
+  }
+  if (typeof errorMessage === 'string') {
+    const m = errorMessage.toLowerCase();
+    if (m.includes('timeout') || m.includes('timed out')) return 'timeout';
+    if (m.includes('network') || m.includes('failed to fetch') || m.includes('aborted')) return 'network';
+  }
+  return status ? 'http_error' : undefined;
+}
+
 // Helper function to safely capture PostHog events.
 // Automatically enriches every event with session_id + user_name from sessionStorage.
+// For `api_error` events, also auto-derives `service`, `error_reason`, and ensures `fallback_triggered` is present.
 export function captureEvent(event: string, properties?: Record<string, unknown>) {
   ensureSessionTracking();
 
@@ -86,13 +110,26 @@ export function captureEvent(event: string, properties?: Record<string, unknown>
 
   const ctx = readPostHogContext();
 
+  let enriched: Record<string, unknown> = { ...(properties || {}) };
+  if (event === 'api_error') {
+    const endpoint = (enriched.endpoint as string | undefined);
+    const status = (enriched.status as number | undefined);
+    const errorMessage = (enriched.error_message as string | undefined);
+    enriched = {
+      service: serviceFromEndpoint(endpoint),
+      error_reason: errorReasonFromStatus(status, errorMessage),
+      fallback_triggered: enriched.fallback_triggered ?? false,
+      ...enriched,
+    };
+  }
+
   if (window.posthog) {
     window.posthog.capture(event, {
       ...ctx,
-      ...properties,
+      ...enriched,
       timestamp: new Date().toISOString(),
     });
-    console.log(`[PostHog] ✅ Captured event: ${event}`, properties);
+    console.log(`[PostHog] ✅ Captured event: ${event}`, enriched);
     return true;
   } else {
     console.warn(`[PostHog] ⚠️ Not loaded, skipping event: ${event}`);
@@ -522,10 +559,18 @@ function App() {
     // PostHog health check — fired ~3s after mount to confirm the SDK is alive in production
     const healthCheckTimer = window.setTimeout(() => {
       const verification = verifyPostHog();
+      const ph: any = window.posthog;
+      let persistenceType: string | undefined;
+      try {
+        persistenceType = ph?.config?.persistence ?? ph?.persistence?.props_load_type ?? undefined;
+      } catch { /* ignore */ }
       captureEvent("posthog_health_check", {
         status: verification.status,
         has_distinct_id: Boolean(verification.details?.distinctId),
         loaded: Boolean(verification.details?.__loaded),
+        identified: ph?._isIdentified?.() ?? Boolean(ph?.persistence?.props?.$user_id),
+        sdk_version: ph?.LIB_VERSION ?? ph?.version ?? undefined,
+        persistence_type: persistenceType,
         url: window.location.href,
         user_agent: navigator.userAgent,
       });

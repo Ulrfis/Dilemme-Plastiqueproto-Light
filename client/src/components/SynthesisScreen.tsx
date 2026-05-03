@@ -25,7 +25,10 @@ export default function SynthesisScreen({
   const sessionFlow = useSessionFlow();
 
   const inputModeReportedRef = useRef<'voice' | 'text' | null>(null);
+  const usedVoiceRef = useRef<boolean>(false);
+  const revisionCountRef = useRef<number>(0);
   const reportInputMode = useCallback((mode: 'voice' | 'text') => {
+    if (mode === 'voice') usedVoiceRef.current = true;
     if (inputModeReportedRef.current) return;
     inputModeReportedRef.current = mode;
     captureEvent('synthesis_input_mode', { mode, userName });
@@ -130,9 +133,15 @@ export default function SynthesisScreen({
     } catch (error) {
       console.error('Recording error:', error);
       const err = error as Error;
+      const browser_support = {
+        mediaRecorder: typeof MediaRecorder !== 'undefined',
+        getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+      };
+      const isUnavailable = err?.name === 'NotFoundError' || err?.name === 'NotSupportedError';
       captureEvent('mic_permission', {
-        state: 'denied',
+        state: isUnavailable ? 'unavailable' : 'denied',
         source: 'synthesis',
+        browser_support,
         error_name: err?.name,
         error_message: err?.message,
       });
@@ -184,6 +193,8 @@ export default function SynthesisScreen({
         userName,
         synthesisLength: synthesis.trim().length,
         input_mode: inputModeReportedRef.current ?? 'text',
+        used_voice_at_any_point: usedVoiceRef.current,
+        revision_count: revisionCountRef.current,
       });
       
       setHasSaved(true);
@@ -235,6 +246,7 @@ export default function SynthesisScreen({
               value={synthesis}
               onChange={(e) => {
                 if (e.target.value.length > synthesis.length) reportInputMode('text');
+                revisionCountRef.current += 1;
                 setSynthesis(e.target.value);
               }}
               className="min-h-[120px] resize-none rounded-xl pr-14 text-base"

@@ -254,11 +254,32 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     }
   }, []);
 
+  const browserSupportSummary = useCallback(() => {
+    const hasMR = typeof MediaRecorder !== 'undefined';
+    const hasGUM = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    return {
+      mediaRecorder: hasMR,
+      getUserMedia: hasGUM,
+      audioContext: typeof (window.AudioContext || (window as any).webkitAudioContext) !== 'undefined',
+    };
+  }, []);
+
+  const interruptionPendingRef = useRef<{ source: 'tab_hidden' | 'os_pause'; at: number } | null>(null);
+
   const checkMicrophonePermission = useCallback(async (): Promise<boolean> => {
+    const browser_support = browserSupportSummary();
+    if (!browser_support.getUserMedia || !browser_support.mediaRecorder) {
+      captureEvent('mic_permission', {
+        state: 'unavailable',
+        source: 'check',
+        browser_support,
+      });
+      return false;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(track => track.stop());
-      captureEvent('mic_permission', { state: 'granted', source: 'check' });
+      captureEvent('mic_permission', { state: 'granted', source: 'check', browser_support });
       return true;
     } catch (error) {
       console.error('Microphone permission denied:', error);
@@ -266,12 +287,13 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       captureEvent('mic_permission', {
         state: 'denied',
         source: 'check',
+        browser_support,
         error_name: err?.name,
         error_message: err?.message,
       });
       return false;
     }
-  }, []);
+  }, [browserSupportSummary]);
 
   // Vérifier si MediaRecorder est supporté (pas sur Safari iOS ancien)
   const checkMediaRecorderSupport = useCallback((): boolean => {
@@ -352,22 +374,32 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       // Whisper restera la passe de correction au stop
       if (onLiveTranscriptRef.current) {
         try {
-          deepgram.start(stream, (text, isFinal) => {
+          deepgram.start(stream, (text: string, isFinal: boolean) => {
             onLiveTranscriptRef.current?.(text, isFinal);
           });
         } catch (err) {
           console.warn('[useVoiceInteraction] Deepgram start failed (non-fatal):', err);
+          captureEvent('deepgram_fallback_to_whisper', {
+            stage: 'start',
+            error_message: err instanceof Error ? err.message : String(err),
+          });
         }
       }
 
       console.log('[useVoiceInteraction] Recording started successfully');
-      captureEvent('mic_permission', { state: 'granted', source: 'start_recording' });
+      captureEvent('mic_permission', {
+        state: 'granted',
+        source: 'start_recording',
+        browser_support: browserSupportSummary(),
+      });
     } catch (error) {
       console.error('[useVoiceInteraction] Error starting recording:', error);
       const err = error as Error;
+      const isUnavailable = err?.name === 'NotFoundError' || err?.name === 'NotSupportedError';
       captureEvent('mic_permission', {
-        state: 'denied',
+        state: isUnavailable ? 'unavailable' : 'denied',
         source: 'start_recording',
+        browser_support: browserSupportSummary(),
         error_name: err?.name,
         error_message: err?.message,
       });
@@ -579,6 +611,14 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         clearTimeout(playTimeoutId);
         // MOBILE FIX: Arrêter le keepalive une fois que l'audio joue vraiment
         stopAudioKeepAlive();
+        if (interruptionPendingRef.current) {
+          captureEvent('audio_interrupted', {
+            source: interruptionPendingRef.current.source,
+            duration_off_ms: Date.now() - interruptionPendingRef.current.at,
+            resumed: true,
+          });
+          interruptionPendingRef.current = null;
+        }
         if (onAudioStartRef.current) {
           onAudioStartRef.current();
         }
@@ -597,10 +637,14 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       audio.onpause = () => {
         console.log('[useVoiceInteraction] Audio paused (possibly interrupted on mobile)');
         if (!audioExplicitlyStoppedRef.current && !audio.ended) {
+          const source = document.visibilityState === 'hidden' ? 'tab_hidden' : 'os_pause';
+          interruptionPendingRef.current = { source, at: Date.now() };
           captureEvent('audio_interrupted', {
+            source,
             current_time: audio.currentTime,
             duration: audio.duration,
             visibility: document.visibilityState,
+            resumed: false,
           });
         }
         console.log('[useVoiceInteraction] Audio state:', {
@@ -913,6 +957,14 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         playStarted = true;
         clearTimeout(playTimeoutId);
         stopAudioKeepAlive();
+        if (interruptionPendingRef.current) {
+          captureEvent('audio_interrupted', {
+            source: interruptionPendingRef.current.source,
+            duration_off_ms: Date.now() - interruptionPendingRef.current.at,
+            resumed: true,
+          });
+          interruptionPendingRef.current = null;
+        }
         if (onAudioStartRef.current) onAudioStartRef.current();
       };
 

@@ -170,6 +170,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     onPlaybackStart: () => {
       console.log('[TutorialScreen] First sentence audio started playing');
       const now = Date.now();
+      if (turnFirstAudioAtRef.current === 0) turnFirstAudioAtRef.current = now;
       const latencyMs = exchangeStartTimeRef.current > 0 ? now - exchangeStartTimeRef.current : undefined;
       const phase1ToPlaybackMs = phase1ReadyTimeRef.current > 0 ? now - phase1ReadyTimeRef.current : undefined;
       captureEvent('audio_playback_started', {
@@ -211,13 +212,14 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               audioBlob = await audioResponse.blob();
               console.log('[TutorialScreen] Pre-generated welcome audio ready, size:', audioBlob.size);
             } else {
-              captureEvent('api_error', { endpoint: '/api/tts/play', status: audioResponse.status, context: 'welcome_pregen' });
+              captureEvent('api_error', { endpoint: '/api/tts/play', status: audioResponse.status, context: 'welcome_pregen', fallback_triggered: true });
               console.warn('[TutorialScreen] Pre-generated token returned', audioResponse.status, '— falling back');
             }
           } catch (pregenErr) {
             captureEvent('api_error', {
               endpoint: '/api/tts/play',
               context: 'welcome_pregen',
+              fallback_triggered: true,
               error_message: pregenErr instanceof Error ? pregenErr.message : String(pregenErr),
             });
             console.warn('[TutorialScreen] Pre-generated audio fetch failed, falling back:', pregenErr);
@@ -324,6 +326,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     }
 
     setAudioUnlocked(true);
+    captureEvent('audio_context_unlocked', {
+      is_returning_user: isReturningUser,
+      had_pregen_token: typeof sessionStorage !== 'undefined' && !!sessionStorage.getItem('welcomeAudioToken'),
+    });
   };
 
   // MOBILE FIX: Détecter automatiquement si MediaRecorder est supporté
@@ -334,7 +340,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     if (!isSupported) {
       console.warn('[TutorialScreen] MediaRecorder NOT supported - activating text fallback mode');
-      captureEvent('fallback_mode_activated', { reason: 'no_mediarecorder' });
+      captureEvent('fallback_mode_activated', { reason: 'no_mediarecorder', exchange_index: exchangeCount });
       setFallbackMode(true);
       toast({
         title: "Mode texte activé",
@@ -433,6 +439,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               ? 'mic_not_found'
               : 'mic_unsupported',
           error_name: errorName,
+          exchange_index: exchangeCount,
         });
         // IMPORTANT: Réinitialiser l'état audio AVANT de passer en mode texte
         // Sinon audioState peut rester bloqué et désactiver le bouton d'envoi
@@ -458,6 +465,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   };
 
   const handleStopRecording = async () => {
+    turnRecordingStoppedAtRef.current = Date.now();
     const text = await stopRecording();
     turnSttDoneAtRef.current = Date.now();
     if (text) {
@@ -569,6 +577,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           // Première phrase reçue : masquer la bulle "Peter réfléchit"
           if (!firstSentenceReceivedRef.current) {
             firstSentenceReceivedRef.current = true;
+            turnLlmFirstAtRef.current = Date.now();
             setIsThinking(false);
           }
 
@@ -591,6 +600,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           if (phase === 'phase1' || (!phase && !phase1ReportedRef.current)) {
             phase1ReportedRef.current = true;
             phase1ReadyTimeRef.current = now;
+            turnPhase1ReadyAtRef.current = now;
             captureEvent('tts_phase1_ready', {
               latency_ms: latencyMs,
               sentence_index: index,
@@ -714,12 +724,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
           if (detectedNewClues.length > 0) {
             console.log('[TutorialScreen] New clues detected — showing animation before audio');
+            const tutStart = tutorialStartedAtRef.current;
             detectedNewClues.forEach((clue) => {
+              const clue_index = newFoundClues.indexOf(clue);
               captureEvent('clue_discovered', {
+                clue_id: clue,
+                clue_index,
                 clue,
                 total_found: newFoundClues.length,
                 total_clues: TOTAL_CLUES,
+                exchange_index: currentExchange,
                 exchange: currentExchange,
+                time_since_tutorial_start_ms: Date.now() - tutStart,
                 pipeline: 'streaming',
               });
             });
@@ -732,15 +748,32 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           // Voice turn timing — only meaningful for voice turns (not text-only)
           if (turnRecordingStartedAtRef.current > 0) {
             const now = Date.now();
+            const recStart = turnRecordingStartedAtRef.current;
+            const recStop = turnRecordingStoppedAtRef.current;
+            const sttDone = turnSttDoneAtRef.current;
+            const llmFirst = turnLlmFirstAtRef.current;
+            const phase1Ready = turnPhase1ReadyAtRef.current;
+            const firstAudio = turnFirstAudioAtRef.current;
             captureEvent('voice_turn_complete', {
-              recording_to_complete_ms: now - turnRecordingStartedAtRef.current,
-              stt_to_complete_ms: turnSttDoneAtRef.current > 0 ? now - turnSttDoneAtRef.current : undefined,
+              recording_duration_ms: recStop > 0 ? recStop - recStart : undefined,
+              stt_latency_ms: sttDone > 0 && recStop > 0 ? sttDone - recStop : undefined,
+              llm_latency_ms: llmFirst > 0 && sttDone > 0 ? llmFirst - sttDone : undefined,
+              tts_phase1_latency_ms: phase1Ready > 0 && llmFirst > 0 ? phase1Ready - llmFirst : undefined,
+              first_audio_ms: firstAudio > 0 && recStart > 0 ? firstAudio - recStart : undefined,
+              total_ms: now - recStart,
+              recording_to_complete_ms: now - recStart,
+              stt_to_complete_ms: sttDone > 0 ? now - sttDone : undefined,
+              exchange_index: currentExchange,
               exchange: currentExchange,
               new_clues: detectedNewClues.length,
               pipeline: 'streaming',
             });
             turnRecordingStartedAtRef.current = 0;
+            turnRecordingStoppedAtRef.current = 0;
             turnSttDoneAtRef.current = 0;
+            turnLlmFirstAtRef.current = 0;
+            turnPhase1ReadyAtRef.current = 0;
+            turnFirstAudioAtRef.current = 0;
           }
 
           audioQueue.resume();
@@ -801,12 +834,18 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
     if (detectedNewClues.length > 0) {
       console.log('[TutorialScreen] New clues detected:', detectedNewClues);
+      const tutStart = tutorialStartedAtRef.current;
       detectedNewClues.forEach((clue) => {
+        const clue_index = result.foundClues.indexOf(clue);
         captureEvent('clue_discovered', {
+          clue_id: clue,
+          clue_index,
           clue,
           total_found: result.foundClues.length,
           total_clues: TOTAL_CLUES,
+          exchange_index: exchangeCount,
           exchange: exchangeCount,
+          time_since_tutorial_start_ms: Date.now() - tutStart,
           pipeline: 'non-streaming',
         });
       });
@@ -867,7 +906,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
   // Voice turn timing refs — set in handleStartRecording, consumed in onComplete
   const turnRecordingStartedAtRef = useRef<number>(0);
+  const turnRecordingStoppedAtRef = useRef<number>(0);
   const turnSttDoneAtRef = useRef<number>(0);
+  const turnLlmFirstAtRef = useRef<number>(0);
+  const turnPhase1ReadyAtRef = useRef<number>(0);
+  const turnFirstAudioAtRef = useRef<number>(0);
+  const tutorialStartedAtRef = useRef<number>(Date.now());
 
   // Auto-démarrage audio dès le montage (le clic précédent “Démarrer le tutoriel” suffit comme geste utilisateur)
   const autoStartedRef = useRef(false);
