@@ -47,18 +47,17 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
             alt="Place des Nations - Dilemme Plastique"
             className="w-full object-cover rounded-xl shadow-md"
           />
-          <div className="absolute -bottom-14 sm:-bottom-20 right-2 select-none pointer-events-none">
-            <div className="absolute inset-x-0 bottom-0 h-8 sm:h-10 rounded-full bg-black/10 blur-md mx-3 sm:mx-4" />
+          <div className="absolute bottom-0 right-0 select-none pointer-events-none">
             <img
               src={peterAvatar}
               alt="Peter, ton guide IA"
-              className="relative h-24 sm:h-36 w-auto object-contain"
-              style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.18)) drop-shadow(0 1px 2px rgba(0,0,0,0.10))" }}
+              className="h-64 sm:h-80 md:h-96 w-auto object-contain"
+              style={{ filter: "drop-shadow(0 4px 16px rgba(0,0,0,0.30)) drop-shadow(0 2px 6px rgba(0,0,0,0.15))" }}
             />
           </div>
         </div>
 
-        <div className="flex flex-col items-center gap-2 pt-10 sm:pt-16 text-center">
+        <div className="flex flex-col items-center gap-2 pt-2 text-center">
           <p className="text-base text-foreground/80 leading-relaxed">
             Explore cette image avec Peter et découvre les 6 indices cachés sur l'impact du plastique dans notre corps.
           </p>

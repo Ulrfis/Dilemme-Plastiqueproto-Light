@@ -359,16 +359,15 @@ export default function VideoIntro({ onComplete }: VideoIntroProps) {
         size="lg"
         style={{
           position: "fixed",
-          top: "50%",
-          right: "1rem",
-          transform: "translateY(-50%)",
+          bottom: "1.5rem",
+          right: "1.5rem",
           zIndex: 30,
         }}
-        className="h-14 w-14 sm:h-16 sm:w-auto sm:px-6 sm:right-8 rounded-2xl bg-primary/90 backdrop-blur-md border-2 border-white/10 text-white hover:bg-primary hover:scale-105 transition-all duration-200 shadow-2xl flex items-center justify-center"
+        className="h-12 sm:h-14 px-5 sm:px-6 rounded-2xl bg-primary/90 backdrop-blur-md border-2 border-white/10 text-white hover:bg-primary hover:scale-105 transition-all duration-200 shadow-2xl flex items-center justify-center gap-2"
         data-testid="button-skip"
       >
-        <span className="hidden sm:inline text-lg font-medium mr-2">Continuer</span>
-        <ChevronRight className="w-6 h-6 sm:w-6 sm:h-6" />
+        <span className="text-base sm:text-lg font-medium">Continuer</span>
+        <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
       </Button>
     </div>
   );

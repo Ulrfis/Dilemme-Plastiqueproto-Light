@@ -1226,6 +1226,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             audioLevel={audioLevel}
             liveTranscript={liveTranscript}
             isThinking={isThinking}
+            conversationEnded={conversationEnded}
           />
         </div>
       </div>
@@ -1282,6 +1283,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               audioLevel={audioLevel}
               liveTranscript={liveTranscript}
               isThinking={isThinking}
+              conversationEnded={conversationEnded}
             />
           </div>
         </div>
@@ -1328,6 +1330,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             maxExchanges={MAX_EXCHANGES}
             audioLevel={audioLevel}
             isThinking={isThinking}
+            conversationEnded={conversationEnded}
           />
         </div>
 
