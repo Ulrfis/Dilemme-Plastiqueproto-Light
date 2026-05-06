@@ -41,15 +41,15 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
           Dilemme Plastique
         </h1>
 
-        <div className="w-full" style={{ display: 'grid', gridTemplateColumns: '1fr auto' }}>
+        <div className="relative w-full" style={{ overflow: 'visible' }}>
           <img
             src={logoImage}
             alt="Place des Nations - Dilemme Plastique"
             className="w-full object-cover rounded-xl shadow-md block"
           />
           <div
-            className="select-none pointer-events-none flex items-end"
-            style={{ alignSelf: 'stretch', width: '9rem' }}
+            className="absolute bottom-0 right-0 select-none pointer-events-none"
+            style={{ height: '200%', width: '38%' }}
           >
             <img
               src={peterAvatar}
