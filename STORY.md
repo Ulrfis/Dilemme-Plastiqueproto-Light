@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-05-03 (PostHog full coverage + serveur, dashboards, reprise instantanée, fluidité Phase 2)  
+> **Last Updated**: 2026-05-06 (Fiabilité comptage indices, additional_instructions, prompt Peter v3, versionning)  
 
 ---
 
@@ -1001,6 +1001,46 @@ Après: WelcomeSetup → POST /api/sessions → TTS starts background → naviga
 **Friction**: La chaîne `previous_text` pour Phase 2b nécessite de conserver `phase2aText` pour que l'ElevenLabs API produise une prosodie cohérente avec les segments précédents.
 
 **Time**: ~30 minutes
+
+---
+
+### [2026-05-06] — Fiabilité comptage indices + prompt Peter v3 🔷
+
+**Intent**: Peter annonçait parfois un mauvais nombre d'indices trouvés ("tu en as trouvé 4" alors qu'il y en avait 5 en base). Le contexte était injecté dans les messages utilisateur — il s'accumulait dans l'historique du thread, et l'assistant pouvait relire un vieux bloc. Parallèlement, le numéro d'échange venait du client (non fiable).
+
+**Prompt(s)**:
+```
+Fiabiliser le comptage des indices entre le jeu et Peter :
+le contexte doit sortir de l'historique du thread et aller dans
+additional_instructions. Le compteur d'échange doit venir du serveur.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+- `/api/chat/stream` + `/api/chat` : contexte des indices sorti du `content` du message utilisateur → passé dans `additional_instructions` du run. Ne pollue plus le thread ; s'applique uniquement à l'échange en cours.
+- `serverExchangeCount = session.messageCount + 1` : numéro d'échange calculé côté serveur depuis la DB, au lieu du champ `exchangeCount` envoyé par le client.
+- Nouveau format de bloc : `[CONTEXTE DU JEU — Source de vérité pour cet échange]` avec sections Indices trouvés / Indices manquants / Échange / Prénom + directive `IMPORTANT: Ne jamais compter depuis l'historique`.
+- Prompt Peter mis à jour (v3, appliqué manuellement par Ulrich dans l'interface OpenAI) : section `## RÈGLE ABSOLUE` en tête, exemples concrets, description complète de l'image restituée (penseur, visage féminin, plastique, PLASTIC TREATY — tronqués en v2).
+- Versionning du prompt initié dans `docs/prompts/peter-assistant.md` (historique v1/v2/v3 avec diff, raisons, taille).
+
+**Architecture**:
+```
+Avant :
+thread history = [..., "user: [Suivi des indices: 4/6] Ma question", ...]
+→ Peter relit les anciens blocs → mauvais comptage
+
+Après :
+thread history = [..., "user: Ma question"]  ← propre
+run.additional_instructions = "[CONTEXTE DU JEU] Indices trouvés : 4/6 — ..."
+→ Peter ne voit le contexte que pour l'échange en cours → comptage exact
+```
+
+**Surprise**: Le thread OpenAI conserve tout l'historique à vie — chaque message utilisateur avec son bloc de contexte s'accumulait silencieusement. Après 8 échanges, l'assistant avait accès à 8 blocs `[Suivi des indices]` différents, parfois contradictoires. `additional_instructions` résout ça élégamment : c'est une instruction éphémère, non persistée.
+
+**Insight**: Ne jamais faire confiance au thread comme source de vérité pour un état de jeu qui évolue. Le thread est un journal, pas un état. L'état doit venir d'ailleurs (DB → additional_instructions).
+
+**Time**: ~1h (diagnostic, fix serveur, mise à jour prompt, versionning)
 
 ---
 

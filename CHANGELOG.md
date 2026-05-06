@@ -6,6 +6,30 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2.6.0] - 2026-05-06
+
+### Corrigé — Fiabilité du comptage des indices + versionning prompt Peter
+
+#### Comptage des indices (server/routes.ts)
+
+**Problème** : Le contexte des indices (`[Suivi des indices: X/6 trouvés]`) était injecté dans le corps du message utilisateur, ce qui accumulait des dizaines de blocs dans l'historique du thread OpenAI. L'assistant pouvait relire un ancien bloc et annoncer un mauvais chiffre.
+
+**Corrections** :
+- `/api/chat/stream` et `/api/chat` : le contexte des indices est maintenant passé via `additional_instructions` du run OpenAI (s'applique uniquement à l'échange en cours, jamais stocké dans le thread). Le thread ne contient désormais que les vrais messages de l'utilisateur.
+- Le numéro d'échange est calculé depuis `session.messageCount + 1` côté serveur (source de vérité), au lieu du champ `exchangeCount` envoyé par le client.
+- Nouveau format du bloc contexte : `[CONTEXTE DU JEU — Source de vérité pour cet échange]` avec sections Indices trouvés / Indices manquants / Échange / Prénom.
+- Directive explicite dans le bloc : `IMPORTANT: Ne jamais compter depuis l'historique`.
+- Suppression du destructuring `exchangeCount` inutilisé dans le streaming endpoint.
+
+#### Prompt Peter — mise à jour (Assistant `asst_P9b5PxMd1k9HjBgbyXI1Cvm9`)
+
+- Nouvelle section `## RÈGLE ABSOLUE — CONTEXTE DU JEU` en tête du prompt : directive explicite que le bloc `[CONTEXTE DU JEU]` est la SOURCE DE VÉRITÉ UNIQUE pour les comptages d'indices, le numéro d'échange et le prénom.
+- Références au `[CONTEXTE DU JEU]` ajoutées aux instructions de fin de conversation (félicitations, indices manquants, prénom).
+- Description complète de l'image restituée (sections "penseur", visage féminin, déchets plastiques, panneau PLASTIC TREATY).
+- Historique des versions du prompt tracé dans `docs/prompts/peter-assistant.md`.
+
+---
+
 ## [2.5.0] - 2026-05-03
 
 ### Ajouté — Observabilité complète : tracking PostHog côté client + côté serveur
