@@ -41,17 +41,19 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
           Dilemme Plastique
         </h1>
 
-        <div className="relative w-full">
-          <img
-            src={logoImage}
-            alt="Place des Nations - Dilemme Plastique"
-            className="w-full object-cover rounded-xl shadow-md"
-          />
-          <div className="absolute inset-y-0 right-0 select-none pointer-events-none flex items-end">
+        <div className="flex items-end w-full">
+          <div className="flex-1 min-w-0">
+            <img
+              src={logoImage}
+              alt="Place des Nations - Dilemme Plastique"
+              className="w-full object-cover rounded-xl shadow-md"
+            />
+          </div>
+          <div className="self-stretch flex-shrink-0 w-20 sm:w-28 md:w-32 select-none pointer-events-none flex items-end">
             <img
               src={peterAvatar}
               alt="Peter, ton guide IA"
-              className="h-full w-auto object-contain"
+              className="h-full w-full object-contain object-bottom"
               style={{ filter: "drop-shadow(0 4px 16px rgba(0,0,0,0.30)) drop-shadow(0 2px 6px rgba(0,0,0,0.15))" }}
             />
           </div>
