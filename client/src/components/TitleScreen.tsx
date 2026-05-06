@@ -49,7 +49,7 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
               className="w-full object-cover rounded-xl shadow-md"
             />
           </div>
-          <div className="self-stretch flex-shrink-0 w-20 sm:w-28 md:w-32 select-none pointer-events-none flex items-end">
+          <div className="self-stretch flex-shrink-0 w-40 sm:w-56 md:w-64 select-none pointer-events-none flex items-end">
             <img
               src={peterAvatar}
               alt="Peter, ton guide IA"
