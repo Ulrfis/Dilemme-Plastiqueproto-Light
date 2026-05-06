@@ -47,11 +47,11 @@ export default function TitleScreen({ onStart }: TitleScreenProps) {
             alt="Place des Nations - Dilemme Plastique"
             className="w-full object-cover rounded-xl shadow-md"
           />
-          <div className="absolute bottom-0 right-0 select-none pointer-events-none">
+          <div className="absolute inset-y-0 right-0 select-none pointer-events-none flex items-end">
             <img
               src={peterAvatar}
               alt="Peter, ton guide IA"
-              className="h-64 sm:h-80 md:h-96 w-auto object-contain"
+              className="h-full w-auto object-contain"
               style={{ filter: "drop-shadow(0 4px 16px rgba(0,0,0,0.30)) drop-shadow(0 2px 6px rgba(0,0,0,0.15))" }}
             />
           </div>
