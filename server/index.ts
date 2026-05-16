@@ -109,18 +109,38 @@ process.once('SIGINT', handleShutdown);
     }
 
     // PHASE 1 OPTIMIZATION: Connection warming for ElevenLabs API
-    // Keeps TCP+TLS connection alive to reduce first-audio latency by ~200-400ms
+    // Keeps TCP+TLS connection alive to reduce first-audio latency by ~200-400ms.
+    // Stops after repeated 401/403 to avoid spamming ElevenLabs when the API key is invalid.
     if (process.env.ELEVENLABS_API_KEY) {
+      const MAX_CONSECUTIVE_AUTH_FAILURES = 3;
+      let consecutiveAuthFailures = 0;
+      let warmingInterval: ReturnType<typeof setInterval> | null = null;
+
+      const stopElevenLabsWarming = (reason: string) => {
+        if (warmingInterval) {
+          clearInterval(warmingInterval);
+          warmingInterval = null;
+        }
+        log(`[Connection Warming] ElevenLabs warming disabled: ${reason}`);
+      };
+
       const warmElevenLabsConnection = async () => {
         try {
           const response = await elevenLabsFetch('https://api.elevenlabs.io/v1/models', {
             headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY! }
           });
+          await response.arrayBuffer(); // Consume body to free socket for reuse
+
           if (response.ok) {
-            await response.arrayBuffer(); // Consume body to free socket for reuse
+            consecutiveAuthFailures = 0;
             log('[Connection Warming] ElevenLabs connection kept alive');
-          } else {
-            await response.arrayBuffer(); // Consume body even on non-OK to release socket
+          } else if (response.status === 401 || response.status === 403) {
+            consecutiveAuthFailures += 1;
+            if (consecutiveAuthFailures >= MAX_CONSECUTIVE_AUTH_FAILURES) {
+              stopElevenLabsWarming(
+                `${response.status} after ${consecutiveAuthFailures} attempts — check ELEVENLABS_API_KEY`
+              );
+            }
           }
         } catch (error) {
           // Silent fail - don't spam logs if API is down
@@ -135,7 +155,7 @@ process.once('SIGINT', handleShutdown);
       setTimeout(warmElevenLabsConnection, 6000);
 
       // Then keep warm at the shared cadence
-      setInterval(warmElevenLabsConnection, POOL_SAMPLE_INTERVAL_MS);
+      warmingInterval = setInterval(warmElevenLabsConnection, POOL_SAMPLE_INTERVAL_MS);
 
       log(`[Connection Warming] ElevenLabs connection warming enabled (every ${POOL_SAMPLE_INTERVAL_MS / 1000}s)`);
     }

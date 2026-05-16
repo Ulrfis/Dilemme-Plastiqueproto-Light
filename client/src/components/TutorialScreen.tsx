@@ -9,7 +9,7 @@ import ZoomableImage from "./ZoomableImage";
 import InfoModal from "./InfoModal";
 import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
 import { useAudioQueue } from "@/hooks/useAudioQueue";
-import { sendChatMessage, textToSpeech, sendChatMessageStreaming, textToSpeechStreaming } from "@/lib/api";
+import { sendChatMessage, textToSpeech, sendChatMessageStreaming } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { captureEvent } from "@/App";
 import { useSessionFlow } from "@/contexts/SessionFlowContext";
@@ -202,9 +202,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       
       const welcomeStartTime = Date.now();
       try {
-        // Pré-chauffage TTS: lancer un call ultra court en arrière-plan pour remplir les caches CDN
-        textToSpeechStreaming("...").catch(() => {});
-
         // Try to use the pre-generated welcome audio token (kicked off at session creation)
         let audioBlob: Blob | null = null;
         let usedPregen = false;
