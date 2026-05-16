@@ -71,6 +71,21 @@ export function captureServerEvent(
  * Convenience helper for caught errors. Truncates message to keep PostHog
  * properties small and avoid leaking entire stack traces in production.
  */
+/** Server-side pipeline timing — joins client latency events via session_id. */
+export function captureServerTiming(
+  sessionId: string | null | undefined,
+  properties: {
+    step: string;
+    duration_ms: number;
+    success: boolean;
+    endpoint?: string;
+    [key: string]: unknown;
+  },
+  userName?: string | null,
+): void {
+  captureServerEvent("server_pipeline_timing", sessionId, properties, userName);
+}
+
 export function captureServerError(
   endpoint: string,
   sessionId: string | null | undefined,

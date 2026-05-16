@@ -34,6 +34,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
   const deepgram = useDeepgramTranscription();
   const onLiveTranscriptRef = useRef(onLiveTranscript);
+  const lastDeepgramInterimRef = useRef('');
   useEffect(() => {
     onLiveTranscriptRef.current = onLiveTranscript;
   }, [onLiveTranscript]);
@@ -383,8 +384,12 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       // Démarrer la transcription Deepgram en parallèle (non-bloquant si échec)
       // Whisper restera la passe de correction au stop
       if (onLiveTranscriptRef.current) {
+        lastDeepgramInterimRef.current = '';
         try {
           deepgram.start(stream, (text: string, isFinal: boolean) => {
+            if (!isFinal && text.trim()) {
+              lastDeepgramInterimRef.current = text;
+            }
             onLiveTranscriptRef.current?.(text, isFinal);
           });
         } catch (err) {
@@ -473,6 +478,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
           formData.append('audio', audioBlob, 'recording.webm');
 
           console.log('[useVoiceInteraction] Sending audio to speech-to-text API...');
+          const whisperStart = Date.now();
           const response = await fetch('/api/speech-to-text', {
             method: 'POST',
             body: formData,
@@ -483,7 +489,24 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
           }
 
           const data = await response.json();
+          const whisperMs = Date.now() - whisperStart;
           console.log('[useVoiceInteraction] Transcription successful:', data.text);
+          captureEvent('whisper_stt_complete', {
+            duration_ms: whisperMs,
+            audio_bytes: audioBlob.size,
+            transcript_chars: typeof data.text === 'string' ? data.text.length : 0,
+          });
+          const dgText = lastDeepgramInterimRef.current.trim();
+          const whisperText = typeof data.text === 'string' ? data.text.trim() : '';
+          if (dgText && whisperText) {
+            captureEvent('whisper_correction_delta', {
+              deepgram_chars: dgText.length,
+              whisper_chars: whisperText.length,
+              char_delta: whisperText.length - dgText.length,
+              texts_match: dgText === whisperText,
+            });
+          }
+          lastDeepgramInterimRef.current = '';
           setTranscription(data.text);
           setAudioState('idle'); // MOBILE FIX: Retourner à idle après succès
           resolve(data.text);

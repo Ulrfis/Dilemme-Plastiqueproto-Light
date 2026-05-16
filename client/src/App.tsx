@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Switch, Route, useLocation, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -28,6 +28,8 @@ declare global {
       capture: (event: string, properties?: Record<string, unknown>) => void;
       identify: (distinctId: string, properties?: Record<string, unknown>) => void;
       reset: () => void;
+      flush?: () => void;
+      captureException?: (error: Error, properties?: Record<string, unknown>) => void;
       get_distinct_id: () => string;
       get_property: (key: string) => unknown;
       debug: (enabled: boolean) => void;
@@ -40,16 +42,100 @@ declare global {
   }
 }
 
+export function getPostHogDeviceContext(): Record<string, unknown> {
+  if (typeof window === "undefined") return {};
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const ua = navigator.userAgent;
+  const isMobile =
+    /iPhone|iPad|iPod|Android/i.test(ua) ||
+    (w > 0 && w < 768);
+  return {
+    device_type: isMobile ? "mobile" : "desktop",
+    viewport_w: w,
+    viewport_h: h,
+    browser_language: navigator.language,
+    platform: navigator.platform,
+    connection_type:
+      (navigator as Navigator & { connection?: { effectiveType?: string } })
+        .connection?.effectiveType ?? undefined,
+  };
+}
+
+export function flushPostHog(): void {
+  try {
+    window.posthog?.flush?.();
+  } catch {
+    /* non-blocking */
+  }
+}
+
 // Identify user in PostHog with their name
 export function identifyUser(userId: string, properties?: Record<string, unknown>) {
   if (window.posthog) {
-    window.posthog.identify(userId, properties);
+    window.posthog.identify(userId, {
+      ...getPostHogDeviceContext(),
+      ...properties,
+    });
     console.log(`[PostHog] ✅ Identified user: ${userId}`, properties);
     return true;
   } else {
     console.warn(`[PostHog] ⚠️ Not loaded, skipping identify for: ${userId}`);
     return false;
   }
+}
+
+function pathToFlowStep(path: string): string {
+  const map: Record<string, string> = {
+    "/": "title",
+    "/video": "video",
+    "/welcome": "welcome",
+    "/tutorial": "tutorial",
+    "/game": "game",
+    "/synthesis": "synthesis",
+    "/feedback": "feedback",
+    "/complete": "complete",
+    "/syntheses": "syntheses",
+    "/admin/connections": "admin_connections",
+  };
+  return map[path] ?? (path.replace(/^\//, "") || "unknown");
+}
+
+/** Tracks time spent per route for funnel / drop-off analysis. */
+function PostHogFlowTracker() {
+  const [location] = useLocation();
+  const stepEnteredAt = useRef(Date.now());
+  const prevPath = useRef(location);
+  const initialViewSent = useRef(false);
+
+  useEffect(() => {
+    if (!initialViewSent.current) {
+      initialViewSent.current = true;
+      captureEvent("flow_step_viewed", {
+        step: pathToFlowStep(location),
+        initial: true,
+      });
+      return;
+    }
+
+    if (prevPath.current === location) return;
+
+    const durationMs = Date.now() - stepEnteredAt.current;
+    captureEvent("flow_step_left", {
+      step: pathToFlowStep(prevPath.current),
+      duration_ms: durationMs,
+      next_step: pathToFlowStep(location),
+    });
+    captureEvent("flow_step_viewed", {
+      step: pathToFlowStep(location),
+      from_step: pathToFlowStep(prevPath.current),
+    });
+
+    prevPath.current = location;
+    stepEnteredAt.current = Date.now();
+  }, [location]);
+
+  return null;
 }
 
 function ensureSessionTracking() {
@@ -527,6 +613,7 @@ function CompletePage() {
 function Router() {
   return (
     <MediaProvider>
+      <PostHogFlowTracker />
       <Switch>
         <Route path="/" component={TitlePage} />
         <Route path="/video" component={VideoPage} />
@@ -594,6 +681,11 @@ function App() {
         stack: event.error?.stack?.substring(0, 1000),
         url: window.location.href,
       });
+      if (event.error instanceof Error) {
+        window.posthog?.captureException?.(event.error, {
+          source: "window.onerror",
+        });
+      }
     };
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason;
@@ -603,6 +695,11 @@ function App() {
         stack: reason instanceof Error ? reason.stack?.substring(0, 1000) : undefined,
         url: window.location.href,
       });
+      if (reason instanceof Error) {
+        window.posthog?.captureException?.(reason, {
+          source: "unhandledrejection",
+        });
+      }
     };
     window.addEventListener("error", handleError);
     window.addEventListener("unhandledrejection", handleUnhandledRejection);
@@ -627,10 +724,16 @@ function App() {
 
   useEffect(() => {
     const handleBeforeUnload = () => {
+      captureEvent("flow_step_left", {
+        step: pathToFlowStep(window.location.pathname),
+        duration_ms: 0,
+        exit_type: "page_unload",
+      });
       captureSessionEnded({
         exit_url: window.location.href,
         exit_type: "page_unload",
       });
+      flushPostHog();
     };
 
     const handleVisibilityChange = () => {
@@ -641,15 +744,22 @@ function App() {
             : 0,
           actions_completed: window.dilemmeActionsCount || 0,
         });
+        flushPostHog();
       }
+    };
+
+    const handlePageHide = () => {
+      flushPostHog();
     };
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
     };
   }, []);
 

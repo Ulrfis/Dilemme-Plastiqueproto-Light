@@ -1,5 +1,6 @@
 import { useRef, useCallback, useEffect } from 'react';
 import { readStoredSessionFlow } from '@/lib/sessionFlowStorage';
+import { captureEvent } from '@/App';
 
 export interface DeepgramHook {
   start: (
@@ -12,8 +13,20 @@ export interface DeepgramHook {
 export function useDeepgramTranscription(): DeepgramHook {
   const wsRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const sessionStartedAtRef = useRef(0);
+  const firstInterimCapturedRef = useRef(false);
 
   const stop = useCallback(() => {
+    const sessionStart = sessionStartedAtRef.current;
+    if (sessionStart > 0) {
+      captureEvent('deepgram_session', {
+        duration_ms: Date.now() - sessionStart,
+        had_first_interim: firstInterimCapturedRef.current,
+      });
+      sessionStartedAtRef.current = 0;
+      firstInterimCapturedRef.current = false;
+    }
+
     const recorder = recorderRef.current;
     if (recorder) {
       try {
@@ -41,6 +54,9 @@ export function useDeepgramTranscription(): DeepgramHook {
     ) => {
       stop();
 
+      sessionStartedAtRef.current = Date.now();
+      firstInterimCapturedRef.current = false;
+
       const mimeType = MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : MediaRecorder.isTypeSupported?.('audio/webm')
@@ -52,7 +68,6 @@ export function useDeepgramTranscription(): DeepgramHook {
         return;
       }
 
-      // Récupérer les credentials de session pour authentifier le WS
       const stored = readStoredSessionFlow();
       const sessionId = stored?.sessionId;
       const token = stored?.accessToken;
@@ -68,8 +83,12 @@ export function useDeepgramTranscription(): DeepgramHook {
         const ws = new WebSocket(wsUrl);
         ws.binaryType = 'arraybuffer';
         wsRef.current = ws;
+        const dgConnectStart = Date.now();
 
         ws.onopen = () => {
+          captureEvent('deepgram_ws_connected', {
+            connect_ms: Date.now() - dgConnectStart,
+          });
           console.log('[Deepgram] WebSocket open, starting parallel recorder');
           try {
             const recorder = new MediaRecorder(stream, { mimeType });
@@ -99,7 +118,15 @@ export function useDeepgramTranscription(): DeepgramHook {
           try {
             const msg = JSON.parse(event.data);
             if (msg.type === 'transcript' && typeof msg.transcript === 'string') {
-              onTranscript(msg.transcript, !!msg.isFinal);
+              const text = msg.transcript;
+              const isFinal = !!msg.isFinal;
+              if (!firstInterimCapturedRef.current && text.trim() && !isFinal) {
+                firstInterimCapturedRef.current = true;
+                captureEvent('deepgram_first_interim', {
+                  latency_ms: Date.now() - sessionStartedAtRef.current,
+                });
+              }
+              onTranscript(text, isFinal);
             }
           } catch (err) {
             console.warn('[Deepgram] Failed to parse message:', err);
@@ -108,6 +135,11 @@ export function useDeepgramTranscription(): DeepgramHook {
 
         ws.onerror = (event) => {
           console.warn('[Deepgram] WebSocket error', event);
+          captureEvent('api_error', {
+            endpoint: 'deepgram/listen',
+            context: 'deepgram_ws_error',
+            fallback_triggered: true,
+          });
         };
 
         ws.onclose = () => {
@@ -126,8 +158,6 @@ export function useDeepgramTranscription(): DeepgramHook {
     [stop],
   );
 
-  // Cleanup automatique au démontage du hook (si jamais l'utilisateur quitte
-  // l'écran pendant un enregistrement, on ferme proprement le WS Deepgram).
   useEffect(() => {
     return () => {
       stop();

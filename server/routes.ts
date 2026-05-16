@@ -8,7 +8,7 @@ import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
 import { elevenLabsFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY, POOL_SAMPLE_INTERVAL_MS } from "./elevenlabs-agent";
-import { captureServerError, captureServerEvent } from "./posthog";
+import { captureServerError, captureServerEvent, captureServerTiming } from "./posthog";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -755,18 +755,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // without waiting for an on-demand ElevenLabs call after navigation.
       const welcomeText = `Bienvenue ${data.userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum 8 échanges pour y parvenir !`;
       const welcomeAudioToken = crypto.randomUUID();
+      const welcomeT0 = Date.now();
       const welcomePromise = generateTtsAudio(welcomeText, undefined, 'quality');
-      // Capture silent welcome-TTS pregen failures (otherwise they only surface
-      // if /api/tts/play is ever called for this token).
-      welcomePromise.catch((err) => {
-        captureServerError(
-          '/api/sessions',
-          session.id,
-          err,
-          { context: 'welcome_pregen_tts' },
-          data.userName,
-        );
-      });
+      welcomePromise
+        .then(() => {
+          captureServerTiming(
+            session.id,
+            {
+              step: 'welcome_pregen_tts',
+              duration_ms: Date.now() - welcomeT0,
+              success: true,
+              endpoint: '/api/sessions',
+              chars: welcomeText.length,
+            },
+            data.userName,
+          );
+        })
+        .catch((err) => {
+          captureServerTiming(
+            session.id,
+            {
+              step: 'welcome_pregen_tts',
+              duration_ms: Date.now() - welcomeT0,
+              success: false,
+              endpoint: '/api/sessions',
+            },
+            data.userName,
+          );
+          captureServerError(
+            '/api/sessions',
+            session.id,
+            err,
+            { context: 'welcome_pregen_tts' },
+            data.userName,
+          );
+        });
       ttsRequestStore.set(welcomeAudioToken, {
         promise: welcomePromise,
         createdAt: Date.now(),
@@ -911,13 +934,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const audioBuffer = req.file.buffer;
-      const audioFile = new File([audioBuffer], 'audio.webm', { type: 'audio/webm' });
+      const audioFile = new File([audioBuffer], 'audio/webm', { type: 'audio/webm' });
+      const sttBody = (req as unknown as { body?: { sessionId?: string; userName?: string } }).body;
+      const sttStart = Date.now();
 
       const transcription = await openai.audio.transcriptions.create({
         file: audioFile,
         model: 'whisper-1',
         language: 'fr',
       });
+
+      captureServerTiming(
+        sttBody?.sessionId ?? null,
+        {
+          step: 'whisper_stt',
+          duration_ms: Date.now() - sttStart,
+          success: true,
+          endpoint: '/api/speech-to-text',
+          audio_bytes: audioBuffer.byteLength,
+          transcript_chars: transcription.text?.length ?? 0,
+        },
+        sttBody?.userName ?? null,
+      );
 
       res.json({ text: transcription.text });
     } catch (error) {
@@ -1217,6 +1255,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // the hidden resume prompt never pollutes the live conversation history.
   // The ephemeral thread is created, used, and never referenced again.
   async function schedulePregenResume(sessionId: string): Promise<void> {
+    const pregenStart = Date.now();
     try {
       const session = await storage.getSession(sessionId);
       if (!session) return;
@@ -1284,7 +1323,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pregenResumeStore.set(sessionId, { text: resumeText, audioBuffer, createdAt: generatedAt });
       }
       console.log('[Pregen Resume] Ready for session:', sessionId.substring(0, 8), '(', resumeText.length, 'chars,', audioBuffer.byteLength, 'bytes)');
+      captureServerTiming(
+        sessionId,
+        {
+          step: 'resume_pregen_total',
+          duration_ms: Date.now() - pregenStart,
+          success: true,
+          endpoint: 'pregen_resume_background',
+          transcript_chars: resumeText.length,
+          audio_bytes: audioBuffer.byteLength,
+        },
+        session.userName,
+      );
     } catch (err) {
+      captureServerTiming(
+        sessionId,
+        {
+          step: 'resume_pregen_total',
+          duration_ms: Date.now() - pregenStart,
+          success: false,
+          endpoint: 'pregen_resume_background',
+        },
+        (await storage.getSession(sessionId).catch(() => null))?.userName,
+      );
       // Silent — never let background pregen affect the primary chat flow
       console.warn('[Pregen Resume] Background generation failed (silent):', err instanceof Error ? err.message : err);
       // Mirror to PostHog so we can detect chronic background failures in prod.
@@ -1488,6 +1549,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
 
+      const streamStartedAt = Date.now();
+      let firstLlmDeltaAt: number | null = null;
+      let firstSentenceEmittedAt: number | null = null;
+
       console.log('[Chat Stream API] Using OpenAI Assistant:', ASSISTANT_ID);
 
       const userNameToUse = userName || 'mon ami';
@@ -1606,6 +1671,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const count = sentences.length;
         phase1Text = combined;
         phase1Done = true;
+        const phase1T0 = Date.now();
 
         console.log(`[Chat Stream API] Phase 1 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model — uniforme)`);
 
@@ -1614,6 +1680,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // on sentences ending with "!" (different acoustic profile from multilingual_v2).
         const ttsPromise = generateTtsAudio(combined, undefined, 'quality')
           .then((audioBuffer) => {
+            captureServerTiming(sessionId, {
+              step: 'elevenlabs_phase1',
+              duration_ms: Date.now() - phase1T0,
+              success: true,
+              endpoint: '/api/chat/stream',
+              chars: combined.length,
+              sentence_count: count,
+              exchange_index: serverExchangeCount,
+            }, userName);
             const audioToken = crypto.randomUUID();
             ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now(), sessionId, userName });
             console.log(`[Chat Stream API] Phase 1 TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
@@ -1628,6 +1703,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           })
           .catch((ttsErr) => {
+            captureServerTiming(sessionId, {
+              step: 'elevenlabs_phase1',
+              duration_ms: Date.now() - phase1T0,
+              success: false,
+              endpoint: '/api/chat/stream',
+              exchange_index: serverExchangeCount,
+            }, userName);
             console.error('[Chat Stream API] Phase 1 TTS failed:', ttsErr);
             captureServerError('/api/chat/stream', sessionId, ttsErr, { context: 'phase1_tts' }, userName);
             if (!res.writableEnded) {
@@ -1651,6 +1733,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phase2Dispatched = true;
 
         console.log(`[Chat Stream API] Phase 2a TTS (${dispatchedMidStream ? 'MID-STREAM' : 'AT-COMPLETION'}): ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
+        const phase2aT0 = Date.now();
 
         // Emit timing metadata immediately so the client can fire a PostHog event
         if (!res.writableEnded) {
@@ -1663,6 +1746,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const ttsPromise = generateTtsAudio(combined, phase1Text || undefined, 'quality')
           .then((audioBuffer) => {
+            captureServerTiming(sessionId, {
+              step: 'elevenlabs_phase2a',
+              duration_ms: Date.now() - phase2aT0,
+              success: true,
+              endpoint: '/api/chat/stream',
+              chars: combined.length,
+              sentence_count: count,
+              dispatched_mid_stream: dispatchedMidStream,
+              exchange_index: serverExchangeCount,
+            }, userName);
             phase2aResolved = true;
             phase2aSettled = true;
             if (phase2aCancelled) {
@@ -1685,6 +1778,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .catch((ttsErr) => {
             phase2aSettled = true;
+            captureServerTiming(sessionId, {
+              step: 'elevenlabs_phase2a',
+              duration_ms: Date.now() - phase2aT0,
+              success: false,
+              endpoint: '/api/chat/stream',
+              exchange_index: serverExchangeCount,
+            }, userName);
             console.error('[Chat Stream API] Phase 2a TTS failed:', ttsErr);
             captureServerError('/api/chat/stream', sessionId, ttsErr, { context: 'phase2a_tts' }, userName);
             if (!phase2aCancelled && !res.writableEnded) {
@@ -1705,9 +1805,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const prevText = [phase1Text, phase2aText].filter(Boolean).join(' ') || undefined;
 
         console.log(`[Chat Stream API] Phase 2b TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
+        const phase2bT0 = Date.now();
 
         const ttsPromise = generateTtsAudio(combined, prevText, 'quality')
           .then((audioBuffer) => {
+            captureServerTiming(sessionId, {
+              step: 'elevenlabs_phase2b',
+              duration_ms: Date.now() - phase2bT0,
+              success: true,
+              endpoint: '/api/chat/stream',
+              chars: combined.length,
+              sentence_count: count,
+              exchange_index: serverExchangeCount,
+            }, userName);
             const audioToken = crypto.randomUUID();
             ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now(), sessionId, userName });
             console.log(`[Chat Stream API] Phase 2b TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
@@ -1722,6 +1832,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           })
           .catch((ttsErr) => {
+            captureServerTiming(sessionId, {
+              step: 'elevenlabs_phase2b',
+              duration_ms: Date.now() - phase2bT0,
+              success: false,
+              endpoint: '/api/chat/stream',
+              exchange_index: serverExchangeCount,
+            }, userName);
             console.error('[Chat Stream API] Phase 2b TTS failed:', ttsErr);
             captureServerError('/api/chat/stream', sessionId, ttsErr, { context: 'phase2b_tts' }, userName);
             if (!res.writableEnded) {
@@ -1740,6 +1857,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         sentenceCount++;
         const index = sentenceCount;
+        if (firstSentenceEmittedAt === null) {
+          firstSentenceEmittedAt = Date.now();
+          captureServerTiming(sessionId, {
+            step: 'openai_first_sentence',
+            duration_ms: firstSentenceEmittedAt - streamStartedAt,
+            success: true,
+            endpoint: '/api/chat/stream',
+            exchange_index: serverExchangeCount,
+          }, userName);
+        }
         console.log('[Chat Stream API] Sentence #' + index + ' (' + trimmed.length + ' chars):', trimmed.substring(0, 50) + (trimmed.length > 50 ? '...' : ''));
 
         // Always emit the text SSE event immediately (client display + UI)
@@ -1786,6 +1913,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const delta = event.data.delta;
           if (delta.content && delta.content[0]?.type === 'text') {
             const textDelta = delta.content[0].text?.value || '';
+            if (textDelta && firstLlmDeltaAt === null) {
+              firstLlmDeltaAt = Date.now();
+              captureServerTiming(sessionId, {
+                step: 'openai_first_delta',
+                duration_ms: firstLlmDeltaAt - streamStartedAt,
+                success: true,
+                endpoint: '/api/chat/stream',
+                exchange_index: serverExchangeCount,
+              }, userName);
+            }
             fullResponse += textDelta;
             currentSentence += textDelta;
 
@@ -1799,6 +1936,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (event.event === 'thread.run.completed') {
           console.log('[Chat Stream API] ✅ Run completed:', { responseLength: fullResponse.length });
+          captureServerTiming(sessionId, {
+            step: 'openai_run_complete',
+            duration_ms: Date.now() - streamStartedAt,
+            success: true,
+            endpoint: '/api/chat/stream',
+            response_chars: fullResponse.length,
+            sentence_count: sentenceCount,
+            exchange_index: serverExchangeCount,
+          }, userName);
 
           if (streamTimeout) {
             clearTimeout(streamTimeout);
@@ -1834,8 +1980,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
               const mergedText = [phase2aText, phase2bText].filter(Boolean).join(' ');
               const mergedCount = phase2aSentenceCount + phase2bBuffer.length;
               console.log(`[Chat Stream API] Phase 2a+2b MERGED (2b was ${phase2bText.length} chars, 2a unresolved): "${mergedText.substring(0, 80)}..." (${mergedCount} sentences)`);
+              const mergedT0 = Date.now();
               const ttsPromise = generateTtsAudio(mergedText, phase1Text || undefined, 'quality')
                 .then((audioBuffer) => {
+                  captureServerTiming(sessionId, {
+                    step: 'elevenlabs_phase2_merged',
+                    duration_ms: Date.now() - mergedT0,
+                    success: true,
+                    endpoint: '/api/chat/stream',
+                    chars: mergedText.length,
+                    sentence_count: mergedCount,
+                    exchange_index: serverExchangeCount,
+                  }, userName);
                   const audioToken = crypto.randomUUID();
                   ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now(), sessionId, userName });
                   console.log(`[Chat Stream API] Phase 2a+2b merged TTS ready (index=${phase2StartIndex}, count=${mergedCount}), token:`, audioToken);
@@ -1948,6 +2104,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await Promise.allSettled(sentenceTtsPromises);
         console.log('[Chat Stream API] All sentence TTS promises settled');
       }
+
+      captureServerTiming(sessionId, {
+        step: 'chat_stream_total',
+        duration_ms: Date.now() - streamStartedAt,
+        success: true,
+        endpoint: '/api/chat/stream',
+        sentence_count: sentenceCount,
+        response_chars: fullResponse.length,
+        exchange_index: serverExchangeCount,
+      }, userName);
 
       res.end();
       console.log('[Chat Stream API] Stream ended successfully');
