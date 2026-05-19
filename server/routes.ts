@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import { File as NodeFile } from "node:buffer";
 import { storage, type InsertTutorialSessionWithToken } from "./storage";
 import { attachDeepgramRelay } from "./deepgramRelay";
 import multer from "multer";
@@ -12,11 +13,21 @@ import { captureServerError, captureServerEvent, captureServerTiming } from "./p
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
+  "audio/mp4",
   "audio/ogg",
   "audio/wav",
   "audio/mpeg",
   "audio/mp3",
 ]);
+
+const AUDIO_EXTENSION_BY_MIME: Record<string, string> = {
+  "audio/webm": "webm",
+  "audio/mp4": "mp4",
+  "audio/ogg": "ogg",
+  "audio/wav": "wav",
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+};
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -934,7 +945,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const audioBuffer = req.file.buffer;
-      const audioFile = new File([audioBuffer], 'audio/webm', { type: 'audio/webm' });
+      const audioMime = req.file.mimetype || 'audio/webm';
+      const audioExtension = AUDIO_EXTENSION_BY_MIME[audioMime] ?? 'webm';
+      const audioFile = new NodeFile([audioBuffer], `recording.${audioExtension}`, { type: audioMime });
       const sttBody = (req as unknown as { body?: { sessionId?: string; userName?: string } }).body;
       const sttStart = Date.now();
 
