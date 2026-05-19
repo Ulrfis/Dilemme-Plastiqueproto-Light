@@ -55,7 +55,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [audioUnlocked, setAudioUnlockedLocal] = useState(() => sessionFlow.audioUnlocked);
   const [exchangeCount, setExchangeCountLocal] = useState(() => sessionFlow.exchangeCount);
   const [conversationEnded, setConversationEndedLocal] = useState(() => sessionFlow.conversationEnded);
-  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum 8 échanges pour y parvenir !`);
+  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum 15 échanges pour y parvenir !`);
   
   const setFoundClues = (clues: string[]) => {
     setFoundCluesLocal(clues);
@@ -89,7 +89,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     sessionFlow.setConversationEnded(ended);
   };
   
-  const MAX_EXCHANGES = 8;
+  const MAX_EXCHANGES = 15;
+  const CLOSING_EXCHANGE = 14;
   const TOTAL_CLUES = 6;
 
   const hasPlayedWelcome = useRef(false);
@@ -110,6 +111,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const phase1ReportedRef = useRef<boolean>(false);
 
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (conversationEnded && exchangeCount < CLOSING_EXCHANGE) {
+      setConversationEnded(false);
+    }
+  }, [conversationEnded, exchangeCount]);
 
   // MOBILE FIX: Ajouter un état local pour forcer le retour à idle en cas de blocage
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
@@ -582,7 +589,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         await processMessageStreaming(userMessage, newExchangeCount);
       } else {
         console.log('[TutorialScreen] Using NON-STREAMING pipeline (legacy)');
-        await processMessageNonStreaming(userMessage);
+        await processMessageNonStreaming(userMessage, newExchangeCount);
       }
     } catch (error) {
       setIsThinking(false);
@@ -875,10 +882,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             fn();
           }
           
-          const maxExchangesReached = currentExchange >= MAX_EXCHANGES;
+          const maxExchangesReached = currentExchange >= CLOSING_EXCHANGE;
           const allCluesNowFound = newFoundClues.length >= TOTAL_CLUES;
 
-          if (maxExchangesReached || allCluesNowFound) {
+          if (maxExchangesReached) {
             console.log('[TutorialScreen] Conversation ending:', { maxExchangesReached, allCluesNowFound, exchange: currentExchange, clues: newFoundClues.length });
             setConversationEnded(true);
           }
@@ -950,12 +957,12 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       console.error('[TutorialScreen] Streaming failed:', error);
       audioQueue.clear();
       console.log('[TutorialScreen] Falling back to non-streaming');
-      await processMessageNonStreaming(userMessage);
+      await processMessageNonStreaming(userMessage, currentExchange);
     }
   };
 
   // Legacy non-streaming message processing (kept for fallback)
-  const processMessageNonStreaming = async (userMessage: string) => {
+  const processMessageNonStreaming = async (userMessage: string, currentExchange: number) => {
     if (turnTranscriptSentAtRef.current === 0) {
       turnTranscriptSentAtRef.current = Date.now();
     }
@@ -980,8 +987,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           clue,
           total_found: result.foundClues.length,
           total_clues: TOTAL_CLUES,
-          exchange_index: exchangeCount,
-          exchange: exchangeCount,
+          exchange_index: currentExchange,
+          exchange: currentExchange,
           time_since_tutorial_start_ms: Date.now() - tutStart,
           pipeline: 'non-streaming',
         });
@@ -997,9 +1004,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     setIsThinking(false);
     setMessages(prev => [...prev, makeMessage('assistant', result.response)]);
 
-    // Fin de conversation si tous les indices trouvés
-    if (result.foundClues.length >= TOTAL_CLUES) {
-      console.log('[TutorialScreen] All clues found — ending conversation');
+    if (currentExchange >= CLOSING_EXCHANGE) {
+      console.log('[TutorialScreen] Closing exchange reached — ending conversation');
       setConversationEnded(true);
     }
 

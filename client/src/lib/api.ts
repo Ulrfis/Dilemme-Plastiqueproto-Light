@@ -165,7 +165,7 @@ export interface StreamChatCallbacks {
 }
 
 export interface StreamChatOptions {
-  exchangeCount?: number; // Current exchange number (1-8)
+  exchangeCount?: number; // Current exchange number (1-15)
   userName?: string; // User's name for personalized goodbye
 }
 

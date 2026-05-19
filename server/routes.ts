@@ -348,6 +348,9 @@ const TARGET_CLUES = [
   { keyword: "Femme", variants: ["femme", "figure féminine", "personnage féminin", "sculpture femme", "mère", "terre-mère"] }
 ];
 
+const MAX_TUTORIAL_EXCHANGES = 15;
+const CLOSING_TUTORIAL_EXCHANGE = 14;
+
 function detectClues(text: string, alreadyFound: string[]): string[] {
   const textLower = text.toLowerCase();
   const foundClues: string[] = [];
@@ -764,7 +767,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Pre-generate welcome message TTS in background so TutorialScreen can play it immediately
       // without waiting for an on-demand ElevenLabs call after navigation.
-      const welcomeText = `Bienvenue ${data.userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum 8 échanges pour y parvenir !`;
+      const welcomeText = `Bienvenue ${data.userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum ${MAX_TUTORIAL_EXCHANGES} échanges pour y parvenir !`;
       const welcomeAudioToken = crypto.randomUUID();
       const welcomeT0 = Date.now();
       const welcomePromise = generateTtsAudio(welcomeText, undefined, 'quality');
@@ -1582,20 +1585,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Clue tracking context — passed as additional_instructions so the thread stays clean
       // Peter always receives the authoritative state for this specific run
-      const cluesContext = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés : ${allFoundSoFar.length}/6${allFoundSoFar.length > 0 ? ` (${allFoundSoFar.join(', ')})` : ''}\nIndices manquants : ${missingClues.length > 0 ? missingClues.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCount}/8\nPrénom de l'utilisateur : ${userNameToUse}\n\nIMPORTANT : Ce bloc [CONTEXTE DU JEU] est la source de vérité absolue. Ne jamais compter les indices à partir de l'historique de conversation — toujours utiliser les chiffres ci-dessus.`;
+      const cluesContext = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés : ${allFoundSoFar.length}/6${allFoundSoFar.length > 0 ? ` (${allFoundSoFar.join(', ')})` : ''}\nIndices manquants : ${missingClues.length > 0 ? missingClues.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCount}/${MAX_TUTORIAL_EXCHANGES}\nPrénom de l'utilisateur : ${userNameToUse}\n\nIMPORTANT : Ce bloc [CONTEXTE DU JEU] est la source de vérité absolue. Ne jamais compter les indices à partir de l'historique de conversation — toujours utiliser les chiffres ci-dessus.`;
 
       // Build exchange-specific instructions
       let exchangeInstructions = '';
-      if (missingClues.length === 0) {
+      if (serverExchangeCount >= CLOSING_TUTORIAL_EXCHANGE) {
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'échange ${CLOSING_TUTORIAL_EXCHANGE}/${MAX_TUTORIAL_EXCHANGES}. Le temps de l'échange est maintenant terminé. Réponds poliment et chaleureusement à ${userNameToUse}, fais un bref récapitulatif des indices trouvés (${allFoundSoFar.join(', ') || 'aucun'}) et des indices manquants (${missingClues.join(', ') || 'aucun'}), puis indique clairement qu'il faut maintenant passer à la suite de l'expérience en cliquant sur "Poursuivre" pour commencer le jeu. Ne propose pas de continuer la discussion.]`;
+      } else if (missingClues.length === 0) {
         // All 6 clues already found — Peter must celebrate and prompt Poursuivre
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les 6 indices ont déjà été trouvés ! Félicite chaleureusement ${userNameToUse} pour avoir trouvé les 6 indices, fais un bref récapitulatif de la liste complète, et invite-le à cliquer sur le bouton "Poursuivre" pour continuer l'expérience.]`;
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les 6 indices ont déjà été trouvés ! Félicite chaleureusement ${userNameToUse} pour avoir trouvé les 6 indices, fais un bref récapitulatif de la liste complète, rappelle qu'il peut cliquer sur le bouton "Poursuivre" pour continuer l'expérience, mais qu'il peut aussi discuter encore un peu avant la limite s'il le souhaite.]`;
       } else if (missingClues.length === 1) {
         // One clue left — hint + Poursuivre if validated in this response
         exchangeInstructions = `\n\n[INSTRUCTION: Il ne reste qu'UN seul indice à trouver : "${missingClues[0]}". Guide habilement l'utilisateur vers cet indice. Si tu valides sa découverte dans cette réponse et que tous les 6 sont maintenant trouvés, félicite chaleureusement ${userNameToUse} et invite-le immédiatement à cliquer sur le bouton "Poursuivre" pour continuer l'expérience.]`;
-      } else if (serverExchangeCount === 7) {
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange (7/8). Tu dois absolument mentionner qu'il reste encore UN échange possible pour trouver les indices manquants (${missingClues.join(', ')}). Encourage l'utilisateur à faire un dernier effort. Ne dis pas au revoir maintenant.]`;
-      } else if (serverExchangeCount >= 8) {
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est le DERNIER échange (8/8). Tu dois terminer la conversation de manière chaleureuse. Salue l'utilisateur en utilisant son prénom "${userNameToUse}". Fais un bref récapitulatif des indices trouvés (${allFoundSoFar.join(', ') || 'aucun'}) et des indices manquants (${missingClues.join(', ') || 'aucun'}). Invite-le à cliquer sur le bouton "Poursuivre" pour continuer l'expérience.]`;
+      } else if (serverExchangeCount === CLOSING_TUTORIAL_EXCHANGE - 1) {
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange avant la clôture (${serverExchangeCount}/${MAX_TUTORIAL_EXCHANGES}). Mentionne qu'il reste encore un court échange possible avant de passer au jeu. Encourage l'utilisateur à faire un dernier effort sur les indices manquants (${missingClues.join(', ')}). Ne dis pas au revoir maintenant.]`;
       }
 
       // Reuse or create thread
@@ -2199,15 +2202,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const serverExchangeCountNS = (session.messageCount ?? 0) + 1;
 
       // Clue context passed via additional_instructions (clean thread, authoritative per run)
-      const cluesContextNS = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés : ${allFoundSoFarNS.length}/6${allFoundSoFarNS.length > 0 ? ` (${allFoundSoFarNS.join(', ')})` : ''}\nIndices manquants : ${missingCluesNS.length > 0 ? missingCluesNS.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCountNS}/8\nPrénom de l'utilisateur : ${userNameToUseNS}\n\nIMPORTANT : Ce bloc [CONTEXTE DU JEU] est la source de vérité absolue. Ne jamais compter les indices à partir de l'historique de conversation — toujours utiliser les chiffres ci-dessus.`;
+      const cluesContextNS = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés : ${allFoundSoFarNS.length}/6${allFoundSoFarNS.length > 0 ? ` (${allFoundSoFarNS.join(', ')})` : ''}\nIndices manquants : ${missingCluesNS.length > 0 ? missingCluesNS.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCountNS}/${MAX_TUTORIAL_EXCHANGES}\nPrénom de l'utilisateur : ${userNameToUseNS}\n\nIMPORTANT : Ce bloc [CONTEXTE DU JEU] est la source de vérité absolue. Ne jamais compter les indices à partir de l'historique de conversation — toujours utiliser les chiffres ci-dessus.`;
 
       let nsInstructions = '';
-      if (missingCluesNS.length === 0) {
-        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les 6 indices ont été trouvés ! Félicite chaleureusement ${userNameToUseNS}, fais un récapitulatif de la liste complète, et invite-le à cliquer sur "Poursuivre".]`;
+      if (serverExchangeCountNS >= CLOSING_TUTORIAL_EXCHANGE) {
+        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'échange ${CLOSING_TUTORIAL_EXCHANGE}/${MAX_TUTORIAL_EXCHANGES}. Le temps de l'échange est maintenant terminé. Réponds poliment et chaleureusement à ${userNameToUseNS}, fais un bref récapitulatif des indices trouvés (${allFoundSoFarNS.join(', ') || 'aucun'}) et des indices manquants (${missingCluesNS.join(', ') || 'aucun'}), puis indique clairement qu'il faut maintenant passer à la suite de l'expérience en cliquant sur "Poursuivre" pour commencer le jeu. Ne propose pas de continuer la discussion.]`;
+      } else if (missingCluesNS.length === 0) {
+        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les 6 indices ont été trouvés ! Félicite chaleureusement ${userNameToUseNS}, fais un récapitulatif de la liste complète, rappelle qu'il peut cliquer sur "Poursuivre", mais qu'il peut aussi discuter encore un peu avant la limite s'il le souhaite.]`;
       } else if (missingCluesNS.length === 1) {
         nsInstructions = `\n\n[INSTRUCTION: Il ne reste qu'UN seul indice : "${missingCluesNS[0]}". Si tu le valides dans cette réponse, félicite ${userNameToUseNS} et invite-le à cliquer sur "Poursuivre".]`;
-      } else if (serverExchangeCountNS >= 8) {
-        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est le DERNIER échange (8/8). Termine chaleureusement. Salue ${userNameToUseNS}. Récapitule les indices trouvés (${allFoundSoFarNS.join(', ') || 'aucun'}) et manquants (${missingCluesNS.join(', ') || 'aucun'}). Invite à cliquer sur "Poursuivre".]`;
+      } else if (serverExchangeCountNS === CLOSING_TUTORIAL_EXCHANGE - 1) {
+        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange avant la clôture (${serverExchangeCountNS}/${MAX_TUTORIAL_EXCHANGES}). Mentionne qu'il reste encore un court échange possible avant de passer au jeu. Encourage l'utilisateur à faire un dernier effort sur les indices manquants (${missingCluesNS.join(', ')}). Ne dis pas au revoir maintenant.]`;
       }
 
       // Réutiliser le thread existant ou en créer un nouveau
