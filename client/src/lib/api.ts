@@ -70,10 +70,11 @@ export async function sendChatMessage(sessionId: string, userMessage: string): P
 }
 
 export async function textToSpeech(text: string): Promise<Blob> {
+  const stored = readStoredSessionFlow();
   const response = await fetch('/api/text-to-speech', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    headers: { 'Content-Type': 'application/json', ...sessionAuthHeaders() },
+    body: JSON.stringify({ text, sessionId: stored?.sessionId }),
   });
 
   if (!response.ok) {
@@ -99,11 +100,12 @@ export async function textToSpeech(text: string): Promise<Blob> {
 // but waits for complete audio to avoid playback cuts
 export async function textToSpeechStreaming(text: string): Promise<Blob> {
   console.log('[API] Starting streaming TTS for text length:', text.length);
+  const stored = readStoredSessionFlow();
 
   const response = await fetch('/api/text-to-speech/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    headers: { 'Content-Type': 'application/json', ...sessionAuthHeaders() },
+    body: JSON.stringify({ text, sessionId: stored?.sessionId }),
   });
 
   if (!response.ok) {

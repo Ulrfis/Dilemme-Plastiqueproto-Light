@@ -8,10 +8,11 @@ const DEEPGRAM_PATH = '/ws/deepgram';
 const MAX_BUFFERED_CHUNKS = 40;          // ~10s of 250ms webm chunks before we drop oldest
 const MAX_BUFFERED_BYTES = 4 * 1024 * 1024; // hard cap 4MB total in buffer
 const UPSTREAM_OPEN_TIMEOUT_MS = 8_000;  // close client if Deepgram doesn't open in 8s
-const MAX_CONCURRENT_PER_IP = 3;         // anti-abuse: cap concurrent live transcriptions per IP
+const MAX_CONCURRENT_PER_SESSION = 1;    // one live recorder per tutorial session
+const MAX_CONCURRENT_TOTAL = 100;        // hard process cap against abusive fan-out
 const MAX_SESSION_DURATION_MS = 5 * 60 * 1000; // hard kill after 5 min (tutorial is short)
 
-const concurrentByIp = new Map<string, number>();
+const concurrentBySession = new Map<string, number>();
 
 function clientIp(req: IncomingMessage): string {
   // On utilise toujours l'IP de la socket TCP réelle pour l'attribution
@@ -81,11 +82,13 @@ export function attachDeepgramRelay(server: Server) {
       return;
     }
 
-    // === Rate limit: max N connexions concurrentes par IP ===
+    // === Rate limit: one live transcription per session ===
+    // A school class commonly shares one public IP, so an IP-level cap would
+    // incorrectly block most students behind the same NAT or reverse proxy.
     const ip = clientIp(req);
-    const current = concurrentByIp.get(ip) || 0;
-    if (current >= MAX_CONCURRENT_PER_IP) {
-      console.warn('[Deepgram] Too many concurrent connections from', ip);
+    const current = concurrentBySession.get(sessionId) || 0;
+    if (current >= MAX_CONCURRENT_PER_SESSION || concurrentBySession.size >= MAX_CONCURRENT_TOTAL) {
+      console.warn('[Deepgram] Too many concurrent connections for session', sessionId);
       socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
       socket.destroy();
       return;
@@ -96,9 +99,9 @@ export function attachDeepgramRelay(server: Server) {
     const decrementOnce = () => {
       if (!counted) return;
       counted = false;
-      const n = concurrentByIp.get(ip) || 0;
-      if (n <= 1) concurrentByIp.delete(ip);
-      else concurrentByIp.set(ip, n - 1);
+      const n = concurrentBySession.get(sessionId) || 0;
+      if (n <= 1) concurrentBySession.delete(sessionId);
+      else concurrentBySession.set(sessionId, n - 1);
     };
     socket.once('close', () => {
       // Si on a incrémenté mais que la connexion `wss.connection` n'a pas pris
@@ -110,7 +113,7 @@ export function attachDeepgramRelay(server: Server) {
 
     // On incrémente APRÈS avoir attaché le hook de socket close,
     // pour qu'il n'y ait pas de fenêtre où le compteur reste bloqué.
-    concurrentByIp.set(ip, current + 1);
+    concurrentBySession.set(sessionId, current + 1);
     counted = true;
 
     wss.handleUpgrade(req, socket, head, (ws) => {

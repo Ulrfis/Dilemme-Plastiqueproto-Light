@@ -8,6 +8,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useMutation } from "@tanstack/react-query";
 import { captureEvent } from "@/App";
 import { useSessionFlow } from "@/contexts/SessionFlowContext";
+import { readStoredSessionFlow } from "@/lib/sessionFlowStorage";
 
 interface SynthesisScreenProps {
   userName: string;
@@ -89,9 +90,13 @@ export default function SynthesisScreen({
           const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
           const formData = new FormData();
           formData.append('audio', audioBlob, 'synthesis.webm');
+          formData.append('sessionId', sessionId);
+          formData.append('userName', userName);
+          const storedSession = readStoredSessionFlow();
 
           const response = await fetch('/api/speech-to-text', {
             method: 'POST',
+            headers: storedSession?.accessToken ? { 'X-Session-Token': storedSession.accessToken } : undefined,
             body: formData,
           });
 

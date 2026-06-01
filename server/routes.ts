@@ -10,6 +10,7 @@ import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFee
 import crypto from "crypto";
 import { elevenLabsFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY, POOL_SAMPLE_INTERVAL_MS } from "./elevenlabs-agent";
 import { captureServerError, captureServerEvent, captureServerTiming } from "./posthog";
+import { BoundedPriorityQueue, QueueOverloadedError, type QueuePriority } from "./concurrency-limit";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -43,12 +44,22 @@ const upload = multer({
 });
 
 type RateEntry = { count: number; resetAt: number };
+function requestIdentity(req: any): string {
+  const sessionToken = req.headers["x-session-token"] || req.body?.accessToken || req.body?.sessionId;
+  if (sessionToken) return `session:${String(sessionToken)}`;
+  if (typeof req.path === 'string' && req.path.startsWith('/tts/play/')) {
+    return `tts:${req.path.slice('/tts/play/'.length)}`;
+  }
+  if (req.params?.token) return `token:${String(req.params.token)}`;
+  return `ip:${String(req.ip || req.socket?.remoteAddress || "unknown")}`;
+}
+
 function createRateLimiter(maxRequests: number, windowMs: number) {
   const buckets = new Map<string, RateEntry>();
   let lastPurge = Date.now();
 
   return function rateLimiter(req: any, res: any, next: any) {
-    const key = req.ip || req.headers["x-forwarded-for"] || "unknown";
+    const key = requestIdentity(req);
     const now = Date.now();
 
     // Purge expired entries every 5 minutes to prevent unbounded memory growth
@@ -79,9 +90,25 @@ function createRateLimiter(maxRequests: number, windowMs: number) {
   };
 }
 
-const generalLimiter = createRateLimiter(200, 15 * 60 * 1000); // 200 req / 15 min / IP
-const ttsLimiter = createRateLimiter(60, 15 * 60 * 1000); // plus strict pour endpoints coûteux
+const generalLimiter = createRateLimiter(300, 15 * 60 * 1000); // per session when available, IP fallback for public routes
+const ttsLimiter = createRateLimiter(60, 15 * 60 * 1000);
 const sttLimiter = createRateLimiter(60, 15 * 60 * 1000);
+
+function positiveIntFromEnv(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const elevenLabsQueue = new BoundedPriorityQueue({
+  maxConcurrent: positiveIntFromEnv('ELEVENLABS_MAX_CONCURRENT', 5),
+  maxQueued: positiveIntFromEnv('ELEVENLABS_MAX_QUEUED', 100),
+});
+const resumePregenQueue = new BoundedPriorityQueue({
+  maxConcurrent: 1,
+  maxQueued: 0,
+});
+const MAX_CONCURRENT_CHAT_STREAMS = positiveIntFromEnv('OPENAI_MAX_CONCURRENT_STREAMS', 50);
+let activeChatStreams = 0;
 
 // Track failed session-token verification attempts per IP+sessionId to block
 // brute-force guessing of access tokens. Max 10 failures per minute per
@@ -240,7 +267,13 @@ setInterval(() => {
 // previousText: text spoken before this segment, used by ElevenLabs to maintain prosody continuity
 // quality: 'fast' uses eleven_flash_v2_5 for lowest latency (Phase 1)
 //          'quality' uses eleven_multilingual_v2 for best prosody continuity (Phase 2)
-async function generateTtsAudio(text: string, previousText?: string, quality: 'fast' | 'quality' = 'quality'): Promise<Buffer> {
+async function generateTtsAudio(
+  text: string,
+  previousText?: string,
+  quality: 'fast' | 'quality' = 'quality',
+  priority: QueuePriority = 'foreground',
+  dropIfBusy = false,
+): Promise<Buffer> {
   const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
   const VOICE_ID = 'R8IjtpeRZsjoJfq1wwj3';
 
@@ -278,45 +311,47 @@ async function generateTtsAudio(text: string, previousText?: string, quality: 'f
     body.previous_text = previousText;
   }
 
-  const response = await elevenLabsFetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
-    method: 'POST',
-    headers: {
-      'Accept': 'audio/mpeg',
-      'Content-Type': 'application/json',
-      'xi-api-key': ELEVENLABS_API_KEY
-    },
-    body: JSON.stringify(body)
-  });
+  return elevenLabsQueue.run(async () => {
+    const response = await elevenLabsFetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'Content-Type': 'application/json',
+        'xi-api-key': ELEVENLABS_API_KEY
+      },
+      body: JSON.stringify(body)
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
-  }
-
-  const chunks: Buffer[] = [];
-  if (response.body) {
-    const reader = response.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(Buffer.from(value));
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
     }
-  }
 
-  const audioBuffer = Buffer.concat(chunks);
-  if (audioBuffer.byteLength === 0) {
-    throw new Error('Received empty audio from ElevenLabs');
-  }
+    const chunks: Buffer[] = [];
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(Buffer.from(value));
+      }
+    }
 
-  // Cache the result
-  if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
-    const firstKey = ttsCache.keys().next().value as string;
-    if (firstKey) ttsCache.delete(firstKey);
-  }
-  ttsCache.set(textHash, audioBuffer);
-  console.log('[TTS] Audio generated and cached:', audioBuffer.byteLength, 'bytes');
+    const audioBuffer = Buffer.concat(chunks);
+    if (audioBuffer.byteLength === 0) {
+      throw new Error('Received empty audio from ElevenLabs');
+    }
 
-  return audioBuffer;
+    // Cache the result
+    if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
+      const firstKey = ttsCache.keys().next().value as string;
+      if (firstKey) ttsCache.delete(firstKey);
+    }
+    ttsCache.set(textHash, audioBuffer);
+    console.log('[TTS] Audio generated and cached:', audioBuffer.byteLength, 'bytes');
+
+    return audioBuffer;
+  }, { priority, dropIfBusy });
 }
 
 const openai = new OpenAI({
@@ -564,6 +599,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       count: samples.length,
       intervalMs: POOL_SAMPLE_INTERVAL_MS,
       samples,
+    });
+  });
+
+  app.get('/api/health/load', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const memory = process.memoryUsage();
+    res.json({
+      timestamp: Date.now(),
+      activeChatStreams,
+      maxConcurrentChatStreams: MAX_CONCURRENT_CHAT_STREAMS,
+      elevenlabs: elevenLabsQueue.getStats(),
+      resumePregen: resumePregenQueue.getStats(),
+      stores: {
+        ttsRequests: ttsRequestStore.size,
+        pregenResume: pregenResumeStore.size,
+        ttsCache: ttsCache.size,
+      },
+      memory: {
+        heapUsedMB: Math.round(memory.heapUsed / 1024 / 1024),
+        heapTotalMB: Math.round(memory.heapTotal / 1024 / 1024),
+        rssMB: Math.round(memory.rss / 1024 / 1024),
+      },
+      uptimeSeconds: Math.round(process.uptime()),
     });
   });
 
@@ -923,7 +981,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         feedbackCompletedAt: z.string().optional(),
       });
 
-      const partialFeedback = feedbackSchema.parse(req.body);
+      const parsedFeedback = feedbackSchema.parse(req.body);
+      const partialFeedback = {
+        ...parsedFeedback,
+        updateEmail: parsedFeedback.updateEmail ?? undefined,
+      };
 
       console.log('[API] Partial feedback update for session:', sessionId, '- fields:', Object.keys(partialFeedback).join(', '));
 
@@ -947,15 +1009,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'No audio file provided' });
       }
 
+      const sttBody = (req as unknown as { body?: { sessionId?: string; userName?: string } }).body;
+      if (!sttBody?.sessionId) {
+        return res.status(400).json({ error: 'Missing sessionId' });
+      }
+      const session = await verifySessionToken(sttBody.sessionId, req as import('express').Request, res);
+      if (!session) return;
+
       const audioBuffer = req.file.buffer;
       const audioMime = req.file.mimetype || 'audio/webm';
       const audioExtension = AUDIO_EXTENSION_BY_MIME[audioMime] ?? 'webm';
       const audioFile = new NodeFile([audioBuffer], `recording.${audioExtension}`, { type: audioMime });
-      const sttBody = (req as unknown as { body?: { sessionId?: string; userName?: string } }).body;
       const sttStart = Date.now();
 
       const transcription = await openai.audio.transcriptions.create({
-        file: audioFile,
+        file: audioFile as any,
         model: 'whisper-1',
         language: 'fr',
       });
@@ -1028,122 +1096,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // PHASE 2 OPTIMIZATION: Streaming TTS endpoint
-  // Uses ElevenLabs streaming to send audio chunks as they're generated
+  // Kept for backward compatibility. The client waits for the complete Blob,
+  // so reuse the shared queued generator instead of bypassing load control.
   app.post('/api/text-to-speech/stream', ttsLimiter, async (req, res) => {
     try {
       console.log('[TTS Stream API] Request received:', { textLength: req.body.text?.length });
       const { text } = req.body;
 
-      if (!text) {
+      if (!text || typeof text !== 'string' || text.length > 2000) {
         return res.status(400).json({ error: 'No text provided' });
       }
-
-      // PHASE 1: Still check cache first for instant response
-      const textHash = crypto.createHash('md5').update(text).digest('hex');
-      if (ttsCache.has(textHash)) {
-        console.log('[TTS Stream API] Cache HIT - streaming cached audio:', textHash.substring(0, 8));
-        const cachedBuffer = ttsCache.get(textHash)!;
-        res.set('Content-Type', 'audio/mpeg');
-        res.set('X-Cache', 'HIT');
-        res.send(cachedBuffer);
-        return;
+      if (!req.body.sessionId) {
+        return res.status(400).json({ error: 'Missing sessionId' });
       }
+      const session = await verifySessionToken(req.body.sessionId, req, res);
+      if (!session) return;
 
-      console.log('[TTS Stream API] Cache MISS - streaming from ElevenLabs:', textHash.substring(0, 8));
-
-      const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-      const VOICE_ID = 'R8IjtpeRZsjoJfq1wwj3'; // Peter - nouveau workspace
-
-      if (!ELEVENLABS_API_KEY) {
-        console.error('[TTS Stream API] ElevenLabs API key not configured');
-        return res.status(500).json({ error: 'ElevenLabs API key not configured' });
-      }
-
-      console.log('[TTS Stream API] Calling ElevenLabs streaming API...');
-
-      // Call ElevenLabs with optimized settings for French diction quality
-      // Full text is sent in a single call to maintain consistent voice register
-      const response = await elevenLabsFetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
-        method: 'POST',
-        headers: {
-          'Accept': 'audio/mpeg',
-          'Content-Type': 'application/json',
-          'xi-api-key': ELEVENLABS_API_KEY
-        },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_multilingual_v2', // Best quality for French diction
-          voice_settings: {
-            stability: 0.75,
-            similarity_boost: 0.75,
-            style: 0.0,
-            use_speaker_boost: false  // Disabled — causes saturation/clipping on exclamations
-          },
-          optimize_streaming_latency: 3,
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[TTS Stream API] ElevenLabs API error:', response.status, errorText);
-        throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
-      }
-
-      // Set streaming headers
+      const audioBuffer = await generateTtsAudio(text, undefined, 'quality');
       res.set('Content-Type', 'audio/mpeg');
-      res.set('Transfer-Encoding', 'chunked');
-      res.set('X-Cache', 'MISS');
-
-      // Collect chunks for caching while streaming to client
-      const chunks: Buffer[] = [];
-
-      console.log('[TTS Stream API] Streaming audio chunks to client...');
-
-      // Stream response body to client
-      if (response.body) {
-        const reader = response.body.getReader();
-        let chunkCount = 0;
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            chunkCount++;
-            const chunk = Buffer.from(value);
-            chunks.push(chunk);
-
-            // Stream chunk to client immediately
-            res.write(chunk);
-
-            if (chunkCount === 1) {
-              console.log('[TTS Stream API] First audio chunk sent (', chunk.length, 'bytes)');
-            }
-          }
-
-          console.log('[TTS Stream API] Stream complete -', chunkCount, 'chunks sent');
-        } catch (streamError) {
-          console.error('[TTS Stream API] Error during streaming:', streamError);
-          throw streamError;
-        }
-      }
-
-      // End the response
-      res.end();
-
-      // Cache the complete audio
-      const completeAudio = Buffer.concat(chunks);
-      if (completeAudio.byteLength > 0) {
-        // Implement LRU-style eviction if cache is full
-        if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
-          const firstKey = ttsCache.keys().next().value as string;
-          if (firstKey) ttsCache.delete(firstKey);
-          console.log('[TTS Stream API] Cache full - evicted oldest entry');
-        }
-        ttsCache.set(textHash, completeAudio);
-        console.log('[TTS Stream API] Audio cached. Size:', completeAudio.byteLength, 'bytes, Cache entries:', ttsCache.size);
-      }
-
+      res.send(audioBuffer);
     } catch (error) {
       console.error('[TTS Stream API] Error:', error);
       captureServerError(
@@ -1153,15 +1124,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { context: 'tts_stream' },
         (req.body?.userName as string | undefined) ?? null,
       );
-      if (!res.headersSent) {
-        res.status(500).json({
-          error: 'Speech generation failed',
-          details: error instanceof Error ? error.message : 'Unknown error'
-        });
-      } else {
-        // Headers already sent, just end the response
-        res.end();
-      }
+      const status = error instanceof QueueOverloadedError ? 503 : 500;
+      res.status(status).json({
+        error: 'Speech generation failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
@@ -1170,83 +1137,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[TTS API] Request received:', { textLength: req.body.text?.length });
       const { text } = req.body;
 
-      if (!text) {
+      if (!text || typeof text !== 'string' || text.length > 2000) {
         return res.status(400).json({ error: 'No text provided' });
       }
-
-      // PHASE 1 OPTIMIZATION: Check cache first
-      const textHash = crypto.createHash('md5').update(text).digest('hex');
-      if (ttsCache.has(textHash)) {
-        console.log('[TTS API] Cache HIT - returning cached audio for hash:', textHash.substring(0, 8));
-        const cachedBuffer = ttsCache.get(textHash)!;
-        res.set('Content-Type', 'audio/mpeg');
-        res.set('X-Cache', 'HIT'); // Debug header to confirm cache usage
-        return res.send(cachedBuffer);
+      if (!req.body.sessionId) {
+        return res.status(400).json({ error: 'Missing sessionId' });
       }
+      const session = await verifySessionToken(req.body.sessionId, req, res);
+      if (!session) return;
 
-      console.log('[TTS API] Cache MISS - generating new audio for hash:', textHash.substring(0, 8));
-
-      const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-      const VOICE_ID = 'R8IjtpeRZsjoJfq1wwj3'; // Peter - nouveau workspace
-
-      console.log('[TTS API] Using voice:', VOICE_ID);
-
-      if (!ELEVENLABS_API_KEY) {
-        console.error('[TTS API] ElevenLabs API key not configured');
-        return res.status(500).json({ error: 'ElevenLabs API key not configured' });
-      }
-
-      console.log('[TTS API] Calling ElevenLabs API...');
-      const response = await elevenLabsFetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`, {
-        method: 'POST',
-        headers: {
-          'Accept': 'audio/mpeg',
-          'Content-Type': 'application/json',
-          'xi-api-key': ELEVENLABS_API_KEY
-        },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_multilingual_v2', // Best quality for French diction
-          voice_settings: {
-            stability: 0.75,
-            similarity_boost: 0.75,
-            style: 0.0,
-            use_speaker_boost: false  // Disabled — causes saturation/clipping on exclamations
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[TTS API] ElevenLabs API error:', response.status, errorText);
-        throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
-      }
-
-      const audioBuffer = await response.arrayBuffer();
-
-      // MOBILE FIX: Vérifier que l'audio n'est pas vide
-      if (audioBuffer.byteLength === 0) {
-        console.error('[TTS API] Received empty audio from ElevenLabs');
-        throw new Error('Received empty audio from ElevenLabs');
-      }
-
-      const audioBufferNode = Buffer.from(audioBuffer);
-
-      // PHASE 1 OPTIMIZATION: Store in cache
-      // Implement LRU-style eviction if cache is full
-      if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
-        // Remove oldest entry (first key in Map)
-        const firstKey = ttsCache.keys().next().value as string;
-        if (firstKey) ttsCache.delete(firstKey);
-        console.log('[TTS API] Cache full - evicted oldest entry');
-      }
-      ttsCache.set(textHash, audioBufferNode);
-      console.log('[TTS API] Audio cached successfully. Cache size:', ttsCache.size);
-
-      console.log('[TTS API] Audio generated successfully, size:', audioBuffer.byteLength, 'bytes');
+      const audioBuffer = await generateTtsAudio(text, undefined, 'quality');
       res.set('Content-Type', 'audio/mpeg');
-      res.set('X-Cache', 'MISS'); // Debug header to confirm cache usage
-      res.send(audioBufferNode);
+      res.send(audioBuffer);
     } catch (error) {
       console.error('[TTS API] Error generating speech:', error);
       captureServerError(
@@ -1256,7 +1158,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { context: 'tts_full' },
         (req.body?.userName as string | undefined) ?? null,
       );
-      res.status(500).json({
+      const status = error instanceof QueueOverloadedError ? 503 : 500;
+      res.status(status).json({
         error: 'Speech generation failed',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -1270,7 +1173,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Uses an ISOLATED EPHEMERAL THREAD (not the session's main thread) so that
   // the hidden resume prompt never pollutes the live conversation history.
   // The ephemeral thread is created, used, and never referenced again.
-  async function schedulePregenResume(sessionId: string): Promise<void> {
+  async function generatePregenResume(sessionId: string): Promise<void> {
     const pregenStart = Date.now();
     try {
       const session = await storage.getSession(sessionId);
@@ -1330,7 +1233,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Resolve and store the audio Buffer directly — NOT a ttsRequestStore token.
       // This decouples pregen lifetime from TTS_REQUEST_TTL (60s). A fresh
       // ttsRequestStore entry is created only when the client calls GET /resume-token.
-      const audioBuffer = await generateTtsAudio(resumeText, undefined, 'quality');
+      const audioBuffer = await generateTtsAudio(resumeText, undefined, 'quality', 'background', true);
       const generatedAt = Date.now();
       // Guard against out-of-order completion: only store if this job is newer
       // than any currently stored entry (concurrent exchange spam edge case).
@@ -1352,6 +1255,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         session.userName,
       );
     } catch (err) {
+      if (err instanceof QueueOverloadedError) {
+        console.log('[Pregen Resume] Skipped because foreground TTS is waiting');
+        return;
+      }
       captureServerTiming(
         sessionId,
         {
@@ -1373,6 +1280,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { context: 'schedule_pregen_resume' },
         sessionForName?.userName,
       );
+    }
+  }
+
+  async function schedulePregenResume(sessionId: string): Promise<void> {
+    try {
+      const ttsLoad = elevenLabsQueue.getStats();
+      if (activeChatStreams > 1 || ttsLoad.active > 0 || ttsLoad.queued > 0) {
+        console.log('[Pregen Resume] Skipped while foreground AI work is active');
+        return;
+      }
+      await resumePregenQueue.run(
+        () => generatePregenResume(sessionId),
+        { priority: 'background', dropIfBusy: true },
+      );
+    } catch (error) {
+      if (error instanceof QueueOverloadedError) {
+        console.log('[Pregen Resume] Skipped while AI services are busy');
+        return;
+      }
+      throw error;
     }
   }
 
@@ -1528,6 +1455,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PHASE 2 OPTIMIZATION: Streaming chat endpoint with sentence-by-sentence delivery
   // This allows TTS to start generating audio while LLM is still responding
   app.post('/api/chat/stream', async (req, res) => {
+    let countedChatStream = false;
     try {
       console.log('[Chat Stream API] Request received:', {
         sessionId: req.body.sessionId,
@@ -1546,6 +1474,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const session = await verifySessionToken(sessionId, req, res);
       if (!session) return;
+
+      if (activeChatStreams >= MAX_CONCURRENT_CHAT_STREAMS) {
+        res.set('Retry-After', '3');
+        return res.status(503).json({ error: 'Serveur momentanément occupé. Réessaie dans quelques secondes.' });
+      }
+      activeChatStreams += 1;
+      countedChatStream = true;
 
       console.log('[Chat Stream API] Session found:', { sessionId, foundClues: session.foundClues });
 
@@ -1674,10 +1609,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let phase2Dispatched = false;               // true when any Phase 2 TTS call has been dispatched
       let phase2aDispatched = false;              // true when Phase 2a early TTS has fired
       let phase2aText = "";                       // text sent in Phase 2a (chained as previous_text for Phase 2b)
-      let phase2aSentenceCount = 0;               // number of sentences in Phase 2a (for merged count)
-      let phase2aResolved = false;                // true when Phase 2a TTS promise resolved successfully
-      let phase2aSettled = false;                 // true when Phase 2a TTS promise settled (success or failure)
-      let phase2aCancelled = false;               // true when Phase 2a SSE is suppressed for merging with 2b
       let phase2bBuffer: string[] = [];           // sentences accumulating after Phase 2a fires
       let phase2bStartIndex = -1;                 // SSE index of first Phase 2b sentence
 
@@ -1745,7 +1676,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const count = sentences.length;
         phase2aDispatched = true;
         phase2aText = combined;
-        phase2aSentenceCount = count;
         phase2Dispatched = true;
 
         console.log(`[Chat Stream API] Phase 2a TTS (${dispatchedMidStream ? 'MID-STREAM' : 'AT-COMPLETION'}): ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
@@ -1772,13 +1702,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
               dispatched_mid_stream: dispatchedMidStream,
               exchange_index: serverExchangeCount,
             }, userName);
-            phase2aResolved = true;
-            phase2aSettled = true;
-            if (phase2aCancelled) {
-              // Phase 2a was merged with 2b — discard this result silently
-              console.log(`[Chat Stream API] Phase 2a TTS resolved but cancelled (merged with 2b) — discarding`);
-              return;
-            }
             const audioToken = crypto.randomUUID();
             ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now(), sessionId, userName });
             console.log(`[Chat Stream API] Phase 2a TTS ready (index=${startIndex}, count=${count}), token:`, audioToken);
@@ -1793,7 +1716,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           })
           .catch((ttsErr) => {
-            phase2aSettled = true;
             captureServerTiming(sessionId, {
               step: 'elevenlabs_phase2a',
               duration_ms: Date.now() - phase2aT0,
@@ -1803,7 +1725,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }, userName);
             console.error('[Chat Stream API] Phase 2a TTS failed:', ttsErr);
             captureServerError('/api/chat/stream', sessionId, ttsErr, { context: 'phase2a_tts' }, userName);
-            if (!phase2aCancelled && !res.writableEnded) {
+            if (!res.writableEnded) {
               for (let i = startIndex; i < startIndex + count; i++) {
                 res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
               }
@@ -1986,54 +1908,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           // Dispatch Phase 2b for any sentences accumulated after Phase 2a fired.
-          // If Phase 2b is very short (< 80 chars) AND Phase 2a hasn't settled yet (success or failure),
-          // merge them into a single TTS call to avoid prosodic discontinuity.
+          // Do not regenerate a merged 2a+2b block: the earlier request may
+          // already be running, which wastes ElevenLabs capacity under load.
           if (phase2bBuffer.length > 0) {
-            const phase2bText = phase2bBuffer.join(' ');
-            const shouldMerge = phase2bText.length < 80 && phase2aDispatched && !phase2aSettled;
-            if (shouldMerge) {
-              phase2aCancelled = true;
-              const mergedText = [phase2aText, phase2bText].filter(Boolean).join(' ');
-              const mergedCount = phase2aSentenceCount + phase2bBuffer.length;
-              console.log(`[Chat Stream API] Phase 2a+2b MERGED (2b was ${phase2bText.length} chars, 2a unresolved): "${mergedText.substring(0, 80)}..." (${mergedCount} sentences)`);
-              const mergedT0 = Date.now();
-              const ttsPromise = generateTtsAudio(mergedText, phase1Text || undefined, 'quality')
-                .then((audioBuffer) => {
-                  captureServerTiming(sessionId, {
-                    step: 'elevenlabs_phase2_merged',
-                    duration_ms: Date.now() - mergedT0,
-                    success: true,
-                    endpoint: '/api/chat/stream',
-                    chars: mergedText.length,
-                    sentence_count: mergedCount,
-                    exchange_index: serverExchangeCount,
-                  }, userName);
-                  const audioToken = crypto.randomUUID();
-                  ttsRequestStore.set(audioToken, { promise: Promise.resolve(audioBuffer), createdAt: Date.now(), sessionId, userName });
-                  console.log(`[Chat Stream API] Phase 2a+2b merged TTS ready (index=${phase2StartIndex}, count=${mergedCount}), token:`, audioToken);
-                  if (!res.writableEnded) {
-                    res.write(`data: ${JSON.stringify({
-                      type: 'sentence_audio',
-                      index: phase2StartIndex,
-                      audioToken,
-                      count: mergedCount,
-                      phase: 'phase2',
-                    })}\n\n`);
-                  }
-                })
-                .catch((ttsErr) => {
-                  console.error('[Chat Stream API] Phase 2a+2b merged TTS failed:', ttsErr);
-                  captureServerError('/api/chat/stream', sessionId, ttsErr, { context: 'phase2_merged_tts' }, userName);
-                  if (!res.writableEnded) {
-                    for (let i = phase2StartIndex; i < phase2StartIndex + mergedCount; i++) {
-                      res.write(`data: ${JSON.stringify({ type: 'sentence_audio_error', index: i })}\n\n`);
-                    }
-                  }
-                });
-              sentenceTtsPromises.push(ttsPromise);
-            } else {
-              dispatchPhase2bTts(phase2bBuffer, phase2bStartIndex);
-            }
+            dispatchPhase2bTts(phase2bBuffer, phase2bStartIndex);
           }
         }
 
@@ -2156,6 +2034,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: errorMessage
       })}\n\n`);
       res.end();
+    } finally {
+      if (countedChatStream) {
+        activeChatStreams = Math.max(0, activeChatStreams - 1);
+      }
     }
   });
 

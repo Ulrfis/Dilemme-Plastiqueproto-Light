@@ -35,7 +35,7 @@ export class DatabaseStorage implements IStorage {
   async createSession(insertSession: InsertTutorialSessionWithToken): Promise<TutorialSession> {
     const [session] = await db
       .insert(tutorialSessions)
-      .values(insertSession)
+      .values(insertSession as typeof tutorialSessions.$inferInsert)
       .returning();
 
     googleSheetsSync.upsertSessionRow(session).catch(console.error);
@@ -85,7 +85,7 @@ export class DatabaseStorage implements IStorage {
   async addMessage(insertMessage: InsertConversationMessage): Promise<ConversationMessage> {
     const [message] = await db
       .insert(conversationMessages)
-      .values(insertMessage)
+      .values(insertMessage as typeof conversationMessages.$inferInsert)
       .returning();
 
     return message;

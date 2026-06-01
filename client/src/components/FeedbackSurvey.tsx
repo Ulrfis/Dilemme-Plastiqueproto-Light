@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ChevronLeft, ChevronRight, Check, X, Share2, ExternalLink, Mic, MicOff, Loader2 } from "lucide-react";
+import { readStoredSessionFlow } from "@/lib/sessionFlowStorage";
 
 interface FeedbackSurveyProps {
   sessionId: string;
@@ -149,11 +150,15 @@ function YesNoButtons({ value, onChange }: { value: boolean | undefined; onChang
 function VoiceTextInput({ 
   value, 
   onChange, 
-  placeholder 
+  placeholder,
+  sessionId,
+  userName,
 }: { 
   value: string; 
   onChange: (v: string) => void; 
   placeholder: string;
+  sessionId: string;
+  userName?: string;
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -198,9 +203,13 @@ function VoiceTextInput({
     try {
       const formData = new FormData();
       formData.append('audio', audioBlob, 'audio.webm');
+      formData.append('sessionId', sessionId);
+      if (userName) formData.append('userName', userName);
+      const storedSession = readStoredSessionFlow();
 
       const response = await fetch('/api/speech-to-text', {
         method: 'POST',
+        headers: storedSession?.accessToken ? { 'X-Session-Token': storedSession.accessToken } : undefined,
         body: formData,
       });
 
@@ -468,6 +477,8 @@ export default function FeedbackSurvey({ sessionId, userName, onClose, onComplet
                     value={(feedbackData[question.field] as string) || ''}
                     onChange={(v) => updateField(question.field, v)}
                     placeholder="Partage tes idées... (optionnel)"
+                    sessionId={sessionId}
+                    userName={userName}
                   />
                 )}
 

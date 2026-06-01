@@ -3,6 +3,33 @@
 > **Contexte** : 25 étudiants ont utilisé l'app en même temps et ça a crashé.  
 > Ce document explique pourquoi, ce qui doit être corrigé dans le code, et comment déployer sur un serveur auto-hébergé via Coolify.
 
+## Mise à jour après audit du code
+
+Le premier plan surestimait l'impact des connexions SSE et proposait trop tôt un
+cluster PM2 avec sticky sessions. Les blocages les plus immédiats sont applicatifs :
+
+1. Les quotas HTTP étaient calculés par IP. Une classe derrière le même réseau
+   public partage donc artificiellement les limites `200/15 min` et `60/15 min`.
+2. Deepgram limitait à trois WebSockets par IP. Sur un réseau scolaire ou derrière
+   un reverse proxy, le quatrième élève pouvait être refusé même avec une session valide.
+3. Les appels ElevenLabs lancés par les réponses, les accueils et les reprises
+   n'étaient pas régulés par une file commune.
+4. La pré-génération de reprise ajoutait un appel OpenAI et un appel ElevenLabs
+   après chaque échange, y compris en période de charge.
+5. Une optimisation de fin de réponse pouvait régénérer un bloc audio fusionné
+   alors qu'un premier bloc ElevenLabs continuait déjà en parallèle.
+
+Les corrections implémentées utilisent désormais l'identité de session pour les
+quotas coûteux, limitent Deepgram à une connexion par session, plafonnent la
+concurrence ElevenLabs avec une file bornée et abandonnent les pré-générations de
+reprise optionnelles lorsque les services AI sont occupés.
+
+Pour le premier déploiement Coolify, utiliser **un seul processus Node.js** et
+mesurer `/api/health/load`. Le passage à plusieurs processus ou plusieurs
+conteneurs doit venir après externalisation des stores audio vers Redis ou vers
+un stockage partagé. Les sticky sessions seules restent fragiles pendant les
+redéploiements et n'assurent pas le partage du cache.
+
 ---
 
 ## 1. Pourquoi ça a crashé
@@ -19,90 +46,74 @@ Chaque échange avec Peter déclenche plusieurs appels API lourds en parallèle 
 
 ### Causes concrètes du crash
 
-**1. Limite de concurrence ElevenLabs**  
-Le plan ElevenLabs a une limite de requêtes simultanées (souvent 10-15 selon le tier). 75 appels en parallèle → les requêtes au-delà de la limite reçoivent des erreurs 429. Le serveur accumule les timeouts, les buffers audio restent en mémoire, la RAM monte.
+**1. Limite de concurrence ElevenLabs**
+Le niveau exact dépend de l'abonnement ElevenLabs. Sans file applicative, une
+classe peut néanmoins lancer plusieurs dizaines d'appels en rafale et provoquer
+des erreurs 429 ou des latences longues.
 
-**2. Saturation de l'event loop Node.js**  
-L'application tourne sur **un seul processus** (single-threaded). 25 streams SSE OpenAI ouverts en même temps saturent la boucle d'événements — les nouveaux appels attendent plusieurs centaines de ms avant d'être traités.
+**2. Limites IP incompatibles avec un réseau scolaire**
+Les élèves d'une même classe peuvent partager une IP publique. Les anciens
+quotas HTTP et la limite Deepgram par IP transformaient alors la classe entière
+en un seul client.
 
-**3. Mémoire des stores en RAM**  
-`ttsRequestStore`, `pregenResumeStore` et les buffers audio ElevenLabs sont tous en mémoire process. Sous charge, ça gonfle rapidement. Si le processus est tué par OOM (Out Of Memory), toutes les sessions perdent leur état instantanément.
+**3. Mémoire des stores en RAM**
+`ttsRequestStore`, `pregenResumeStore` et les buffers audio ElevenLabs sont en
+mémoire process. Ce n'est pas nécessairement la cause du premier crash, mais
+cela empêche de répliquer l'application sans stockage partagé.
 
-**4. Contraintes Replit**  
-Replit `autoscale` peut lancer plusieurs instances, mais les stores en mémoire ne sont **pas partagés** entre instances — un token audio généré par l'instance A est introuvable sur l'instance B.
+**4. Pré-générations optionnelles sous charge**
+Après chaque échange, une reprise était préparée avec OpenAI puis ElevenLabs,
+même si l'élève ne quittait jamais l'écran. Cette optimisation de confort doit
+s'effacer pendant une affluence.
 
 ---
 
-## 2. Corrections à apporter dans le code
+## 2. Corrections apportées dans le code
 
-Ces changements sont à implémenter en Build mode.
+### A. File de concurrence ElevenLabs
 
-### A. Limiteur de concurrence sur `/api/chat/stream`
+Tous les chemins TTS partagent une file bornée. Les réponses visibles sont
+prioritaires. La concurrence et la longueur maximale de file sont configurables :
 
-Autoriser maximum 10 streams OpenAI simultanés. Les suivants reçoivent une erreur 503 claire (pas un timeout de 30s).
-
-```typescript
-// server/routes.ts — à ajouter en haut du fichier
-let activeStreams = 0;
-const MAX_CONCURRENT_STREAMS = 10;
-
-// Dans le handler /api/chat/stream :
-if (activeStreams >= MAX_CONCURRENT_STREAMS) {
-  return res.status(503).json({
-    error: 'Serveur momentanément occupé. Réessaie dans quelques secondes.'
-  });
-}
-activeStreams++;
-// ... traitement ...
-// Dans finally :
-activeStreams--;
+```env
+ELEVENLABS_MAX_CONCURRENT=5
+ELEVENLABS_MAX_QUEUED=100
 ```
 
-### B. Réduire le TTL des buffers pregenResumeStore
+### B. Délestage des reprises optionnelles
 
-Le TTL actuel est 5 minutes. Sous charge avec 25 sessions, c'est beaucoup de RAM. Ramener à 2 minutes.
+Une seule pré-génération de reprise peut s'exécuter à la fois. Si OpenAI ou
+ElevenLabs sont déjà sollicités, cette tâche de confort est abandonnée.
 
-```typescript
-// server/routes.ts
-const PREGEN_RESUME_TTL_MS = 2 * 60 * 1000; // 2 min au lieu de 5
-```
+### C. Admission OpenAI et état de charge
 
-### C. Route `/api/health` avec état de charge
+Les streams OpenAI possèdent un plafond configurable avec
+`OPENAI_MAX_CONCURRENT_STREAMS=50`. L'endpoint admin `GET /api/health/load`
+expose le nombre de streams actifs, la file ElevenLabs, les stores RAM et la
+mémoire du processus.
 
-```typescript
-app.get('/api/health', (req, res) => {
-  const mem = process.memoryUsage();
-  res.json({
-    status: 'ok',
-    activeStreams,
-    ttsRequestStoreSize: ttsRequestStore.size,
-    pregenResumeStoreSize: pregenResumeStore.size,
-    ttsCacheSize: ttsCache.size,
-    memory: {
-      heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
-      heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
-      rssMB: Math.round(mem.rss / 1024 / 1024),
-    },
-    uptime: Math.round(process.uptime()),
-  });
-});
-```
+### D. Quotas par session
+
+Les routes Whisper et TTS vérifient le token de session. Les quotas coûteux sont
+attribués à cette session lorsqu'elle est disponible. Deepgram autorise une
+connexion WebSocket active par session, avec un garde-fou global par processus.
 
 ---
 
 ## 3. Infrastructure requise pour Coolify
 
-### Serveur recommandé
+### Dimensionnement initial à valider sous charge
 
-| Critère | Minimum (50 users) | Confortable (100 users) |
-|---|---|---|
-| CPU | 4 cœurs | 8 cœurs |
-| RAM | 8 GB | 16 GB |
-| OS | Ubuntu 22.04 LTS | Ubuntu 22.04 LTS |
-| Stockage | 20 GB SSD | 40 GB SSD |
-| Réseau | 100 Mbit/s | 1 Gbit/s |
+| Critère | Point de départ staging |
+|---|---|
+| CPU | 4 cœurs |
+| RAM | 8 GB |
+| OS | Ubuntu LTS supporté par Coolify |
+| Stockage | 20 GB SSD |
+| Réseau | 100 Mbit/s |
 
-Exemples de serveurs compatibles : Hetzner CX32 (~12€/mois), OVH VPS Comfort, Infomaniak VPS-2.
+Ce n'est pas une garantie de capacité. Valider avec des tests à 10, 25 puis 50
+sessions et observer `/api/health/load` avant d'augmenter ou réduire la machine.
 
 ### Logiciels nécessaires
 
@@ -149,20 +160,14 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# PM2 pour le mode cluster multi-cœurs
-RUN npm install -g pm2
-
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 5000
 
-# 4 instances = 4 cœurs utilisés = capacité ×4
-CMD ["pm2-runtime", "start", "dist/index.js", \
-     "--name", "dilemme", \
-     "--instances", "4", \
-     "--exec-mode", "cluster"]
+# Commencer avec un seul processus tant que les stores audio sont en RAM.
+CMD ["node", "dist/index.js"]
 ```
 
 Fichier `.dockerignore` :
@@ -228,18 +233,19 @@ DATABASE_URL=postgresql://... npx drizzle-kit push
 
 ---
 
-### Étape 6 — Sticky sessions (obligatoire avec le mode cluster)
+### Étape 6 — Dimensionner avec les métriques applicatives
 
-Avec 4 processus Node.js, les stores en mémoire (`ttsRequestStore`, `pregenResumeStore`) ne sont pas partagés. Un token audio généré par le processus #2 serait introuvable si la requête suivante arrive sur le processus #3.
+Configurer d'abord un seul processus Node.js. Les réglages principaux sont :
 
-**Solution : sticky sessions** — chaque navigateur étudiant reste épinglé au même processus.
-
-Dans Coolify → **Advanced** → **Labels** (Traefik), ajouter :
-
+```env
+ELEVENLABS_MAX_CONCURRENT=5
+ELEVENLABS_MAX_QUEUED=100
+OPENAI_MAX_CONCURRENT_STREAMS=50
 ```
-traefik.http.services.dilemme.loadbalancer.sticky.cookie=true
-traefik.http.services.dilemme.loadbalancer.sticky.cookie.name=dilemme_node
-```
+
+Adapter `ELEVENLABS_MAX_CONCURRENT` au niveau de concurrence réellement autorisé
+par l'abonnement ElevenLabs. Vérifier ensuite la file et la mémoire avec
+`GET /api/health/load` accompagné du header `x-admin-token`.
 
 ---
 
@@ -265,20 +271,20 @@ Durée typique : 2-3 minutes au premier build, ~1 minute pour les suivants.
 # Sur le serveur, vérifier que le conteneur tourne
 docker ps
 
-# Vérifier les logs PM2 dans le conteneur
-docker exec -it <container_id> pm2 logs
+# Vérifier les logs applicatifs
+docker logs <container_id>
 
-# Tester le health check
-curl https://dilemme.tonecole.ch/api/health
+# Tester l'état de charge
+curl -H "x-admin-token: $ADMIN_TOKEN" https://dilemme.tonecole.ch/api/health/load
 ```
 
 Résultat attendu :
 ```json
 {
-  "status": "ok",
-  "activeStreams": 0,
-  "ttsRequestStoreSize": 0,
-  "pregenResumeStoreSize": 0,
+  "activeChatStreams": 0,
+  "maxConcurrentChatStreams": 50,
+  "elevenlabs": { "active": 0, "queued": 0, "maxConcurrent": 5 },
+  "stores": { "ttsRequests": 0, "pregenResume": 0, "ttsCache": 0 },
   "memory": { "heapUsedMB": 120, "heapTotalMB": 200 }
 }
 ```
@@ -290,12 +296,12 @@ Résultat attendu :
 ```
 Replit (actuel)                    Ton serveur Coolify
 ────────────────────────           ────────────────────────────────────
-1 processus Node.js                4 processus Node.js (PM2 cluster)
+1 processus Node.js                1 processus Node.js mesuré
 ~2 GB RAM disponible               8 GB RAM dédiés
 CPU partagé (burst)                4 cœurs dédiés
-Stores mémoire non partagés        Sticky sessions → même process
+Stores mémoire non partagés        Stores RAM assumés sur une instance
 Limite Replit autoscale            Aucune limite artificielle
-~15 users simultanés max           ~50 users confortablement
+Capacité non mesurée               Capacité validée par tests de charge
 Redéploiement manuel               Redéploiement auto à chaque git push
 HTTPS géré par Replit              HTTPS Let's Encrypt via Traefik
 ```
@@ -307,16 +313,16 @@ HTTPS géré par Replit              HTTPS Let's Encrypt via Traefik
 ### Checklist de migration
 
 - [ ] Dockerfile et .dockerignore créés dans le repo
-- [ ] Correction du limiteur de concurrence streams (serveur/routes.ts)
-- [ ] Route `/api/health` ajoutée
+- [x] File bornée ElevenLabs et délestage des reprises optionnelles
+- [x] Quotas coûteux calculés par session et Deepgram limité par session
+- [x] Route admin `/api/health/load` ajoutée
 - [ ] Serveur provisionné et Coolify installé
 - [ ] Repo Git connecté à Coolify
 - [ ] Toutes les variables d'environnement configurées
 - [ ] Base de données migrée ou Neon gardé
 - [ ] Domaine configuré + HTTPS vérifié
-- [ ] Sticky sessions activées (labels Traefik)
 - [ ] Test de charge : simuler 10 puis 25 puis 50 connexions simultanées
-- [ ] Health check `/api/health` répond correctement
+- [ ] Health check `/api/health/load` répond correctement avec `x-admin-token`
 
 ### Maintenir les deux en parallèle pendant la transition
 
@@ -326,12 +332,14 @@ Pendant la migration, tu peux garder Replit actif en production et tester Coolif
 
 ## 7. Pour aller plus loin (si > 50 users)
 
-Si tu dépasses 50 utilisateurs simultanés régulièrement, la prochaine étape est de **sortir les stores de la mémoire process** vers Redis :
+Avant de lancer plusieurs processus ou plusieurs conteneurs, la prochaine étape est de **sortir les stores de la mémoire process** vers Redis :
 
 - `ttsRequestStore` → Redis avec TTL automatique
 - `pregenResumeStore` → Redis avec TTL automatique
 - `ttsCache` → Redis avec TTL automatique
 
-Avec Redis, tu peux lancer **autant de conteneurs que tu veux** sans sticky sessions — chaque processus lit et écrit dans le même store partagé. Coolify permet d'ajouter un service Redis en un clic (**New Resource** → **Redis**).
+Avec Redis, plusieurs processus peuvent lire et écrire dans le même store partagé.
+Il faut ensuite valider le comportement sous charge avant d'augmenter le nombre
+de conteneurs. Coolify permet d'ajouter un service Redis (**New Resource** → **Redis**).
 
 Cette évolution est une tâche de refactoring estimée à ~2-3h.

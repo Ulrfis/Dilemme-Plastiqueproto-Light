@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useDeepgramTranscription } from './useDeepgramTranscription';
 import { captureEvent } from '@/App';
+import { readStoredSessionFlow } from '@/lib/sessionFlowStorage';
 
 export type AudioState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
 
@@ -476,11 +477,15 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         try {
           const formData = new FormData();
           formData.append('audio', audioBlob, 'recording.webm');
+          const storedSession = readStoredSessionFlow();
+          if (storedSession?.sessionId) formData.append('sessionId', storedSession.sessionId);
+          if (storedSession?.userName) formData.append('userName', storedSession.userName);
 
           console.log('[useVoiceInteraction] Sending audio to speech-to-text API...');
           const whisperStart = Date.now();
           const response = await fetch('/api/speech-to-text', {
             method: 'POST',
+            headers: storedSession?.accessToken ? { 'X-Session-Token': storedSession.accessToken } : undefined,
             body: formData,
           });
 

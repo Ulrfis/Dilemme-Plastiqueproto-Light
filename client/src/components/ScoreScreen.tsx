@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import type { TutorialSession } from "@shared/schema";
 import FeedbackSurvey from "@/components/FeedbackSurvey";
+import { readStoredSessionFlow } from "@/lib/sessionFlowStorage";
 
 interface ScoreScreenProps {
   score: number;
@@ -92,9 +93,13 @@ export default function ScoreScreen({
           const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
           const formData = new FormData();
           formData.append('audio', audioBlob, 'synthesis.webm');
+          formData.append('sessionId', sessionId);
+          formData.append('userName', userName);
+          const storedSession = readStoredSessionFlow();
 
           const response = await fetch('/api/speech-to-text', {
             method: 'POST',
+            headers: storedSession?.accessToken ? { 'X-Session-Token': storedSession.accessToken } : undefined,
             body: formData,
           });
 

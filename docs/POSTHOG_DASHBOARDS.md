@@ -99,7 +99,7 @@ GROUP BY properties.step
 |-------|----------------|
 | `server_pipeline_timing` | `step`, `duration_ms`, `success`, `exchange_index?`, `chars?` |
 
-**Steps:** `whisper_stt`, `welcome_pregen_tts`, `resume_pregen_total`, `openai_first_delta`, `openai_first_sentence`, `openai_run_complete`, `elevenlabs_phase1`, `elevenlabs_phase2a`, `elevenlabs_phase2b`, `elevenlabs_phase2_merged`, `chat_stream_total`
+**Steps:** `whisper_stt`, `welcome_pregen_tts`, `resume_pregen_total`, `openai_first_delta`, `openai_first_sentence`, `openai_run_complete`, `elevenlabs_phase1`, `elevenlabs_phase2a`, `elevenlabs_phase2b`, `chat_stream_total`
 
 ---
 

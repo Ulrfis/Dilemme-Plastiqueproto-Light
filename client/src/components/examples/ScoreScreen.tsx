@@ -7,6 +7,7 @@ export default function ScoreScreenExample() {
       totalClues={4}
       foundClues={['ADN', 'bébé', 'penseur de Rodin']}
       userName="Alice"
+      sessionId="example-session"
       onReplay={() => console.log('Replay clicked')}
       onNextLevel={() => console.log('Next level clicked')}
     />
