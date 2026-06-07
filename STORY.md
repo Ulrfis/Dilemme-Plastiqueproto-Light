@@ -135,6 +135,13 @@ déterministes et contrôlés par l'application.
 script de charge prêt pour staging. Le test réel à 25 reste une étape
 opérationnelle avant la prochaine séance.
 
+**Follow-up du 7 juin 2026**: La première version du détecteur stabilisé était
+trop prudente : elle rejetait `traité du plastique` et une occurrence de
+`femme` placée après `puis`. La règle a été précisée pour toujours reconnaître
+les noms explicites des indices et conserver tous les nouveaux indices trouvés
+dans un même message. Les formulations exactes signalées sont maintenant des
+tests de non-régression.
+
 ---
 
 ### [2026-05-02] — Peter reprend la conversation au retour sur /tutorial 🔷

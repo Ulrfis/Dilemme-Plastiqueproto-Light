@@ -16,7 +16,21 @@ export const TARGET_CLUES: TargetClue[] = [
   },
   {
     keyword: "Traité plastique",
-    strongVariants: ["traité plastique", "traite plastique", "traité sur le plastique", "traite sur le plastique", "accord plastique", "convention plastique", "plastic treaty", "plastique treaty"],
+    strongVariants: [
+      "traité plastique",
+      "traite plastique",
+      "traité du plastique",
+      "traite du plastique",
+      "traité de plastique",
+      "traite de plastique",
+      "traité sur le plastique",
+      "traite sur le plastique",
+      "accord plastique",
+      "accord sur le plastique",
+      "convention plastique",
+      "plastic treaty",
+      "plastique treaty",
+    ],
   },
   {
     keyword: "Végétation",
@@ -25,13 +39,11 @@ export const TARGET_CLUES: TargetClue[] = [
   },
   {
     keyword: "Homme",
-    strongVariants: ["penseur", "rodin", "sculpture homme", "figure masculine", "personnage masculin"],
-    weakVariants: ["homme"],
+    strongVariants: ["homme", "penseur", "rodin", "sculpture homme", "figure masculine", "personnage masculin"],
   },
   {
     keyword: "Femme",
-    strongVariants: ["figure féminine", "figure feminine", "personnage féminin", "personnage feminin", "sculpture femme", "terre-mère", "terre mere", "mère nature", "mere nature"],
-    weakVariants: ["femme"],
+    strongVariants: ["femme", "figure féminine", "figure feminine", "personnage féminin", "personnage feminin", "sculpture femme", "terre-mère", "terre mere", "mère nature", "mere nature"],
   },
 ];
 
@@ -41,7 +53,7 @@ export function normalizeClueText(text: string): string {
     .replace(/\p{Diacritic}/gu, "")
     .toLocaleLowerCase("fr")
     .replace(/[’']/g, " ")
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

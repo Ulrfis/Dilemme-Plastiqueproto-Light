@@ -6,6 +6,21 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2.7.1] - 2026-06-07
+
+### Corrigé — Validation exhaustive des indices prononcés
+
+- `traité du plastique`, `traité de plastique` et `accord sur le plastique`
+  sont désormais reconnus comme `Traité plastique`.
+- Les noms explicites `homme` et `femme` sont reconnus quelle que soit leur
+  position dans la phrase.
+- Tous les nouveaux indices prononcés dans un même message sont détectés et
+  ajoutés ensemble.
+- Ajout de tests reprenant les formulations exactes de la session signalée et
+  un message contenant trois nouveaux indices simultanément.
+
+---
+
 ## [2.7.0] - 2026-06-07
 
 ### Corrigé — Intégrité des indices, concurrence et reprise après erreur
