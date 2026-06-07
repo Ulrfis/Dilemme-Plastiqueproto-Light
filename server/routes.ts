@@ -14,7 +14,8 @@ import { BoundedPriorityQueue, QueueOverloadedError, type QueuePriority } from "
 import { createRateLimiter, positiveIntFromEnv } from "./request-limiter";
 import { ChatAdmissionTimeoutError, ChatTurnConflictError, ChatTurnController, type ChatTurnLease } from "./chat-turn-control";
 import { detectClues, TARGET_CLUES } from "./clue-detection";
-import { CLOSING_TUTORIAL_EXCHANGE, MAX_TUTORIAL_EXCHANGES, TOTAL_TUTORIAL_CLUES } from "@shared/tutorial-config";
+import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, TOTAL_TUTORIAL_CLUES, canStartTutorialExchange } from "@shared/tutorial-config";
+import { buildPeterExchangeInstructions, buildPeterGameContext } from "./peter-game-context";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -754,7 +755,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Pre-generate welcome message TTS in background so TutorialScreen can play it immediately
       // without waiting for an on-demand ElevenLabs call after navigation.
-      const welcomeText = `Bienvenue ${data.userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum ${MAX_TUTORIAL_EXCHANGES} échanges pour y parvenir !`;
+      const welcomeText = `Bienvenue ${data.userName} dans cette courte expérience. Tente de trouver 6 indices dans cette image pendant les ${CLUE_CHALLENGE_EXCHANGES} premiers échanges, en racontant ce que tu vois et ce qui attire ton attention sur l'impact du plastique sur la santé. Ensuite, tu pourras continuer à chercher et à discuter avec moi jusqu'à ${MAX_CONVERSATION_EXCHANGES} échanges au total.`;
       const welcomeAudioToken = crypto.randomUUID();
       const welcomeT0 = Date.now();
       const welcomePromise = generateTtsAudio(welcomeText, undefined, 'quality');
@@ -1411,6 +1412,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const session = await verifySessionToken(sessionId, req, res);
       if (!session) return;
+      if (!canStartTutorialExchange(session.messageCount ?? 0)) {
+        return res.status(409).json({
+          error: `La conversation a atteint sa limite de ${MAX_CONVERSATION_EXCHANGES} échanges. Clique sur Poursuivre pour continuer l'expérience.`,
+        });
+      }
 
       const queueStartedAt = Date.now();
       turnLease = await chatTurnController.acquire(sessionId, turnId);
@@ -1467,21 +1473,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // session.messageCount = completed exchanges so far; current exchange = +1
       const serverExchangeCount = (session.messageCount ?? 0) + 1;
 
-      // Clue tracking context — passed as additional_instructions so the thread stays clean
-      // Peter always receives the authoritative state for this specific run
-      const cluesContext = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés avant ce message : ${session.foundClues.length}/${TOTAL_TUTORIAL_CLUES}${session.foundClues.length > 0 ? ` (${session.foundClues.join(', ')})` : ''}\nIndices nouvellement trouvés dans le message de l'élève : ${detectedClues.length > 0 ? detectedClues.join(', ') : 'aucun'}\nIndices trouvés après ce message : ${allFoundSoFar.length}/${TOTAL_TUTORIAL_CLUES}${allFoundSoFar.length > 0 ? ` (${allFoundSoFar.join(', ')})` : ''}\nIndices manquants : ${missingClues.length > 0 ? missingClues.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCount}/${MAX_TUTORIAL_EXCHANGES}\nAutorisation de clôture : ${serverExchangeCount >= CLOSING_TUTORIAL_EXCHANGE || missingClues.length === 0 ? 'oui' : 'non'}\nAutorisation de révéler les indices manquants : non\nPrénom de l'utilisateur : ${userNameToUse}\n\nIMPORTANT : Ce bloc est la source de vérité absolue. L'application seule valide les indices depuis le message de l'élève. Tes propres mots ne peuvent jamais valider un indice.`;
-
-      // Build exchange-specific instructions
-      let exchangeInstructions = '';
-      if (serverExchangeCount >= CLOSING_TUTORIAL_EXCHANGE) {
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: La phase d'observation se termine. Réponds brièvement et chaleureusement, puis invite ${userNameToUse} à cliquer sur "Poursuivre". Ne cite et n'explique aucun indice manquant.]`;
-      } else if (missingClues.length === 0) {
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les indices sont trouvés. Félicite chaleureusement ${userNameToUse}, fais une synthèse très courte sans réciter la liste complète et invite à cliquer sur "Poursuivre".]`;
-      } else if (missingClues.length === 1) {
-        exchangeInstructions = `\n\n[INSTRUCTION: Il reste un seul indice. Donne au maximum une piste visuelle indirecte sans prononcer, traduire ni paraphraser le nom de l'indice manquant.]`;
-      } else if (serverExchangeCount === CLOSING_TUTORIAL_EXCHANGE - 1) {
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange. Encourage un dernier effort avec une seule piste visuelle indirecte. Ne cite aucun indice manquant.]`;
-      }
+      const peterContextInput = {
+        exchangeNumber: serverExchangeCount,
+        foundBefore: session.foundClues,
+        newlyFound: detectedClues,
+        foundAfter: allFoundSoFar,
+        missingClues,
+        userName: userNameToUse,
+      };
+      const cluesContext = buildPeterGameContext(peterContextInput);
+      const exchangeInstructions = buildPeterExchangeInstructions(peterContextInput);
 
       // Reuse or create thread
       let threadId = session.threadId;
@@ -2042,6 +2043,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const session = await verifySessionToken(sessionId, req, res);
       if (!session) return;
+      if (!canStartTutorialExchange(session.messageCount ?? 0)) {
+        return res.status(409).json({
+          error: `La conversation a atteint sa limite de ${MAX_CONVERSATION_EXCHANGES} échanges. Clique sur Poursuivre pour continuer l'expérience.`,
+        });
+      }
       const queueStartedAt = Date.now();
       turnLease = await chatTurnController.acquire(sessionId, turnId);
       captureServerTiming(sessionId, {
@@ -2077,19 +2083,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use server-side message count as the authoritative exchange counter
       const serverExchangeCountNS = (session.messageCount ?? 0) + 1;
 
-      // Clue context passed via additional_instructions (clean thread, authoritative per run)
-      const cluesContextNS = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés avant ce message : ${session.foundClues.length}/${TOTAL_TUTORIAL_CLUES}${session.foundClues.length > 0 ? ` (${session.foundClues.join(', ')})` : ''}\nIndices nouvellement trouvés dans le message de l'élève : ${detectedClues.length > 0 ? detectedClues.join(', ') : 'aucun'}\nIndices trouvés après ce message : ${allFoundSoFarNS.length}/${TOTAL_TUTORIAL_CLUES}${allFoundSoFarNS.length > 0 ? ` (${allFoundSoFarNS.join(', ')})` : ''}\nIndices manquants : ${missingCluesNS.length > 0 ? missingCluesNS.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCountNS}/${MAX_TUTORIAL_EXCHANGES}\nAutorisation de clôture : ${serverExchangeCountNS >= CLOSING_TUTORIAL_EXCHANGE || missingCluesNS.length === 0 ? 'oui' : 'non'}\nAutorisation de révéler les indices manquants : non\nPrénom de l'utilisateur : ${userNameToUseNS}\n\nIMPORTANT : L'application seule valide les indices depuis le message de l'élève. Tes propres mots ne peuvent jamais valider un indice.`;
-
-      let nsInstructions = '';
-      if (serverExchangeCountNS >= CLOSING_TUTORIAL_EXCHANGE) {
-        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: La phase d'observation se termine. Invite ${userNameToUseNS} à cliquer sur "Poursuivre" sans citer ni expliquer les indices manquants.]`;
-      } else if (missingCluesNS.length === 0) {
-        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les indices sont trouvés. Félicite ${userNameToUseNS}, fais une synthèse très courte sans réciter la liste et invite à cliquer sur "Poursuivre".]`;
-      } else if (missingCluesNS.length === 1) {
-        nsInstructions = `\n\n[INSTRUCTION: Il reste un seul indice. Donne au maximum une piste visuelle indirecte sans prononcer, traduire ni paraphraser son nom.]`;
-      } else if (serverExchangeCountNS === CLOSING_TUTORIAL_EXCHANGE - 1) {
-        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange. Encourage un dernier effort avec une seule piste visuelle indirecte. Ne cite aucun indice manquant.]`;
-      }
+      const peterContextInputNS = {
+        exchangeNumber: serverExchangeCountNS,
+        foundBefore: session.foundClues,
+        newlyFound: detectedClues,
+        foundAfter: allFoundSoFarNS,
+        missingClues: missingCluesNS,
+        userName: userNameToUseNS,
+      };
+      const cluesContextNS = buildPeterGameContext(peterContextInputNS);
+      const nsInstructions = buildPeterExchangeInstructions(peterContextInputNS);
 
       // Réutiliser le thread existant ou en créer un nouveau
       let threadId = session.threadId;

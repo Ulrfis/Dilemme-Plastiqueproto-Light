@@ -13,7 +13,7 @@ import { sendChatMessage, textToSpeech, sendChatMessageStreaming } from "@/lib/a
 import { useToast } from "@/hooks/use-toast";
 import { captureEvent } from "@/App";
 import { useSessionFlow } from "@/contexts/SessionFlowContext";
-import { CLOSING_TUTORIAL_EXCHANGE, MAX_TUTORIAL_EXCHANGES, MIN_CLUES_FOR_EARLY_EXIT, TOTAL_TUTORIAL_CLUES } from "@shared/tutorial-config";
+import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, MIN_CLUES_FOR_EARLY_EXIT, TOTAL_TUTORIAL_CLUES } from "@shared/tutorial-config";
 
 interface Message {
   id?: string;
@@ -56,7 +56,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [audioUnlocked, setAudioUnlockedLocal] = useState(() => sessionFlow.audioUnlocked);
   const [exchangeCount, setExchangeCountLocal] = useState(() => sessionFlow.exchangeCount);
   const [conversationEnded, setConversationEndedLocal] = useState(() => sessionFlow.conversationEnded);
-  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Il faut que tu trouves 6 indices dans cette image, en me racontant ce que tu vois, ce qui attire ton attention, en relation avec la problématique de l'impact du plastique sur la santé. Tu as maximum 15 échanges pour y parvenir !`);
+  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Tente de trouver 6 indices dans cette image pendant les 8 premiers échanges, en racontant ce que tu vois et ce qui attire ton attention sur l'impact du plastique sur la santé. Ensuite, tu pourras continuer à chercher et à discuter avec Peter jusqu'à 15 échanges au total.`);
   
   const setFoundClues = (clues: string[]) => {
     setFoundCluesLocal(clues);
@@ -90,8 +90,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     sessionFlow.setConversationEnded(ended);
   };
   
-  const MAX_EXCHANGES = MAX_TUTORIAL_EXCHANGES;
-  const CLOSING_EXCHANGE = CLOSING_TUTORIAL_EXCHANGE;
+  const CHALLENGE_EXCHANGES = CLUE_CHALLENGE_EXCHANGES;
+  const MAX_EXCHANGES = MAX_CONVERSATION_EXCHANGES;
   const TOTAL_CLUES = TOTAL_TUTORIAL_CLUES;
 
   const hasPlayedWelcome = useRef(false);
@@ -114,7 +114,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const { toast } = useToast();
 
   useEffect(() => {
-    if (conversationEnded && exchangeCount < CLOSING_EXCHANGE) {
+    if (conversationEnded && exchangeCount < MAX_EXCHANGES) {
       setConversationEnded(false);
     }
   }, [conversationEnded, exchangeCount]);
@@ -883,11 +883,20 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             fn();
           }
           
-          const maxExchangesReached = currentExchange >= CLOSING_EXCHANGE;
-          const allCluesNowFound = newFoundClues.length >= TOTAL_CLUES;
+          if (currentExchange === CHALLENGE_EXCHANGES) {
+            toast({
+              title: "Défi des 8 échanges terminé",
+              description: "Tu peux continuer à chercher les indices et discuter avec Peter jusqu'à 15 échanges.",
+            });
+            captureEvent("clue_challenge_completed", {
+              exchange: currentExchange,
+              clues_found: newFoundClues.length,
+              total_clues: TOTAL_CLUES,
+            });
+          }
 
-          if (maxExchangesReached) {
-            console.log('[TutorialScreen] Conversation ending:', { maxExchangesReached, allCluesNowFound, exchange: currentExchange, clues: newFoundClues.length });
+          if (currentExchange >= MAX_EXCHANGES) {
+            console.log('[TutorialScreen] Conversation ending at technical limit:', { exchange: currentExchange, clues: newFoundClues.length });
             setConversationEnded(true);
           }
         },
@@ -1008,8 +1017,20 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     setIsThinking(false);
     setMessages(prev => [...prev, makeMessage('assistant', result.response)]);
 
-    if (currentExchange >= CLOSING_EXCHANGE) {
-      console.log('[TutorialScreen] Closing exchange reached — ending conversation');
+    if (currentExchange === CHALLENGE_EXCHANGES) {
+      toast({
+        title: "Défi des 8 échanges terminé",
+        description: "Tu peux continuer à chercher les indices et discuter avec Peter jusqu'à 15 échanges.",
+      });
+      captureEvent("clue_challenge_completed", {
+        exchange: currentExchange,
+        clues_found: result.foundClues.length,
+        total_clues: TOTAL_CLUES,
+      });
+    }
+
+    if (currentExchange >= MAX_EXCHANGES) {
+      console.log('[TutorialScreen] Technical conversation limit reached — ending conversation');
       setConversationEnded(true);
     }
 
@@ -1243,6 +1264,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             textInput={textInput}
             onTextInputChange={setTextInput}
             exchangeCount={exchangeCount}
+            challengeExchanges={CHALLENGE_EXCHANGES}
             maxExchanges={MAX_EXCHANGES}
             audioLevel={audioLevel}
             liveTranscript={liveTranscript}
@@ -1300,6 +1322,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               textInput={textInput}
               onTextInputChange={setTextInput}
               exchangeCount={exchangeCount}
+              challengeExchanges={CHALLENGE_EXCHANGES}
               maxExchanges={MAX_EXCHANGES}
               audioLevel={audioLevel}
               liveTranscript={liveTranscript}
@@ -1348,6 +1371,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             onTextInputChange={setTextInput}
             liveTranscript={liveTranscript}
             exchangeCount={exchangeCount}
+            challengeExchanges={CHALLENGE_EXCHANGES}
             maxExchanges={MAX_EXCHANGES}
             audioLevel={audioLevel}
             isThinking={isThinking}

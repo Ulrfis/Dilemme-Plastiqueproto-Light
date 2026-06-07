@@ -142,6 +142,12 @@ les noms explicites des indices et conserver tous les nouveaux indices trouvés
 dans un même message. Les formulations exactes signalées sont maintenant des
 tests de non-régression.
 
+**Second follow-up du 7 juin 2026**: La contrainte des échanges a été séparée en
+deux intentions : huit échanges comme défi créatif pour trouver les indices,
+puis une conversation libre qui reste capable de valider de nouvelles
+découvertes jusqu'au quinzième échange inclus. Cette distinction est maintenant
+partagée par le serveur, l'interface et le prompt PeterBot v5.
+
 ---
 
 ### [2026-05-02] — Peter reprend la conversation au retour sur /tutorial 🔷

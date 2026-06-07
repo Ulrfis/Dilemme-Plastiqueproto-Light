@@ -9,6 +9,8 @@
     "start": "NODE_ENV=production node dist/index.js",
     "test": "node --experimental-strip-types --test server/**/*.test.ts",
     "test:load:class": "node scripts/load-test-class.mjs",
+    "openai:check-peter-prompt": "node scripts/update-peter-assistant-prompt.mjs --dry-run",
+    "openai:update-peter-prompt": "node scripts/update-peter-assistant-prompt.mjs",
     "check": "tsc",
     "db:push": "drizzle-kit push"
   },

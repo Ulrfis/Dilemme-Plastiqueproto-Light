@@ -124,15 +124,15 @@ Ce format supprime l'ambiguïté entre :
 - un indice que l'élève vient réellement de mentionner ;
 - un indice que Peter connaît mais ne doit pas révéler.
 
-### 4.4 Prompt PeterBot v4 complet et directement remplaçable
+### 4.4 Prompt PeterBot complet et directement remplaçable
 
-Le prompt v4 a été entièrement réécrit après inspection de l'image originale en
+Le prompt a été entièrement réécrit après inspection de l'image originale en
 haute résolution et vérification du contexte public de l'œuvre, de la place des
 Nations, du Palais des Nations et des négociations INC-5.2.
 
 Le document complet à copier dans les instructions de l'assistant est :
 
-[PROMPT_PETERBOT_V4_COMPLET.md](./PROMPT_PETERBOT_V4_COMPLET.md)
+[PROMPT_PETERBOT_V5_COMPLET.md](./PROMPT_PETERBOT_V5_COMPLET.md)
 
 Cette version complète ajoute notamment :
 
@@ -213,7 +213,7 @@ contexte demande explicitement de le faire.
 
 La description complète de l'image et du contexte n'est pas dupliquée ici afin
 d'éviter que deux versions divergent. Le fichier
-`docs/PROMPT_PETERBOT_V4_COMPLET.md` est la source de vérité versionnée du prompt
+`docs/PROMPT_PETERBOT_V5_COMPLET.md` est la source de vérité versionnée du prompt
 PeterBot.
 
 ### 4.5 Recommandation sur la révélation finale
@@ -307,8 +307,8 @@ Maintenir un verrou par `sessionId` :
 Définir une seule configuration partagée :
 
 ```text
-MAX_TUTORIAL_EXCHANGES
-CLOSING_TUTORIAL_EXCHANGE
+CLUE_CHALLENGE_EXCHANGES
+MAX_CONVERSATION_EXCHANGES
 MIN_CLUES_TO_ALLOW_EARLY_EXIT
 REVEAL_MISSING_CLUES_AT_END
 ```
@@ -667,7 +667,7 @@ Configurer des alertes :
 1. Supprimer la détection dans les réponses Peter.
 2. Ajouter et tester `Plastic Treaty`.
 3. Aligner la clôture prompt/code/client.
-4. Déployer le prompt PeterBot v4.
+4. Déployer le prompt PeterBot v5.
 5. Clarifier `Poursuivre` et le jeu suivant.
 
 ### Lot 2 — Timeouts et concurrence
@@ -738,3 +738,24 @@ La stabilisation peut être considérée terminée lorsque :
 
 La procédure progressive et le retour arrière sont détaillés dans
 [MIGRATION_OPENAI_RESPONSES_API.md](./MIGRATION_OPENAI_RESPONSES_API.md).
+
+## 13. Règle conversationnelle mise à jour au 7 juin 2026
+
+La limite pédagogique et la limite technique sont désormais distinctes :
+
+- échanges 1 à 8 : défi créatif pour tenter de trouver les 6 indices ;
+- échanges 9 à 14 : discussion complémentaire, avec indices toujours validables ;
+- échange 15 : dernier message traité normalement, puis conclusion ;
+- après 15 échanges terminés : nouvelle demande refusée côté serveur.
+
+Trouver les 6 indices ne ferme plus la conversation. Peter propose `Poursuivre`,
+mais l'élève peut continuer à discuter. Le serveur transmet la phase et les deux
+seuils dans le contexte dynamique.
+
+Le prompt correspondant est
+[PROMPT_PETERBOT_V5_COMPLET.md](./PROMPT_PETERBOT_V5_COMPLET.md). Pour le
+synchroniser avec l'assistant OpenAI :
+
+```bash
+OPENAI_API_KEY=... npm run openai:update-peter-prompt
+```

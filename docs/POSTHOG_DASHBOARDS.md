@@ -109,6 +109,7 @@ GROUP BY properties.step
 | `openai_run_late_completion_blocked` | A cancelled or superseded run tried to finish |
 | `clue_revealed_by_assistant` | Peter mentioned an undiscovered clue |
 | `continue_with_missing_clues` | Student continued before finding all clues |
+| `clue_challenge_completed` | Student completed the 8-exchange creative challenge |
 
 Create alerts for any `clue_revealed_by_assistant` or
 `openai_run_late_completion_blocked`, and for p95 `openai_queue_wait` above

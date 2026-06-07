@@ -23,6 +23,7 @@ interface ConversationPanelProps {
   textInput: string;
   onTextInputChange: (text: string) => void;
   exchangeCount: number;
+  challengeExchanges: number;
   maxExchanges: number;
   audioLevel?: number;
   liveTranscript?: string;
@@ -128,6 +129,7 @@ export default function ConversationPanel({
   textInput,
   onTextInputChange,
   exchangeCount,
+  challengeExchanges,
   maxExchanges,
   audioLevel = 0,
   liveTranscript = '',
@@ -365,7 +367,11 @@ export default function ConversationPanel({
                     className="text-[10px] sm:text-xs text-muted-foreground/50 font-mono flex-shrink-0 ml-2 tabular-nums"
                     data-testid="badge-exchange-counter-conversation"
                   >
-                    {exchangeCount}/{maxExchanges}
+                    {exchangeCount <= challengeExchanges
+                      ? `Défi indices · ${exchangeCount}/${challengeExchanges}`
+                      : conversationEnded
+                        ? `Conversation terminée · ${exchangeCount}/${maxExchanges}`
+                        : `Discussion · ${exchangeCount}/${maxExchanges}`}
                   </span>
                 </div>
               )}

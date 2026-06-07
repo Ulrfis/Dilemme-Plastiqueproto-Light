@@ -47,8 +47,11 @@
 ### 🧠 Peter suit les indices à chaque échange
 
 - **Mémoire continue** : Peter reçoit désormais à chaque échange un bloc de contexte mis à jour (`[Suivi des indices: N/6 trouvés — manquants: X, Y]`). Il ne peut plus redemander un indice déjà trouvé.
-- **Instructions adaptatives** : quand il ne reste qu'un seul indice, Peter guide explicitement vers lui. Quand les 6 sont trouvés, il félicite et invite à cliquer sur « Poursuivre » — sans attendre le 8e échange.
-- **Fin automatique à 6/6** : la conversation se ferme côté client dès que tous les indices sont détectés, le bouton « Poursuivre » s'illumine en vert.
+- **Défi créatif puis discussion** : l'objectif est de trouver les 6 indices
+  pendant les 8 premiers échanges. La discussion et la validation des indices
+  restent possibles jusqu'au 15e échange inclus.
+- **À 6/6** : Peter félicite et invite à cliquer sur « Poursuivre », mais
+  l'utilisateur peut continuer à discuter jusqu'à la limite technique.
 
 ### 💭 Bulle "Peter réfléchit" pendant la génération
 

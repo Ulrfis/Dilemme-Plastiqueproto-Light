@@ -6,6 +6,30 @@ Voix TTS : ElevenLabs `R8IjtpeRZsjoJfq1wwj3` (eleven_multilingual_v2)
 
 ---
 
+## Version 5 — 2026-06-07
+
+**Statut** : prête à remplacer intégralement les instructions actuelles de
+l'assistant OpenAI
+**Raison** : distinction explicite entre le défi créatif de 8 échanges et la
+conversation autorisée jusqu'au 15e échange
+
+Prompt complet :
+[PROMPT_PETERBOT_V5_COMPLET.md](../PROMPT_PETERBOT_V5_COMPLET.md)
+
+### Changements vs v4
+
+- Les 8 premiers échanges constituent l'objectif créatif pour trouver les 6
+  indices, mais ne ferment jamais la conversation.
+- Les indices restent détectables et validables pendant les échanges 9 à 15.
+- Les échanges 9 à 14 permettent de continuer l'observation et d'approfondir le
+  sujet.
+- Le 15e échange est traité normalement, puis Peter conclut et invite à
+  `Poursuivre`.
+- Peter reçoit désormais la phase, les deux seuils et la possibilité de continuer
+  dans le contexte dynamique.
+
+---
+
 ## Version 4 — 2026-06-07
 
 **Statut** : prête à remplacer intégralement les instructions actuelles de

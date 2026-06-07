@@ -6,6 +6,23 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2.8.0] - 2026-06-07
+
+### Modifié — Défi de 8 échanges, conversation jusqu'à 15
+
+- Les 8 premiers échanges constituent désormais un objectif créatif pour
+  découvrir les 6 indices, sans fermer la conversation.
+- Les indices restent détectables et validables pendant les échanges 9 à 15.
+- Le 15e message est traité normalement avant la conclusion ; un 16e échange
+  est refusé côté serveur avant toute écriture ou génération OpenAI.
+- L'accueil, le compteur et Peter distinguent maintenant les phases `Défi
+  indices`, `Discussion` et `Conversation terminée`.
+- Ajout du prompt PeterBot v5 et d'un script reproductible de synchronisation
+  avec l'assistant OpenAI.
+- Ajout de tests couvrant les frontières 8, 9, 14 et 15.
+
+---
+
 ## [2.7.1] - 2026-06-07
 
 ### Corrigé — Validation exhaustive des indices prononcés

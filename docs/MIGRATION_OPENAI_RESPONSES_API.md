@@ -82,7 +82,7 @@ classe.
 - zéro écriture tardive après timeout ou annulation ;
 - taux de succès au moins égal à Assistants ;
 - p95 du premier texte sans régression supérieure à 10 % ;
-- prompt PeterBot v4 utilisé ;
+- prompt PeterBot v5 utilisé ;
 - test synchronisé de 25 sessions réussi ;
 - retour arrière testé.
 
