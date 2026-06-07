@@ -299,7 +299,7 @@ export default function DragDropGame({ userName, onComplete }: DragDropGameProps
             Complète la phrase, {userName} !
           </h2>
           <p className="text-muted-foreground text-xs sm:text-sm">
-            Clique sur un mot puis sur un espace vide, ou glisse les mots.
+            Cette phase présente toutes les notions de l'œuvre. Clique sur un mot puis sur un espace vide, ou glisse les mots.
           </p>
         </div>
 

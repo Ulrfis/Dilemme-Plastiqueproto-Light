@@ -13,6 +13,7 @@ import { sendChatMessage, textToSpeech, sendChatMessageStreaming } from "@/lib/a
 import { useToast } from "@/hooks/use-toast";
 import { captureEvent } from "@/App";
 import { useSessionFlow } from "@/contexts/SessionFlowContext";
+import { CLOSING_TUTORIAL_EXCHANGE, MAX_TUTORIAL_EXCHANGES, MIN_CLUES_FOR_EARLY_EXIT, TOTAL_TUTORIAL_CLUES } from "@shared/tutorial-config";
 
 interface Message {
   id?: string;
@@ -89,9 +90,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     sessionFlow.setConversationEnded(ended);
   };
   
-  const MAX_EXCHANGES = 15;
-  const CLOSING_EXCHANGE = 14;
-  const TOTAL_CLUES = 6;
+  const MAX_EXCHANGES = MAX_TUTORIAL_EXCHANGES;
+  const CLOSING_EXCHANGE = CLOSING_TUTORIAL_EXCHANGE;
+  const TOTAL_CLUES = TOTAL_TUTORIAL_CLUES;
 
   const hasPlayedWelcome = useRef(false);
   const streamGenerationRef = useRef(0);
@@ -572,9 +573,8 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     }
 
     try {
-      // Incrémenter le compteur d'échanges
       const newExchangeCount = exchangeCount + 1;
-      setExchangeCount(newExchangeCount);
+      const turnId = generateId();
       
       // Ajouter le message utilisateur
       setMessages(prev => [...prev, makeMessage('user', userMessage)]);
@@ -586,10 +586,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       // PHASE 2 OPTIMIZATION: Use streaming pipeline for better latency
       if (useStreaming.current) {
         console.log('[TutorialScreen] Using STREAMING pipeline');
-        await processMessageStreaming(userMessage, newExchangeCount);
+        await processMessageStreaming(userMessage, newExchangeCount, turnId);
       } else {
         console.log('[TutorialScreen] Using NON-STREAMING pipeline (legacy)');
-        await processMessageNonStreaming(userMessage, newExchangeCount);
+        await processMessageNonStreaming(userMessage, newExchangeCount, turnId);
       }
     } catch (error) {
       setIsThinking(false);
@@ -619,13 +619,13 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
       toast({
         title: "Erreur de conversation avec Peter",
-        description: detailedDescription,
+        description: `Peter a mis trop de temps ou n'a pas pu répondre. Ton message est conservé et tu peux réessayer. ${detailedDescription}`,
         variant: "destructive",
       });
     }
   };
 
-  const processMessageStreaming = async (userMessage: string, currentExchange: number) => {
+  const processMessageStreaming = async (userMessage: string, currentExchange: number, turnId: string) => {
     console.log('[TutorialScreen] Processing message with streaming, exchange:', currentExchange);
     let fullResponse = '';
 
@@ -762,6 +762,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
           // Garde-fou : si le stream complète sans aucun event onSentence, la bulle
           // "Peter réfléchit" doit être retirée ici (sinon elle resterait à jamais).
           setIsThinking(false);
+          setExchangeCount(currentExchange);
 
           if (!finalResponse || finalResponse.trim().length === 0) {
             console.error('[TutorialScreen] Empty response received from Peter');
@@ -951,22 +952,25 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         },
       }, {
         exchangeCount: currentExchange,
-        userName: userName
+        userName: userName,
+        turnId,
       });
     } catch (error) {
       console.error('[TutorialScreen] Streaming failed:', error);
       audioQueue.clear();
-      console.log('[TutorialScreen] Falling back to non-streaming');
-      await processMessageNonStreaming(userMessage, currentExchange);
+      setIsThinking(false);
+      recoverFromError();
+      throw error;
     }
   };
 
   // Legacy non-streaming message processing (kept for fallback)
-  const processMessageNonStreaming = async (userMessage: string, currentExchange: number) => {
+  const processMessageNonStreaming = async (userMessage: string, currentExchange: number, turnId: string) => {
     if (turnTranscriptSentAtRef.current === 0) {
       turnTranscriptSentAtRef.current = Date.now();
     }
-    const result = await sendChatMessage(sessionId, userMessage);
+    const result = await sendChatMessage(sessionId, userMessage, turnId);
+    setExchangeCount(currentExchange);
 
     console.log('[TutorialScreen] ========== API RESPONSE ==========');
     console.log('[TutorialScreen] result.response:', result.response);
@@ -1069,6 +1073,19 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   };
 
   const handleFinish = () => {
+    if (isThinking || audioState === 'processing') {
+      toast({
+        title: "Réponse en cours",
+        description: "Attends la fin de la réponse de Peter avant de poursuivre.",
+      });
+      return;
+    }
+    if (foundClues.length < TOTAL_CLUES) {
+      const remaining = TOTAL_CLUES - foundClues.length;
+      const confirmed = window.confirm(`Il reste ${remaining} indice${remaining > 1 ? 's' : ''} à découvrir. Veux-tu vraiment passer à la suite ?`);
+      if (!confirmed) return;
+      captureEvent("continue_with_missing_clues", { remaining_clues: remaining, clues_found: foundClues.length });
+    }
     captureEvent("tutorial_completed", {
       cluesFound: foundClues.length,
       totalClues: TOTAL_CLUES,
@@ -1119,9 +1136,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   // Animation CSS pour flash limité à 3 fois
   const flashAnimation = allCluesFound ? "animate-flash-3" : "";
   
-  const FinishButton = foundClues.length >= 3 ? (
+  const FinishButton = foundClues.length >= MIN_CLUES_FOR_EARLY_EXIT ? (
     <Button
       onClick={handleFinish}
+      disabled={isThinking || audioState === 'processing'}
       className={`transition-all duration-500 font-semibold shadow-lg hover:scale-105 active:scale-95 whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 ${
         allCluesFound 
           ? `bg-green-600 hover:bg-green-700 text-white px-3 sm:px-4 py-2 text-sm sm:text-base ${flashAnimation}` 

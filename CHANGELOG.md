@@ -6,6 +6,23 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2.7.0] - 2026-06-07
+
+### Corrigé — Intégrité des indices, concurrence et reprise après erreur
+
+- Les indices sont désormais détectés uniquement dans les messages des élèves ;
+  Peter ne peut plus valider un indice qu'il vient lui-même de révéler.
+- Ajout de la reconnaissance robuste de `Plastic Treaty` et de tests dédiés.
+- Ajout d'un verrou de tour par session, d'une file OpenAI bornée, de timeouts
+  avec annulation et du blocage des écritures tardives.
+- Suppression du fallback client automatique qui pouvait doubler un échange.
+- Le compteur d'échanges avance uniquement après confirmation du serveur.
+- `Poursuivre` demande confirmation lorsque des indices manquent.
+- Ajout des métriques de saturation, d'un test de charge classe et du plan de
+  migration Assistants API vers Responses API.
+
+---
+
 ## [2.6.0] - 2026-05-06
 
 ### Corrigé — Fiabilité du comptage des indices + versionning prompt Peter

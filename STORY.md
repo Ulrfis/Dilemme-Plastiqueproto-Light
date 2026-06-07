@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-05-06 (Fiabilité comptage indices, additional_instructions, prompt Peter v3, versionning)  
+> **Last Updated**: 2026-06-07 (Stabilisation PeterBot, intégrité pédagogique, charge classe et migration OpenAI)
 
 ---
 
@@ -63,6 +63,79 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 ## Feature Chronicle
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
+
+### [2026-06-07] — Stabilisation PeterBot pour une classe de 25 élèves 🔷
+
+**Intent**: Après les améliorations de connexions multiples, des sessions
+pouvaient bloquer ou expirer. Après un timeout, Peter révélait parfois des
+indices non trouvés par l'élève, et une validation annoncée oralement pouvait ne
+pas apparaître dans l'interface. Il fallait identifier si la régression venait
+du code ou du prompt, puis stabiliser l'ensemble sans perdre les gains de
+concurrence précédents.
+
+**Prompt(s)**:
+```
+Il faut vérifier en tout premier lieu ce qu'il s'est passé, si c'est les
+corrections qui ont cassé quelque chose, ou si la mécanique avec le prompt dans
+l'assistant OpenAI est cassée. Faire un audit et proposer des améliorations
+ciblées, sans casser ce qui a été amélioré avant.
+```
+
+**Tool**: Codex
+
+**Outcome**:
+- Audit complet du code, du prompt PeterBot et des captures d'erreur.
+- Prompt PeterBot v4 documenté avec description détaillée de l'image et contexte
+  de la place des Nations à Genève.
+- Source de vérité déplacée clairement vers le serveur : seuls les messages des
+  élèves peuvent valider un indice ; les réponses de Peter servent uniquement à
+  détecter et signaler une révélation accidentelle.
+- Détection d'indices normalisée et plus précise, avec prise en charge de
+  `Plastic Treaty` et réduction des faux positifs sur les mots génériques.
+- Un seul tour actif ou en attente par session, `turnId`, file OpenAI bornée,
+  timeout configurable, annulation des runs et blocage des écritures tardives.
+- Suppression du fallback client automatique qui pouvait doubler un tour après
+  une erreur de streaming.
+- Compteur d'échanges avancé uniquement après confirmation serveur ; contrôles
+  bloqués pendant le traitement ; confirmation avant de poursuivre avec des
+  indices manquants.
+- Nouvelles métriques PostHog, tests unitaires et script de charge synchronisé
+  pour 5, 10, 25 puis 30 sessions.
+- Plan progressif documenté pour migrer de l'Assistants API vers Responses API
+  sans mélanger cette migration avec la stabilisation actuelle.
+
+**Architecture Delta**:
+```
+Avant :
+message élève + réponse Peter → peuvent tous deux modifier foundClues
+timeout client → fallback possible → second appel caché
+concurrence globale élevée sans file OpenAI bornée
+
+Après :
+message élève → détection serveur → seule écriture autorisée dans foundClues
+réponse Peter → dialogue + alerte si elle révèle un indice manquant
+session → un turnId actif → file bornée → annulation → aucune écriture tardive
+```
+
+**Surprise**: Le principal défaut n'était pas seulement le prompt. Même un
+excellent prompt reste probabiliste ; tant que le serveur acceptait la réponse
+de Peter comme preuve de découverte, une formulation de l'assistant pouvait
+corrompre l'état du jeu.
+
+**Friction**: Stabiliser une expérience voix implique plusieurs pipelines
+asynchrones superposés : navigateur, SSE, run OpenAI et TTS. Un timeout visible
+dans un seul niveau ne suffit pas ; chaque niveau doit être annulé et les
+résultats tardifs doivent être explicitement refusés.
+
+**Insight**: Dans une expérience pédagogique pilotée par IA, le modèle peut
+guider et expliquer, mais les règles, validations et compteurs doivent rester
+déterministes et contrôlés par l'application.
+
+**Verification**: 16 tests réussis, TypeScript validé, build production réussi,
+script de charge prêt pour staging. Le test réel à 25 reste une étape
+opérationnelle avant la prochaine séance.
+
+---
 
 ### [2026-05-02] — Peter reprend la conversation au retour sur /tutorial 🔷
 
@@ -405,6 +478,27 @@ WelcomeSetup → onStart(name) → identifyUser(name) → posthog.identify(name,
 ## Pivots & Breakages
 
 *Major direction changes, things that broke badly, abandoned approaches. This is where story gold lives.*
+
+### [2026-06-07] — Peter révélait puis validait ses propres indices
+
+**Breakage**: Après un timeout, l'élève pouvait poursuivre et voir tous les
+indices, y compris `ADN`, sans les avoir décrits. Peter pouvait aussi annoncer
+qu'il validait `Traité plastique` sans que l'interface reflète correctement
+l'état attendu.
+
+**Root cause**: La réponse probabiliste de Peter était encore analysée comme une
+source possible de validation. En parallèle, le fallback après erreur de
+streaming pouvait relancer le même tour, et les traitements tardifs n'étaient
+pas suffisamment isolés.
+
+**Pivot**: Peter n'est plus autorisé techniquement à modifier l'état
+pédagogique. Le serveur valide uniquement le texte élève, contrôle la
+concurrence par session et rejette toute fin de traitement devenue obsolète.
+
+**Durable lesson**: Un prompt améliore le comportement attendu ; il ne remplace
+jamais un invariant applicatif.
+
+---
 
 ### [2024-12-12] — PostHog Integration Approach
 
@@ -1309,6 +1403,8 @@ Client sets audio.src = /api/tts/play/token → Browser streams + plays natively
 - [2024-12-12]: Variant matching in AI detection creates pedagogical flexibility—let students express ideas in their own language, don't force exact matches.
 - [2024-12-12]: Dual-mode interfaces (drag + click) are more accessible AND feel better on mobile than we expected.
 - [2026-02-16]: Une passe "fiabilité" sans changement fonctionnel peut améliorer fortement l'expérience perçue (moins de crashes, moins de glitches) en ciblant storage, listeners et viewport.
+- [2026-06-07]: Un modèle conversationnel ne doit jamais être la source de vérité d'une règle pédagogique ; les validations doivent rester déterministes côté serveur.
+- [2026-06-07]: Un timeout utile doit annuler le travail distant et empêcher ses écritures tardives, pas seulement afficher une erreur au client.
 
 ---
 

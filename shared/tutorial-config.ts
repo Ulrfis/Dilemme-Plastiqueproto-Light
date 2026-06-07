@@ -1,0 +1,4 @@
+export const TOTAL_TUTORIAL_CLUES = 6;
+export const MAX_TUTORIAL_EXCHANGES = 15;
+export const CLOSING_TUTORIAL_EXCHANGE = 14;
+export const MIN_CLUES_FOR_EARLY_EXIT = 3;

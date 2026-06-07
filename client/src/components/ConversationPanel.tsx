@@ -167,7 +167,7 @@ export default function ConversationPanel({
     }
   }, [textInput, onSendText, onTextInputChange]);
 
-  const isButtonDisabled = !textInput.trim() || state === 'processing' || conversationEnded;
+  const isButtonDisabled = !textInput.trim() || state === 'processing' || isThinking || conversationEnded;
 
   const statusZoneClasses = `flex-1 rounded-xl px-3 sm:px-4 py-2 sm:py-3 min-h-[44px] sm:min-h-[48px] flex items-center justify-between transition-colors duration-200 ${
     state === 'recording'
@@ -281,7 +281,7 @@ export default function ConversationPanel({
                 onClick={() => setShowTextInput(!showTextInput)}
                 size="icon"
                 variant={showTextInput ? "secondary" : "outline"}
-                disabled={state === 'recording' || state === 'processing' || conversationEnded}
+                disabled={state === 'recording' || state === 'processing' || isThinking || conversationEnded}
                 className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex-shrink-0 touch-manipulation"
                 data-testid="button-toggle-text"
               >

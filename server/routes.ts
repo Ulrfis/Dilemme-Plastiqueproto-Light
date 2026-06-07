@@ -12,6 +12,9 @@ import { elevenLabsFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY, P
 import { captureServerError, captureServerEvent, captureServerTiming } from "./posthog";
 import { BoundedPriorityQueue, QueueOverloadedError, type QueuePriority } from "./concurrency-limit";
 import { createRateLimiter, positiveIntFromEnv } from "./request-limiter";
+import { ChatAdmissionTimeoutError, ChatTurnConflictError, ChatTurnController, type ChatTurnLease } from "./chat-turn-control";
+import { detectClues, TARGET_CLUES } from "./clue-detection";
+import { CLOSING_TUTORIAL_EXCHANGE, MAX_TUTORIAL_EXCHANGES, TOTAL_TUTORIAL_CLUES } from "@shared/tutorial-config";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -56,7 +59,15 @@ const resumePregenQueue = new BoundedPriorityQueue({
   maxConcurrent: 1,
   maxQueued: 0,
 });
-const MAX_CONCURRENT_CHAT_STREAMS = positiveIntFromEnv('OPENAI_MAX_CONCURRENT_STREAMS', 50);
+const MAX_CONCURRENT_CHAT_STREAMS = positiveIntFromEnv('OPENAI_MAX_CONCURRENT_STREAMS', 10);
+const MAX_QUEUED_CHAT_STREAMS = positiveIntFromEnv('OPENAI_MAX_QUEUED_STREAMS', 30);
+const OPENAI_QUEUE_WAIT_TIMEOUT_MS = positiveIntFromEnv('OPENAI_QUEUE_WAIT_TIMEOUT_MS', 15_000);
+const OPENAI_RUN_TIMEOUT_MS = positiveIntFromEnv('OPENAI_RUN_TIMEOUT_MS', 45_000);
+const chatTurnController = new ChatTurnController(
+  MAX_CONCURRENT_CHAT_STREAMS,
+  MAX_QUEUED_CHAT_STREAMS,
+  OPENAI_QUEUE_WAIT_TIMEOUT_MS,
+);
 let activeChatStreams = 0;
 
 // Track failed session-token verification attempts per IP+sessionId to block
@@ -323,38 +334,6 @@ async function validateAssistant() {
 // Appeler au démarrage
 validateAssistant();
 
-const TARGET_CLUES = [
-  { keyword: "Déchets plastiques", variants: ["déchets plastiques", "dechets plastiques", "plastique", "pollution plastique", "déchets", "ordures plastiques"] },
-  { keyword: "ADN", variants: ["adn", "acide désoxyribonucléique", "génétique", "double hélice", "hélice adn"] },
-  { keyword: "Traité plastique", variants: ["traité plastique", "traite plastique", "traité", "accord plastique", "convention plastique"] },
-  { keyword: "Végétation", variants: ["végétation", "végétaux", "algues", "algue", "végétation marine", "plantes marines", "végétaux marins", "plantes", "verdure"] },
-  { keyword: "Homme", variants: ["homme", "penseur", "rodin", "sculpture homme", "figure masculine", "personnage masculin"] },
-  { keyword: "Femme", variants: ["femme", "figure féminine", "personnage féminin", "sculpture femme", "mère", "terre-mère"] }
-];
-
-const MAX_TUTORIAL_EXCHANGES = 15;
-const CLOSING_TUTORIAL_EXCHANGE = 14;
-
-function detectClues(text: string, alreadyFound: string[]): string[] {
-  const textLower = text.toLowerCase();
-  const foundClues: string[] = [];
-
-  for (const clue of TARGET_CLUES) {
-    // Skip if already found
-    if (alreadyFound.includes(clue.keyword)) continue;
-
-    // Check all variants for this clue
-    for (const variant of clue.variants) {
-      if (textLower.includes(variant)) {
-        foundClues.push(clue.keyword);
-        break; // Move to next clue (avoid duplicates)
-      }
-    }
-  }
-
-  return foundClues;
-}
-
 export async function registerRoutes(app: Express): Promise<Server> {
   // Rate-limit global API
   app.use('/api', generalLimiter);
@@ -558,6 +537,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       timestamp: Date.now(),
       activeChatStreams,
       maxConcurrentChatStreams: MAX_CONCURRENT_CHAT_STREAMS,
+      openai: chatTurnController.getStats(),
       elevenlabs: elevenLabsQueue.getStats(),
       resumePregen: resumePregenQueue.getStats(),
       stores: {
@@ -1405,6 +1385,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // This allows TTS to start generating audio while LLM is still responding
   app.post('/api/chat/stream', async (req, res) => {
     let countedChatStream = false;
+    let turnLease: ChatTurnLease | null = null;
+    let assistantStream: { abort: () => void } | null = null;
+    let threadIdForRun = '';
+    let runId = '';
+    let turnFinished = false;
     try {
       console.log('[Chat Stream API] Request received:', {
         sessionId: req.body.sessionId,
@@ -1412,6 +1397,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userName: req.body.userName
       });
       const { sessionId, userMessage, userName } = req.body;
+      const turnId = typeof req.body.turnId === 'string' && req.body.turnId.length <= 100
+        ? req.body.turnId
+        : crypto.randomUUID();
 
       if (!sessionId || !userMessage) {
         return res.status(400).json({ error: 'Missing sessionId or userMessage' });
@@ -1424,12 +1412,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const session = await verifySessionToken(sessionId, req, res);
       if (!session) return;
 
-      if (activeChatStreams >= MAX_CONCURRENT_CHAT_STREAMS) {
-        res.set('Retry-After', '3');
-        return res.status(503).json({ error: 'Serveur momentanément occupé. Réessaie dans quelques secondes.' });
-      }
+      const queueStartedAt = Date.now();
+      turnLease = await chatTurnController.acquire(sessionId, turnId);
+      captureServerTiming(sessionId, {
+        step: 'openai_queue_wait',
+        duration_ms: Date.now() - queueStartedAt,
+        success: true,
+        endpoint: '/api/chat/stream',
+      }, userName);
       activeChatStreams += 1;
       countedChatStream = true;
+      res.once('close', () => {
+        if (turnFinished) return;
+        turnLease?.cancel();
+        assistantStream?.abort();
+        if (runId && threadIdForRun) {
+          openai.beta.threads.runs.cancel(runId, { thread_id: threadIdForRun }).catch(() => undefined);
+        }
+      });
 
       console.log('[Chat Stream API] Session found:', { sessionId, foundClues: session.foundClues });
 
@@ -1469,20 +1469,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Clue tracking context — passed as additional_instructions so the thread stays clean
       // Peter always receives the authoritative state for this specific run
-      const cluesContext = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés : ${allFoundSoFar.length}/6${allFoundSoFar.length > 0 ? ` (${allFoundSoFar.join(', ')})` : ''}\nIndices manquants : ${missingClues.length > 0 ? missingClues.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCount}/${MAX_TUTORIAL_EXCHANGES}\nPrénom de l'utilisateur : ${userNameToUse}\n\nIMPORTANT : Ce bloc [CONTEXTE DU JEU] est la source de vérité absolue. Ne jamais compter les indices à partir de l'historique de conversation — toujours utiliser les chiffres ci-dessus.`;
+      const cluesContext = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés avant ce message : ${session.foundClues.length}/${TOTAL_TUTORIAL_CLUES}${session.foundClues.length > 0 ? ` (${session.foundClues.join(', ')})` : ''}\nIndices nouvellement trouvés dans le message de l'élève : ${detectedClues.length > 0 ? detectedClues.join(', ') : 'aucun'}\nIndices trouvés après ce message : ${allFoundSoFar.length}/${TOTAL_TUTORIAL_CLUES}${allFoundSoFar.length > 0 ? ` (${allFoundSoFar.join(', ')})` : ''}\nIndices manquants : ${missingClues.length > 0 ? missingClues.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCount}/${MAX_TUTORIAL_EXCHANGES}\nAutorisation de clôture : ${serverExchangeCount >= CLOSING_TUTORIAL_EXCHANGE || missingClues.length === 0 ? 'oui' : 'non'}\nAutorisation de révéler les indices manquants : non\nPrénom de l'utilisateur : ${userNameToUse}\n\nIMPORTANT : Ce bloc est la source de vérité absolue. L'application seule valide les indices depuis le message de l'élève. Tes propres mots ne peuvent jamais valider un indice.`;
 
       // Build exchange-specific instructions
       let exchangeInstructions = '';
       if (serverExchangeCount >= CLOSING_TUTORIAL_EXCHANGE) {
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'échange ${CLOSING_TUTORIAL_EXCHANGE}/${MAX_TUTORIAL_EXCHANGES}. Le temps de l'échange est maintenant terminé. Réponds poliment et chaleureusement à ${userNameToUse}, fais un bref récapitulatif des indices trouvés (${allFoundSoFar.join(', ') || 'aucun'}) et des indices manquants (${missingClues.join(', ') || 'aucun'}), puis indique clairement qu'il faut maintenant passer à la suite de l'expérience en cliquant sur "Poursuivre" pour commencer le jeu. Ne propose pas de continuer la discussion.]`;
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: La phase d'observation se termine. Réponds brièvement et chaleureusement, puis invite ${userNameToUse} à cliquer sur "Poursuivre". Ne cite et n'explique aucun indice manquant.]`;
       } else if (missingClues.length === 0) {
-        // All 6 clues already found — Peter must celebrate and prompt Poursuivre
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les 6 indices ont déjà été trouvés ! Félicite chaleureusement ${userNameToUse} pour avoir trouvé les 6 indices, fais un bref récapitulatif de la liste complète, rappelle qu'il peut cliquer sur le bouton "Poursuivre" pour continuer l'expérience, mais qu'il peut aussi discuter encore un peu avant la limite s'il le souhaite.]`;
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les indices sont trouvés. Félicite chaleureusement ${userNameToUse}, fais une synthèse très courte sans réciter la liste complète et invite à cliquer sur "Poursuivre".]`;
       } else if (missingClues.length === 1) {
-        // One clue left — hint + Poursuivre if validated in this response
-        exchangeInstructions = `\n\n[INSTRUCTION: Il ne reste qu'UN seul indice à trouver : "${missingClues[0]}". Guide habilement l'utilisateur vers cet indice. Si tu valides sa découverte dans cette réponse et que tous les 6 sont maintenant trouvés, félicite chaleureusement ${userNameToUse} et invite-le immédiatement à cliquer sur le bouton "Poursuivre" pour continuer l'expérience.]`;
+        exchangeInstructions = `\n\n[INSTRUCTION: Il reste un seul indice. Donne au maximum une piste visuelle indirecte sans prononcer, traduire ni paraphraser le nom de l'indice manquant.]`;
       } else if (serverExchangeCount === CLOSING_TUTORIAL_EXCHANGE - 1) {
-        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange avant la clôture (${serverExchangeCount}/${MAX_TUTORIAL_EXCHANGES}). Mentionne qu'il reste encore un court échange possible avant de passer au jeu. Encourage l'utilisateur à faire un dernier effort sur les indices manquants (${missingClues.join(', ')}). Ne dis pas au revoir maintenant.]`;
+        exchangeInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange. Encourage un dernier effort avec une seule piste visuelle indirecte. Ne cite aucun indice manquant.]`;
       }
 
       // Reuse or create thread
@@ -1496,6 +1494,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateSession(sessionId, { threadId });
         console.log('[Chat Stream API] Thread created and saved:', threadId);
       }
+      threadIdForRun = threadId;
 
       // Message content = only what the user actually said (clean thread history)
       await openai.beta.threads.messages.create(threadId, {
@@ -1511,15 +1510,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         assistant_id: ASSISTANT_ID,
         additional_instructions: `${cluesContext}${exchangeInstructions}`,
       });
+      assistantStream = stream;
       console.log('[Chat Stream API] Stream created successfully, starting to process events...');
 
       // Timeout de sécurité pour détecter les streams bloqués
-      let streamTimeout: NodeJS.Timeout | null = setTimeout(() => {
-        console.error('[Chat Stream API] ⚠️ TIMEOUT: Stream blocked after 30 seconds');
+      let streamTimeout: NodeJS.Timeout | null = setTimeout(async () => {
+        console.error(`[Chat Stream API] ⚠️ TIMEOUT: Stream blocked after ${OPENAI_RUN_TIMEOUT_MS}ms`);
+        turnLease?.cancel();
+        assistantStream?.abort();
+        if (runId && threadIdForRun) {
+          await openai.beta.threads.runs.cancel(runId, { thread_id: threadIdForRun }).catch(() => undefined);
+        }
         captureServerEvent('server_error', sessionId, {
           endpoint: '/api/chat/stream',
-          context: 'stream_timeout_30s',
-          error_message: 'Assistant stream blocked >30s',
+          context: 'stream_timeout',
+          error_message: `Assistant stream blocked >${OPENAI_RUN_TIMEOUT_MS}ms`,
+          turn_id: turnId,
         }, userName);
         if (!res.writableEnded) {
           res.write(`data: ${JSON.stringify({
@@ -1528,7 +1534,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })}\n\n`);
           res.end();
         }
-      }, 30000);
+      }, OPENAI_RUN_TIMEOUT_MS);
 
       let fullResponse = "";
       let currentSentence = "";
@@ -1796,6 +1802,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for await (const event of stream) {
         console.log('[Chat Stream API] Event received:', event.event);
 
+        if (event.event === 'thread.run.created') {
+          runId = event.data.id;
+        }
+
         if (event.event === 'thread.message.delta') {
           const delta = event.data.delta;
           if (delta.content && delta.content[0]?.type === 'text') {
@@ -1889,6 +1899,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      if (!turnLease.isCurrent()) {
+        console.warn('[Chat Stream API] Ignoring late completion for inactive turn:', turnId);
+        captureServerEvent('openai_run_late_completion_blocked', sessionId, {
+          endpoint: '/api/chat/stream',
+          turn_id: turnId,
+          run_id: runId,
+        }, userName);
+        return;
+      }
+
       // Annuler le timeout à la fin du stream (au cas où)
       if (streamTimeout) {
         clearTimeout(streamTimeout);
@@ -1912,18 +1932,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: fullResponse,
       });
 
-      // Detect clues from Peter's response too (not just from the user's message).
-      // Peter often explicitly names a clue when validating it — e.g. "Bravo, tu as trouvé le Traité plastique !"
-      // The earlier detectClues(userMessage) only caught words the USER used; this catches what PETER validates.
-      const detectedFromResponse = detectClues(fullResponse, [...session.foundClues, ...detectedClues]);
-      const allDetectedClues = [...detectedClues, ...detectedFromResponse];
-      if (detectedFromResponse.length > 0) {
-        console.log('[Chat Stream API] Additional clues detected from Peter\'s response:', detectedFromResponse);
+      // Only the student's message can change the game state.
+      const assistantMentionedMissingClues = detectClues(fullResponse, [...session.foundClues, ...detectedClues]);
+      if (assistantMentionedMissingClues.length > 0) {
+        captureServerEvent('clue_revealed_by_assistant', sessionId, {
+          endpoint: '/api/chat/stream',
+          clues: assistantMentionedMissingClues,
+          turn_id: turnId,
+        }, userName);
       }
-
-      // Update session with all detected clues (from user message + from Peter's response)
-      if (allDetectedClues.length > 0) {
-        const updatedClues = [...session.foundClues, ...allDetectedClues];
+      if (detectedClues.length > 0) {
+        const updatedClues = [...session.foundClues, ...detectedClues];
         await storage.updateSession(sessionId, {
           foundClues: updatedClues,
           score: updatedClues.length,
@@ -1937,10 +1956,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.write(`data: ${JSON.stringify({
         type: 'complete',
         fullResponse,
-        foundClues: allDetectedClues.length > 0 ? [...session.foundClues, ...allDetectedClues] : session.foundClues,
-        detectedClue: allDetectedClues.length > 0 ? allDetectedClues[0] : null,
+        foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
+        detectedClue: detectedClues.length > 0 ? detectedClues[0] : null,
         phase2Dispatched,
+        turnId,
       })}\n\n`);
+      turnFinished = true;
+      turnLease.release();
+      turnLease = null;
 
       if (sentenceTtsPromises.length > 0) {
         console.log('[Chat Stream API] Waiting for', sentenceTtsPromises.length, 'remaining TTS promises...');
@@ -1974,16 +1997,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (req.body?.userName as string | undefined) ?? null,
       );
 
+      const status = error instanceof ChatTurnConflictError ? 409
+        : error instanceof ChatAdmissionTimeoutError ? 503
+        : 500;
       const isProd = process.env.NODE_ENV === 'production';
       const errorMessage = isProd
         ? 'Une erreur est survenue lors de la conversation'
         : (error instanceof Error ? error.message : 'Unknown error');
-      res.write(`data: ${JSON.stringify({
-        type: 'error',
-        message: errorMessage
-      })}\n\n`);
-      res.end();
+      if (!res.headersSent) {
+        if (status === 503) res.set('Retry-After', '3');
+        res.status(status).json({ error: errorMessage });
+      } else if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage })}\n\n`);
+        res.end();
+      }
     } finally {
+      if (!turnFinished) turnLease?.cancel();
+      turnLease?.release();
       if (countedChatStream) {
         activeChatStreams = Math.max(0, activeChatStreams - 1);
       }
@@ -1991,9 +2021,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post('/api/chat', async (req, res) => {
+    let turnLease: ChatTurnLease | null = null;
+    let assistantStream: { abort: () => void } | null = null;
+    let timeout: NodeJS.Timeout | null = null;
+    let turnFinished = false;
     try {
       console.log('[Chat API] Request received:', { sessionId: req.body.sessionId, messageLength: req.body.userMessage?.length });
       const { sessionId, userMessage } = req.body;
+      const turnId = typeof req.body.turnId === 'string' && req.body.turnId.length <= 100
+        ? req.body.turnId
+        : crypto.randomUUID();
 
       if (!sessionId || !userMessage) {
         return res.status(400).json({ error: 'Missing sessionId or userMessage' });
@@ -2005,6 +2042,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const session = await verifySessionToken(sessionId, req, res);
       if (!session) return;
+      const queueStartedAt = Date.now();
+      turnLease = await chatTurnController.acquire(sessionId, turnId);
+      captureServerTiming(sessionId, {
+        step: 'openai_queue_wait',
+        duration_ms: Date.now() - queueStartedAt,
+        success: true,
+        endpoint: '/api/chat',
+      }, session.userName);
 
       console.log('[Chat API] Session found:', { sessionId, foundClues: session.foundClues });
 
@@ -2033,17 +2078,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const serverExchangeCountNS = (session.messageCount ?? 0) + 1;
 
       // Clue context passed via additional_instructions (clean thread, authoritative per run)
-      const cluesContextNS = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés : ${allFoundSoFarNS.length}/6${allFoundSoFarNS.length > 0 ? ` (${allFoundSoFarNS.join(', ')})` : ''}\nIndices manquants : ${missingCluesNS.length > 0 ? missingCluesNS.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCountNS}/${MAX_TUTORIAL_EXCHANGES}\nPrénom de l'utilisateur : ${userNameToUseNS}\n\nIMPORTANT : Ce bloc [CONTEXTE DU JEU] est la source de vérité absolue. Ne jamais compter les indices à partir de l'historique de conversation — toujours utiliser les chiffres ci-dessus.`;
+      const cluesContextNS = `[CONTEXTE DU JEU — Source de vérité pour cet échange]\nIndices trouvés avant ce message : ${session.foundClues.length}/${TOTAL_TUTORIAL_CLUES}${session.foundClues.length > 0 ? ` (${session.foundClues.join(', ')})` : ''}\nIndices nouvellement trouvés dans le message de l'élève : ${detectedClues.length > 0 ? detectedClues.join(', ') : 'aucun'}\nIndices trouvés après ce message : ${allFoundSoFarNS.length}/${TOTAL_TUTORIAL_CLUES}${allFoundSoFarNS.length > 0 ? ` (${allFoundSoFarNS.join(', ')})` : ''}\nIndices manquants : ${missingCluesNS.length > 0 ? missingCluesNS.join(', ') : 'aucun — tous trouvés !'}\nÉchange : ${serverExchangeCountNS}/${MAX_TUTORIAL_EXCHANGES}\nAutorisation de clôture : ${serverExchangeCountNS >= CLOSING_TUTORIAL_EXCHANGE || missingCluesNS.length === 0 ? 'oui' : 'non'}\nAutorisation de révéler les indices manquants : non\nPrénom de l'utilisateur : ${userNameToUseNS}\n\nIMPORTANT : L'application seule valide les indices depuis le message de l'élève. Tes propres mots ne peuvent jamais valider un indice.`;
 
       let nsInstructions = '';
       if (serverExchangeCountNS >= CLOSING_TUTORIAL_EXCHANGE) {
-        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'échange ${CLOSING_TUTORIAL_EXCHANGE}/${MAX_TUTORIAL_EXCHANGES}. Le temps de l'échange est maintenant terminé. Réponds poliment et chaleureusement à ${userNameToUseNS}, fais un bref récapitulatif des indices trouvés (${allFoundSoFarNS.join(', ') || 'aucun'}) et des indices manquants (${missingCluesNS.join(', ') || 'aucun'}), puis indique clairement qu'il faut maintenant passer à la suite de l'expérience en cliquant sur "Poursuivre" pour commencer le jeu. Ne propose pas de continuer la discussion.]`;
+        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: La phase d'observation se termine. Invite ${userNameToUseNS} à cliquer sur "Poursuivre" sans citer ni expliquer les indices manquants.]`;
       } else if (missingCluesNS.length === 0) {
-        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les 6 indices ont été trouvés ! Félicite chaleureusement ${userNameToUseNS}, fais un récapitulatif de la liste complète, rappelle qu'il peut cliquer sur "Poursuivre", mais qu'il peut aussi discuter encore un peu avant la limite s'il le souhaite.]`;
+        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: Tous les indices sont trouvés. Félicite ${userNameToUseNS}, fais une synthèse très courte sans réciter la liste et invite à cliquer sur "Poursuivre".]`;
       } else if (missingCluesNS.length === 1) {
-        nsInstructions = `\n\n[INSTRUCTION: Il ne reste qu'UN seul indice : "${missingCluesNS[0]}". Si tu le valides dans cette réponse, félicite ${userNameToUseNS} et invite-le à cliquer sur "Poursuivre".]`;
+        nsInstructions = `\n\n[INSTRUCTION: Il reste un seul indice. Donne au maximum une piste visuelle indirecte sans prononcer, traduire ni paraphraser son nom.]`;
       } else if (serverExchangeCountNS === CLOSING_TUTORIAL_EXCHANGE - 1) {
-        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange avant la clôture (${serverExchangeCountNS}/${MAX_TUTORIAL_EXCHANGES}). Mentionne qu'il reste encore un court échange possible avant de passer au jeu. Encourage l'utilisateur à faire un dernier effort sur les indices manquants (${missingCluesNS.join(', ')}). Ne dis pas au revoir maintenant.]`;
+        nsInstructions = `\n\n[INSTRUCTION IMPORTANTE: C'est l'avant-dernier échange. Encourage un dernier effort avec une seule piste visuelle indirecte. Ne cite aucun indice manquant.]`;
       }
 
       // Réutiliser le thread existant ou en créer un nouveau
@@ -2068,16 +2113,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Run the assistant — clue context passed via additional_instructions
       console.log('[Chat API] Running assistant with streaming...', { assistantId: ASSISTANT_ID, threadId, serverExchangeCountNS });
 
+      let runId = "";
+
       // Créer le run avec streaming
       const stream = await openai.beta.threads.runs.stream(threadId, {
         assistant_id: ASSISTANT_ID,
         additional_instructions: `${cluesContextNS}${nsInstructions}`,
       });
+      assistantStream = stream;
+      timeout = setTimeout(async () => {
+        turnLease?.cancel();
+        assistantStream?.abort();
+        if (runId) {
+          await openai.beta.threads.runs.cancel(runId, { thread_id: threadId }).catch(() => undefined);
+        }
+      }, OPENAI_RUN_TIMEOUT_MS);
 
       console.log('[Chat API] Stream created, waiting for response...');
 
       let assistantResponse = "";
-      let runId = "";
 
       // Écouter les événements du stream
       for await (const event of stream) {
@@ -2126,6 +2180,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           throw new Error(`Assistant run failed - Event: ${event.event}, Run ID: ${runId}, Thread ID: ${threadId}`);
         }
       }
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+
+      if (!turnLease.isCurrent()) {
+        throw new ChatAdmissionTimeoutError("Assistant response arrived after the turn was cancelled");
+      }
 
       // Fallback si la réponse est vide
       if (!assistantResponse) {
@@ -2144,16 +2206,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: assistantResponse,
       });
 
-      // Detect clues from Peter's response too (not just from the user's message)
-      const detectedFromResponse = detectClues(assistantResponse, [...session.foundClues, ...detectedClues]);
-      const allDetectedClues = [...detectedClues, ...detectedFromResponse];
-      if (detectedFromResponse.length > 0) {
-        console.log('[Chat API] Additional clues detected from Peter\'s response:', detectedFromResponse);
+      // Only the student's message can change the game state.
+      const assistantMentionedMissingClues = detectClues(assistantResponse, [...session.foundClues, ...detectedClues]);
+      if (assistantMentionedMissingClues.length > 0) {
+        captureServerEvent('clue_revealed_by_assistant', sessionId, {
+          endpoint: '/api/chat',
+          clues: assistantMentionedMissingClues,
+          turn_id: turnId,
+        }, session.userName);
       }
-
-      // Update session with ALL detected clues (from user message + from Peter's response)
-      if (allDetectedClues.length > 0) {
-        const updatedClues = [...session.foundClues, ...allDetectedClues];
+      if (detectedClues.length > 0) {
+        const updatedClues = [...session.foundClues, ...detectedClues];
         await storage.updateSession(sessionId, {
           foundClues: updatedClues,
           score: updatedClues.length,
@@ -2167,9 +2230,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[Chat API] Sending response to client');
       res.json({
         response: assistantResponse,
-        detectedClue: allDetectedClues.length > 0 ? allDetectedClues[0] : null,
-        foundClues: allDetectedClues.length > 0 ? [...session.foundClues, ...allDetectedClues] : session.foundClues,
+        detectedClue: detectedClues.length > 0 ? detectedClues[0] : null,
+        foundClues: detectedClues.length > 0 ? [...session.foundClues, ...detectedClues] : session.foundClues,
+        turnId,
       });
+      turnFinished = true;
     } catch (error) {
       console.error('[Chat API] Error in chat:', {
         message: error instanceof Error ? error.message : 'Unknown error',
@@ -2189,8 +2254,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
+      const status = error instanceof ChatTurnConflictError ? 409
+        : error instanceof ChatAdmissionTimeoutError ? 503
+        : 500;
       const isProd = process.env.NODE_ENV === 'production';
-      res.status(500).json({
+      if (status === 503) res.set('Retry-After', '3');
+      res.status(status).json({
         error: 'Erreur lors de la conversation avec Peter',
         ...(isProd ? {} : {
           details: error instanceof Error ? error.message : 'Unknown error',
@@ -2201,6 +2270,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         })
       });
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      if (!turnFinished) turnLease?.cancel();
+      turnLease?.release();
     }
   });
 

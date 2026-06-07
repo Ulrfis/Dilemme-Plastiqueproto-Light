@@ -101,6 +101,19 @@ GROUP BY properties.step
 
 **Steps:** `whisper_stt`, `welcome_pregen_tts`, `resume_pregen_total`, `openai_first_delta`, `openai_first_sentence`, `openai_run_complete`, `elevenlabs_phase1`, `elevenlabs_phase2a`, `elevenlabs_phase2b`, `chat_stream_total`
 
+## New events and steps (2026-06-07 stabilization)
+
+| Event or step | Purpose |
+|---|---|
+| `server_pipeline_timing`, step `openai_queue_wait` | OpenAI queue wait time |
+| `openai_run_late_completion_blocked` | A cancelled or superseded run tried to finish |
+| `clue_revealed_by_assistant` | Peter mentioned an undiscovered clue |
+| `continue_with_missing_clues` | Student continued before finding all clues |
+
+Create alerts for any `clue_revealed_by_assistant` or
+`openai_run_late_completion_blocked`, and for p95 `openai_queue_wait` above
+10 seconds during a class session.
+
 ---
 
 ## PostHog project settings (manual)

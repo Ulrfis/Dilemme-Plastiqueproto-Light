@@ -50,20 +50,22 @@ export async function updateSession(id: string, updates: Partial<InsertTutorialS
   return response.json();
 }
 
-export async function sendChatMessage(sessionId: string, userMessage: string): Promise<{
+export async function sendChatMessage(sessionId: string, userMessage: string, turnId: string): Promise<{
   response: string;
   detectedClue: string | null;
   foundClues: string[];
+  turnId: string;
 }> {
   const stored = readStoredSessionFlow();
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...sessionAuthHeaders() },
-    body: JSON.stringify({ sessionId, userMessage, accessToken: stored?.accessToken }),
+    body: JSON.stringify({ sessionId, userMessage, turnId, accessToken: stored?.accessToken }),
   });
 
   if (!response.ok) {
-    throw new Error('Failed to send chat message');
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `Failed to send chat message (${response.status})`);
   }
 
   return response.json();
@@ -169,6 +171,7 @@ export interface StreamChatCallbacks {
 export interface StreamChatOptions {
   exchangeCount?: number; // Current exchange number (1-15)
   userName?: string; // User's name for personalized goodbye
+  turnId: string;
 }
 
 export async function sendChatMessageStreaming(
@@ -185,13 +188,15 @@ export async function sendChatMessageStreaming(
       sessionId,
       userMessage,
       accessToken: stored?.accessToken,
+      turnId: options?.turnId,
       exchangeCount: options?.exchangeCount,
       userName: options?.userName
     }),
   });
 
   if (!response.ok) {
-    throw new Error('Failed to send streaming chat message');
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `Failed to send streaming chat message (${response.status})`);
   }
 
   const reader = response.body?.getReader();
@@ -201,6 +206,7 @@ export async function sendChatMessageStreaming(
 
   const decoder = new TextDecoder();
   let buffer = '';
+  let receivedStreamError: Error | null = null;
 
   try {
     while (true) {
@@ -230,6 +236,7 @@ export async function sendChatMessageStreaming(
             callbacks.onComplete(data.fullResponse, data.foundClues, data.detectedClue, data.phase2Dispatched);
           } else if (data.type === 'error' && callbacks.onError) {
             callbacks.onError(data.message);
+            receivedStreamError = new Error(data.message);
           } else if (data.type === 'phase2a_timing' && callbacks.onPhase2aTiming) {
             callbacks.onPhase2aTiming(data.dispatched_mid_stream, data.chars_at_dispatch);
           }
@@ -237,6 +244,7 @@ export async function sendChatMessageStreaming(
           console.error('[API] Error parsing SSE message:', parseError, message);
         }
       }
+      if (receivedStreamError) throw receivedStreamError;
     }
   } finally {
     reader.releaseLock();

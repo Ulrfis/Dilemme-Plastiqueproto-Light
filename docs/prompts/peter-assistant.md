@@ -6,6 +6,39 @@ Voix TTS : ElevenLabs `R8IjtpeRZsjoJfq1wwj3` (eleven_multilingual_v2)
 
 ---
 
+## Version 4 — 2026-06-07
+
+**Statut** : prête à remplacer intégralement les instructions actuelles de
+l'assistant OpenAI
+**Raison** : stabilisation du contrat jeu/assistant, suppression des révélations
+automatiques et description factuelle complète de l'image
+
+Prompt complet :
+[PROMPT_PETERBOT_V4_COMPLET.md](../PROMPT_PETERBOT_V4_COMPLET.md)
+
+### Changements vs v3
+
+- Suppression de toute limite fixe de 8 échanges : Peter utilise exclusivement le
+  numéro et le maximum fournis par `[CONTEXTE DU JEU]`.
+- Peter ne peut plus décider ou annoncer seul qu'un indice vient d'être validé.
+- Interdiction explicite de révéler les indices manquants, même à la clôture, sauf
+  autorisation dynamique future.
+- Règle de guidage limitée à une seule piste visuelle indirecte à la fois.
+- Compatibilité avec le contexte actuellement injecté par le serveur et avec des
+  champs futurs plus précis.
+- Description entièrement réécrite après inspection de l'image haute résolution.
+- Identification fiable de l'œuvre `The Thinker's Burden / Le Fardeau du Penseur`,
+  de Benjamin Von Wong, créée pour INC-5.2 à Genève en août 2025.
+- Description détaillée du Penseur, du bébé, de la Terre-Mère, des végétaux, de la
+  spirale, des déchets, du panneau `PLASTIC TREATY`, du Palais et des drapeaux.
+- Ajout du contexte historique de la place des Nations et du Palais des Nations.
+- Correction factuelle : Broken Chair est voisine de la scène mais absente du
+  cadrage analysé.
+- Formulation plus précise du résultat des négociations : ajournement sans
+  consensus, plutôt qu'une attribution simplifiée à un seul groupe de pays.
+
+---
+
 ## Version 3 — 2026-05-06
 
 **Modifié par** : Ulrich Fischer (prompt appliqué manuellement dans l'interface OpenAI)  

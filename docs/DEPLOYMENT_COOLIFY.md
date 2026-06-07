@@ -87,10 +87,11 @@ ElevenLabs sont déjà sollicités, cette tâche de confort est abandonnée.
 
 ### C. Admission OpenAI et état de charge
 
-Les streams OpenAI possèdent un plafond configurable avec
-`OPENAI_MAX_CONCURRENT_STREAMS=50`. L'endpoint admin `GET /api/health/load`
-expose le nombre de streams actifs, la file ElevenLabs, les stores RAM et la
-mémoire du processus.
+Les appels OpenAI possèdent un plafond configurable, une file bornée et un
+verrou par session. Le réglage initial recommandé est de 10 appels actifs et
+30 en attente, avec un timeout d'attente de 15 secondes. L'endpoint admin
+`GET /api/health/load` expose les appels OpenAI actifs/en attente, les tours
+verrouillés par session, la file ElevenLabs, les stores RAM et la mémoire.
 
 ### D. Quotas par session
 
@@ -240,7 +241,10 @@ Configurer d'abord un seul processus Node.js. Les réglages principaux sont :
 ```env
 ELEVENLABS_MAX_CONCURRENT=5
 ELEVENLABS_MAX_QUEUED=100
-OPENAI_MAX_CONCURRENT_STREAMS=50
+OPENAI_MAX_CONCURRENT_STREAMS=10
+OPENAI_MAX_QUEUED_STREAMS=30
+OPENAI_QUEUE_WAIT_TIMEOUT_MS=15000
+OPENAI_RUN_TIMEOUT_MS=45000
 ```
 
 Adapter `ELEVENLABS_MAX_CONCURRENT` au niveau de concurrence réellement autorisé
@@ -282,7 +286,16 @@ Résultat attendu :
 ```json
 {
   "activeChatStreams": 0,
-  "maxConcurrentChatStreams": 50,
+  "maxConcurrentChatStreams": 10,
+  "openai": {
+    "active": 0,
+    "queued": 0,
+    "maxConcurrent": 10,
+    "maxQueued": 30,
+    "rejectedConflicts": 0,
+    "rejectedCapacity": 0,
+    "timedOut": 0
+  },
   "elevenlabs": { "active": 0, "queued": 0, "maxConcurrent": 5 },
   "stores": { "ttsRequests": 0, "pregenResume": 0, "ttsCache": 0 },
   "memory": { "heapUsedMB": 120, "heapTotalMB": 200 }
@@ -314,6 +327,7 @@ HTTPS géré par Replit              HTTPS Let's Encrypt via Traefik
 
 - [ ] Dockerfile et .dockerignore créés dans le repo
 - [x] File bornée ElevenLabs et délestage des reprises optionnelles
+- [x] File bornée OpenAI, timeout et verrou d'un tour par session
 - [x] Quotas coûteux calculés par session et Deepgram limité par session
 - [x] Route admin `/api/health/load` ajoutée
 - [ ] Serveur provisionné et Coolify installé
@@ -321,8 +335,27 @@ HTTPS géré par Replit              HTTPS Let's Encrypt via Traefik
 - [ ] Toutes les variables d'environnement configurées
 - [ ] Base de données migrée ou Neon gardé
 - [ ] Domaine configuré + HTTPS vérifié
-- [ ] Test de charge : simuler 10 puis 25 puis 50 connexions simultanées
+- [ ] Test de charge : `SESSIONS=10`, puis `25`, puis `30 npm run test:load:class`
 - [ ] Health check `/api/health/load` répond correctement avec `x-admin-token`
+
+### Test de charge classe
+
+Lancer uniquement sur staging ou dans une fenêtre de test dédiée. Le script
+crée de vraies sessions `LoadTest-*` et consomme les services OpenAI/TTS.
+
+```bash
+export BASE_URL=https://staging.dilemme.tonecole.ch
+export ADMIN_TOKEN=...
+
+# Monter progressivement après analyse de chaque résultat
+SESSIONS=5 TURNS=1 npm run test:load:class
+SESSIONS=10 TURNS=1 npm run test:load:class
+SESSIONS=25 TURNS=1 npm run test:load:class
+SESSIONS=30 TURNS=1 npm run test:load:class
+```
+
+Conserver le rapport JSON de chaque palier. Ne pas passer au palier suivant si
+des erreurs apparaissent ou si la file OpenAI approche de sa limite.
 
 ### Maintenir les deux en parallèle pendant la transition
 
