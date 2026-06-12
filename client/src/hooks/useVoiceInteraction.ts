@@ -47,6 +47,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
   const audioContextRef = useRef<AudioContext | null>(null);
   const keepAliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
+  // Tracks the active 120s safety timeout so a new playAudio() call can cancel
+  // the one from a previous interrupted playback before it fires mid-sentence.
+  const activeSafetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Audio level sampling (Option C: 10fps RMS volume meter)
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -578,10 +581,18 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       currentAudioUrlRef.current = audioUrl;
       console.log('[useVoiceInteraction] Created new blob URL:', audioUrl.substring(0, 50) + '...');
 
+      // Cancel any safety timeout from a previous interrupted playback so it
+      // cannot fire mid-sentence and cut the current audio.
+      if (activeSafetyTimeoutRef.current) {
+        clearTimeout(activeSafetyTimeoutRef.current);
+        activeSafetyTimeoutRef.current = null;
+      }
+
       // MOBILE FIX: Timeout de sécurité pour détecter les blocages audio
       const maxAudioDuration = 120000; // 2 minutes max
       const safetyTimeoutId = setTimeout(() => {
         console.error('[useVoiceInteraction] Audio playback timeout - forcing cleanup');
+        activeSafetyTimeoutRef.current = null;
         if (audioElementRef.current === audio) {
           audio.pause();
           audio.currentTime = 0;
@@ -597,6 +608,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
           resolve(); // Résoudre au lieu de rejeter pour ne pas bloquer
         }
       }, maxAudioDuration);
+      activeSafetyTimeoutRef.current = safetyTimeoutId;
 
       // MOBILE FIX: Timeout pour détecter si play() ne démarre jamais
       let playStarted = false;
@@ -604,6 +616,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         if (!playStarted) {
           console.error('[useVoiceInteraction] Audio play() did not start within 10s - forcing cleanup');
           clearTimeout(safetyTimeoutId);
+          activeSafetyTimeoutRef.current = null;
           if (currentAudioUrlRef.current) {
             URL.revokeObjectURL(currentAudioUrlRef.current);
             currentAudioUrlRef.current = null;
@@ -621,6 +634,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         console.log('[useVoiceInteraction] Audio ended normally');
         clearTimeout(safetyTimeoutId);
         clearTimeout(playTimeoutId);
+        activeSafetyTimeoutRef.current = null;
         if (currentAudioUrlRef.current) {
           URL.revokeObjectURL(currentAudioUrlRef.current);
           currentAudioUrlRef.current = null;
@@ -643,6 +657,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         });
         clearTimeout(safetyTimeoutId);
         clearTimeout(playTimeoutId);
+        activeSafetyTimeoutRef.current = null;
         if (currentAudioUrlRef.current) {
           URL.revokeObjectURL(currentAudioUrlRef.current);
           currentAudioUrlRef.current = null;
