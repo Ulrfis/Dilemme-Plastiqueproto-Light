@@ -47,3 +47,37 @@ test("explains transition at exchange 8 and conclusion at exchange 15", () => {
     /dernier échange autorisé/,
   );
 });
+
+test("keeps the post-challenge discussion open with an indirect visual hint", () => {
+  assert.match(
+    buildPeterExchangeInstructions({ ...baseInput, exchangeNumber: 9 }),
+    /discussion continue et les indices restent validables/,
+  );
+  assert.match(
+    buildPeterExchangeInstructions({ ...baseInput, exchangeNumber: 9 }),
+    /une seule piste visuelle indirecte/,
+  );
+});
+
+test("switches to the completion message once every clue is found", () => {
+  const completedInstructions = buildPeterExchangeInstructions({
+    ...baseInput,
+    exchangeNumber: 9,
+    foundAfter: ["Homme", "Femme", "ADN", "Traité plastique", "Végétation", "Déchets plastiques"],
+    missingClues: [],
+  });
+
+  assert.match(completedInstructions, /Tous les indices sont trouvés/);
+  assert.match(completedInstructions, /discussion peut continuer jusqu'au 15e échange/);
+});
+
+test("uses the single-clue hint before the open discussion phase", () => {
+  assert.match(
+    buildPeterExchangeInstructions({ ...baseInput, exchangeNumber: 7 }),
+    /Il reste un seul indice/,
+  );
+  assert.doesNotMatch(
+    buildPeterExchangeInstructions({ ...baseInput, exchangeNumber: 7 }),
+    /discussion continue et les indices restent validables/,
+  );
+});
