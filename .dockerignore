@@ -1,0 +1,13 @@
+node_modules
+dist
+.git
+.local
+.canvas
+.agents
+attached_assets/screenshots
+*.log
+.env
+.env.local
+drizzle
+migrations
+scripts/load-test-class.mjs
