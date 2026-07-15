@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-06-07 (Stabilisation PeterBot, intégrité pédagogique, charge classe et migration OpenAI)
+> **Last Updated**: 2026-07-15 (Bugs silencieux corrigés, portabilité complète Replit → Coolify)
 
 ---
 
@@ -63,6 +63,58 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 ## Feature Chronicle
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
+
+### [2026-07-15] — Deux bugs silencieux + portabilité complète Replit → Coolify 🔷
+
+**Intent**: Corriger deux bugs discrets qui dégradaient l'expérience en production sans être visibles directement, puis préparer l'application à tourner entièrement hors Replit : Dockerfile, suppression des dépendances Replit du build, tutoriel de migration Coolify exhaustif.
+
+**Prompt(s)**:
+```
+(1) Bug : erreurs 503 CORS dans les logs (SiteBehaviour)
+(2) Bug : audio de Peter coupé aléatoirement en cours de lecture
+(3) Rédiger un tutoriel complet de migration Replit → Coolify,
+    sans dépendance résiduelle Replit dans le code
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+
+*Bug 1 — CORS SiteBehaviour* : le script SiteBehaviour injecté dans `client/index.html` générait une erreur 503 CORS à chaque chargement, sans aucun impact visible côté utilisateur mais polluant les logs et consommant un aller-retour réseau. Suppression complète.
+
+*Bug 2 — race condition timeout audio* : un timeout de sécurité de 120s démarrait à chaque réponse de Peter pour forcer l'arrêt en cas de blocage. Quand Peter enchaînait rapidement deux réponses, l'ancien timeout expirait en pleine lecture du nouvel audio et le coupait. Fix : `activeSafetyTimeoutRef` annule le timeout précédent au début de chaque `playAudio()` — un seul timeout actif à la fois.
+
+*Portabilité* :
+- `vite.config.ts` : suppression de `@replit/vite-plugin-runtime-error-modal` (seul plugin Replit chargé inconditionnellement en production).
+- `server/db.ts` : `max: positiveIntFromEnv('DB_POOL_MAX', 30)` + guide de migration vers `pg` standard en commentaire.
+- `Dockerfile` multi-stage Node 20 Alpine avec health check (`/api/health`) et copie des `attached_assets`.
+- `.dockerignore` propre (node_modules, .git, .local, .agents, .env*, logs, drizzle, migrations, load-test).
+- `.env.example` réécrit avec toutes les variables documentées et groupées (DB, APIs, sécurité, tuning charge).
+- `docs/ops/migration-coolify-complete.md` : tutoriel 10 sections + checklist 6 catégories.
+
+**Architecture Delta**:
+```
+Avant :
+  vite.config.ts charge @replit/vite-plugin-runtime-error-modal en production
+  Pool DB sans limite → saturation potentielle à 30 sessions
+  Aucun Dockerfile → déploiement uniquement via Replit
+
+Après :
+  vite.config.ts ne charge aucun @replit/* en production (REPL_ID non défini)
+  Pool DB max=30 configurable via DB_POOL_MAX
+  Dockerfile + .dockerignore → buildable sur n'importe quelle machine
+  docs/ops/migration-coolify-complete.md → checklist complète pour migrer
+```
+
+**Surprise**: Le seul plugin Replit chargé inconditionnellement était `runtime-error-modal` — les deux autres (`cartographer`, `dev-banner`) étaient déjà correctement conditionnels à `REPL_ID`. Un seul import à supprimer rendait le build 100% portable.
+
+**Friction**: Le code reviewer a rejeté une première version du tutoriel qui ajoutait des marqueurs ✅ et modifiait le wording de la spec — la deuxième version verbatim a passé.
+
+**Insight**: Un timeout de sécurité "global" sur l'audio est dangereux dans un pipeline réactif : il doit toujours être scopé à la génération en cours, pas au composant.
+
+**Time**: ~1h30 (audit bugs + fix + migration Dockerfile + doc + 2 rounds review)
+
+---
 
 ### [2026-06-07] — Stabilisation PeterBot pour une classe de 25 élèves 🔷
 

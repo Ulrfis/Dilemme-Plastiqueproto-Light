@@ -6,6 +6,41 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [2.9.0] - 2026-07-15
+
+### Corrigé — Deux bugs silencieux en production
+
+#### CORS 503 SiteBehaviour (`client/index.html`)
+- Le script SiteBehaviour injecté dans `client/index.html` déclenchait des erreurs 503 CORS sur chaque chargement de page en production — sans jamais être visible côté utilisateur mais polluant les logs et ralentissant le chargement.
+- Suppression complète du script.
+
+#### Race condition timeout sécurité audio (`client/src/hooks/useVoiceInteraction.ts`)
+- Un timeout de sécurité de 120s démarrait à la fin de chaque réponse de Peter pour forcer l'arrêt si l'audio ne se terminait pas. Si Peter commençait une nouvelle réponse avant l'expiration du timeout précédent, le timeout expirait en pleine lecture et coupait le nouvel audio.
+- Ajout de `activeSafetyTimeoutRef` : chaque appel à `playAudio()` annule le timeout précédent avant d'en démarrer un nouveau, garantissant un seul timeout actif à la fois.
+
+### Ajouté — Portabilité complète (zéro dépendance Replit)
+
+#### `vite.config.ts`
+- Suppression de l'import et de l'usage de `@replit/vite-plugin-runtime-error-modal`, qui était chargé inconditionnellement même en build de production. Les deux plugins Replit restants (`cartographer`, `dev-banner`) sont déjà conditionnels à `REPL_ID !== undefined` — ils restent inactifs hors Replit.
+
+#### `server/db.ts`
+- Pool PostgreSQL plafonné à `max: positiveIntFromEnv('DB_POOL_MAX', 30)` — configurable via variable d'environnement, défaut 30 connexions (couvre 30 sessions simultanées sans saturation).
+- Ajout d'un commentaire inline détaillant comment remplacer le driver Neon (`@neondatabase/serverless`) par `pg` standard pour un PostgreSQL local.
+
+#### `Dockerfile` et `.dockerignore` (nouveaux fichiers à la racine)
+- Build multi-stage Node 20 Alpine : étape `builder` (npm ci + npm run build), étape `runner` (deps prod uniquement + artefacts dist + attached_assets).
+- Health check intégré (`wget /api/health`, interval 30s, 3 retries, start-period 15s).
+- `.dockerignore` exclut `node_modules`, `dist`, `.git`, `.local`, `.agents`, `.env*`, logs, drizzle, migrations, script de load test.
+
+#### `.env.example`
+- Entièrement réécrit avec toutes les variables documentées et groupées : runtime, DB (Options A Neon / B PostgreSQL local), OpenAI, ElevenLabs, Deepgram, PostHog, sécurité (`SESSION_SECRET`, `ADMIN_TOKEN`), Google Sheets, tuning charge (`DB_POOL_MAX`, `ELEVENLABS_MAX_CONCURRENT`, `OPENAI_MAX_CONCURRENT_STREAMS`, etc.).
+
+#### `docs/ops/migration-coolify-complete.md` (nouveau)
+- Tutoriel exhaustif en 10 sections : cartographie des dépendances Replit, modifications de code (vite + driver DB), migration base de données (Options A/B), Dockerfile, installation Coolify, déploiement étape par étape, vérification post-déploiement, migration progressive zéro-downtime, comparaison Replit vs Coolify, stratégie Redis pour > 50 utilisateurs.
+- Checklist complète en 6 catégories (code, infrastructure, DB, déploiement, tests de charge, bascule DNS).
+
+---
+
 ## [2.8.0] - 2026-06-07
 
 ### Modifié — Défi de 8 échanges, conversation jusqu'à 15
