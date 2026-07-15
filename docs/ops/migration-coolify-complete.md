@@ -12,7 +12,7 @@
 
 | Fichier | Dépendance Replit | Impact | Action |
 |---------|------------------|--------|--------|
-| `vite.config.ts` | `@replit/vite-plugin-runtime-error-modal` | Importé inconditionnellement — présent même en build production | **Supprimer** ✅ fait |
+| `vite.config.ts` | `@replit/vite-plugin-runtime-error-modal` | Importé inconditionnellement — présent même en build production | **Supprimer** |
 | `vite.config.ts` | `@replit/vite-plugin-cartographer` | Conditionnel `REPL_ID !== undefined` — inactif hors Replit | Laisser (déjà inoffensif) |
 | `vite.config.ts` | `@replit/vite-plugin-dev-banner` | Conditionnel `REPL_ID !== undefined` — inactif hors Replit | Laisser (déjà inoffensif) |
 | `server/db.ts` | `@neondatabase/serverless` | Driver PostgreSQL avec transport WebSocket Neon | Garder si Neon cloud, remplacer par `pg` si PostgreSQL local |
@@ -25,7 +25,7 @@
 | `REPL_ID` | Active les plugins Replit dans `vite.config.ts` | Ne pas définir — les plugins s'éteindront automatiquement |
 | `DATABASE_URL` | Connexion PostgreSQL (Neon ou autre) | À redéfinir avec la nouvelle URL de base |
 | `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE` | Composants individuels de la DB (Replit les injecte) | Non nécessaires si `DATABASE_URL` est définie |
-| `PORT` | Port d'écoute (Replit fixe à 5000) | Fixer à `5000` dans les env vars Coolify |
+| `PORT` | Port d'écoute (Replit fixe à 5000) | Fixer à 5000 dans les env vars Coolify |
 | `SESSION_SECRET` | Secret Express session | À générer et configurer |
 
 ### 1c. Intégrations Replit (`.replit` → `[agent].integrations`)
@@ -45,15 +45,38 @@ pas dans le code. Vérification :
 
 ## 2. Modifications de code nécessaires
 
-### 2a. Supprimer le plugin runtime-error-modal de Vite ✅ déjà fait
+### 2a. Supprimer le plugin runtime-error-modal de Vite
 
 **Fichier** : `vite.config.ts`
 
-L'import et l'usage de `@replit/vite-plugin-runtime-error-modal` ont été supprimés.
-Ce plugin était chargé inconditionnellement, y compris en build de production,
-rendant le bundle dépendant d'un package `@replit/*`.
+Avant :
+```typescript
+import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
-### 2b. Désinstaller les packages @replit/* (après clonage hors Replit)
+export default defineConfig({
+  plugins: [
+    react(),
+    runtimeErrorOverlay(),           // ← à supprimer
+    ...(process.env.NODE_ENV !== "production" &&
+    process.env.REPL_ID !== undefined
+      ? [ /* cartographer, devBanner */ ]
+      : []),
+  ],
+```
+
+Après :
+```typescript
+export default defineConfig({
+  plugins: [
+    react(),
+    ...(process.env.NODE_ENV !== "production" &&
+    process.env.REPL_ID !== undefined
+      ? [ /* cartographer, devBanner — déjà inactifs hors Replit */ ]
+      : []),
+  ],
+```
+
+### 2b. Désinstaller les packages @replit/* (après migration)
 
 Sur ta machine de développement, une fois le repo cloné hors Replit :
 ```bash
@@ -62,16 +85,15 @@ npm uninstall @replit/vite-plugin-runtime-error-modal \
               @replit/vite-plugin-dev-banner
 ```
 
-Les deux derniers (`cartographer`, `dev-banner`) peuvent rester en `devDependencies`
-sans danger — ils sont conditionnels à `REPL_ID !== undefined` et ne s'activent
-pas hors Replit. Mais il est plus propre de les supprimer.
+Les deux derniers peuvent rester en `devDependencies` sans danger
+(conditionnels `REPL_ID`), mais il est plus propre de les supprimer.
 
 ### 2c. Base de données — deux options
 
 #### Option A — Garder Neon PostgreSQL (recommandé, le plus simple)
 
-Neon est un service cloud PostgreSQL standard, complètement indépendant de Replit.
-Aucun code à changer. Copier exactement le même `DATABASE_URL` depuis Replit → Coolify.
+Neon est un service cloud PostgreSQL standard. Aucun code à changer.
+Copier exactement le même `DATABASE_URL` depuis Replit → Coolify env vars.
 
 ```
 DATABASE_URL=postgresql://user:password@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require
@@ -84,7 +106,7 @@ Le driver `@neondatabase/serverless` fonctionne hors Replit sans aucune modifica
 Remplacer dans `server/db.ts` :
 
 ```typescript
-// AVANT (Neon serverless avec transport WebSocket)
+// AVANT (Neon serverless)
 import { Pool, neonConfig } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import ws from "ws";
@@ -92,13 +114,10 @@ neonConfig.webSocketConstructor = ws;
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 export const db = drizzle({ client: pool, schema });
 
-// APRÈS (pg standard pour PostgreSQL local ou tout provider standard)
+// APRÈS (pg standard)
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 30,
-});
+export const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 30 });
 export const db = drizzle({ client: pool, schema });
 ```
 
@@ -109,8 +128,7 @@ npm install --save-dev @types/pg
 npm uninstall @neondatabase/serverless ws
 ```
 
-> **Note** : si tu gardes Neon, le `ws` en `dependencies` reste utile pour le
-> transport WebSocket Neon — ne pas le désinstaller dans ce cas.
+Mettre à jour dans `package.json` les imports Drizzle → `drizzle-orm/node-postgres`.
 
 ---
 
@@ -119,49 +137,52 @@ npm uninstall @neondatabase/serverless ws
 ### Exporter les données depuis Replit (Neon)
 
 ```bash
-# Récupérer DATABASE_URL depuis Replit Secrets
-# Puis sur ta machine locale :
+# Sur ta machine, avec les credentials Replit Neon :
 pg_dump "postgresql://user:pass@host/dbname?sslmode=require" \
   --no-owner --no-acl \
-  -f dilemme_backup_$(date +%Y%m%d).sql
+  -f dilemme_backup.sql
 ```
 
 ### Importer dans la nouvelle base
 
 **Option A — Nouvelle base Neon** (aucune migration nécessaire si on garde le même projet Neon) :
 ```bash
-# Vérifier que le schéma est à jour
+# Juste vérifier que le schéma est à jour
 DATABASE_URL="postgresql://..." npx drizzle-kit push
 ```
 
 **Option B — PostgreSQL local Coolify** :
 ```bash
-# 1. Créer la base dans Coolify (interface UI → New Resource → PostgreSQL)
-# 2. Récupérer l'URL de connexion interne Coolify
+# Créer la base dans Coolify (interface UI → New Resource → PostgreSQL)
+# Récupérer l'URL de connexion interne Coolify
 
-# 3. Pousser le schéma Drizzle
+# Pousser le schéma Drizzle
 DATABASE_URL="postgresql://coolify_user:pass@postgres:5432/dilemme" \
   npx drizzle-kit push
 
-# 4. Importer les données existantes
+# Importer les données existantes
 psql "postgresql://coolify_user:pass@host:5432/dilemme" \
-  < dilemme_backup_$(date +%Y%m%d).sql
+  < dilemme_backup.sql
 ```
 
 ---
 
-## 4. Dockerfile et .dockerignore ✅ déjà créés à la racine
+## 4. Dockerfile et .dockerignore
 
-### Dockerfile (multi-stage Node 20 Alpine)
+Créer ces deux fichiers à la **racine du projet** (à côté de `package.json`).
+
+### Dockerfile
 
 ```dockerfile
 # ─── Étape 1 : build ───────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# Copier les manifestes en premier pour tirer parti du cache Docker
 COPY package*.json ./
 RUN npm ci
 
+# Copier le code source et builder
 COPY . .
 RUN npm run build
 
@@ -170,14 +191,19 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Dépendances de production seulement
 COPY package*.json ./
 RUN npm ci --omit=dev
 
+# Artefacts de build
 COPY --from=builder /app/dist ./dist
+
+# Fichiers statiques nécessaires au runtime
 COPY --from=builder /app/attached_assets ./attached_assets
 
 EXPOSE 5000
 
+# Health check applicatif
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD wget -qO- http://localhost:5000/api/health || exit 1
 
@@ -219,7 +245,7 @@ scripts/load-test-class.mjs
 ### Installer Coolify
 
 ```bash
-# Se connecter en SSH au serveur
+# Se connecter en SSH
 ssh root@TON_IP_SERVEUR
 
 # Mise à jour système
@@ -271,15 +297,14 @@ DEEPGRAM_API_KEY=...
 POSTHOG_API_KEY=phc_...
 POSTHOG_PERSONAL_API_KEY=phx_...
 POSTHOG_PROJECT_ID=107669
-SESSION_SECRET=<générer avec: openssl rand -base64 48>
+SESSION_SECRET=<chaîne_aléatoire_32+_chars>
 
-# ── Google Sheets (optionnel — analytics séances) ─────────────
-# URL du Google Apps Script déployé (voir google-apps-script.js à la racine)
+# ── Google Sheets (optionnel) ─────────────────────────────────
+# URL du Google Apps Script déployé (voir google-apps-script.js)
 GOOGLE_SCRIPT_URL=https://script.google.com/macros/s/.../exec
 
 # ── Sécurité admin ────────────────────────────────────────────
-# Requis pour accéder à /admin et /api/health/load
-ADMIN_TOKEN=<token_secret_32+_chars>
+ADMIN_TOKEN=<token_secret_pour_dashboard_admin>
 
 # ── Tuning charge (30 élèves simultanés) ─────────────────────
 DB_POOL_MAX=30
@@ -291,8 +316,7 @@ OPENAI_QUEUE_WAIT_TIMEOUT_MS=30000
 OPENAI_RUN_TIMEOUT_MS=45000
 ```
 
-> **Générer SESSION_SECRET** : `openssl rand -base64 48`  
-> **Générer ADMIN_TOKEN** : `openssl rand -hex 32`
+> **SESSION_SECRET** : générer avec `openssl rand -base64 48`
 
 ### 6d. Lancer le premier déploiement
 
@@ -300,11 +324,11 @@ Dans Coolify → cliquer **Deploy**.
 
 Coolify effectue automatiquement :
 1. Clone du dépôt Git
-2. Build de l'image Docker (multi-stage, ~3 min au premier build)
+2. Build de l'image Docker (multi-stage)
 3. Push dans le registry Docker interne
 4. Lancement du conteneur avec les env vars configurées
-5. Configuration Traefik (reverse proxy + HTTPS Let's Encrypt)
-6. Health check automatique (30s interval, 3 retries)
+5. Configuration Traefik (reverse proxy + HTTPS)
+6. Health check automatique (30s interval)
 
 Durée typique : **2-4 minutes** au premier build, ~1 minute pour les suivants.
 
@@ -319,7 +343,7 @@ docker ps | grep dilemme
 # Logs applicatifs en temps réel
 docker logs -f <container_id>
 
-# Tester le health check de base (doit retourner 200)
+# Tester le health check de base
 curl https://dilemme.tonecole.ch/api/health
 
 # Tester l'état de charge (nécessite ADMIN_TOKEN)
@@ -338,16 +362,6 @@ Réponse `/api/health/load` attendue à vide :
 }
 ```
 
-Résultat des logs Docker attendu au démarrage :
-```
-[GoogleSheets] ✅ Google Apps Script URL configured
-[Server] ✅ Assistant validated: Peter décembre 2025 proto Replit
-[Deepgram] Live transcription relay attached at /ws/deepgram
-serving on port 5000
-[Connection Warming] OpenAI connection warming enabled (every 30s)
-[Connection Warming] ElevenLabs connection warming enabled (every 30s)
-```
-
 ---
 
 ## 8. Migration progressive (zéro downtime)
@@ -357,11 +371,10 @@ Recommandé pour ne pas interrompre une classe en cours :
 ```
 Semaine 1 → Coolify staging sur dilemme-staging.tonecole.ch
               Tests avec 5 puis 10 sessions simultanées
-              Observer /api/health/load pendant les tests
 Semaine 2 → Test avec une vraie classe (30 élèves) sur staging
-              Valider latence TTS et OpenAI sous charge réelle
-Semaine 3 → Basculer le DNS production → IP Coolify
-              Garder Replit actif en fallback 24-48h
+              Observer /api/health/load pendant la session
+Semaine 3 → Basculer le DNS production → Coolify
+              Garder Replit actif en fallback 24h
 Semaine 4 → Désactiver Replit, archiver le dépôt Replit si nécessaire
 ```
 
@@ -380,15 +393,14 @@ c'est acceptable car la base de données est partagée (Neon) ou déjà migrée.
 |---------|-----------------|---------------------|
 | RAM disponible | ~2 GB partagés | 8 GB dédiés |
 | CPU | Partagé, burst | 4 cœurs dédiés |
-| Restart automatique | Géré par Replit | Coolify + Docker `restart: unless-stopped` |
+| Restart automatique | Géré par Replit | Coolify + Docker restart policy |
 | HTTPS | Automatique | Traefik + Let's Encrypt |
-| Redéploiement | Via UI Replit | `git push` → webhook → auto |
+| Redéploiement | Via UI Replit | git push → webhook → auto |
 | Logs | UI Replit | `docker logs` + Coolify UI |
 | Limites artificielles | Oui (autoscale Replit) | Aucune |
 | Coût serveur | Inclus dans plan Replit | ~10-30€/mois VPS |
 | In-memory state | Reset à chaque restart | Reset à chaque restart |
 | Données persistées | Neon PostgreSQL (cloud) | PostgreSQL Coolify ou Neon |
-| DB pool max | 10 (défaut, non configuré) | 30 (configuré via `DB_POOL_MAX`) |
 
 ---
 
@@ -397,11 +409,9 @@ c'est acceptable car la base de données est partagée (Neon) ou déjà migrée.
 Si la charge dépasse 50 élèves simultanés, la prochaine étape est d'externaliser
 les stores audio de la RAM vers **Redis** :
 
-| Store actuel | Redis équivalent | TTL |
-|---|---|---|
-| `ttsRequestStore` (in-memory Map) | Redis avec TTL 60s | 60s |
-| `pregenResumeStore` (in-memory Map) | Redis avec TTL | 5min |
-| `ttsCache` (in-memory Map, 300 entrées) | Redis avec TTL | 24h |
+- `ttsRequestStore` → Redis avec TTL 60s
+- `pregenResumeStore` → Redis avec TTL 5min
+- `ttsCache` → Redis avec TTL 24h
 
 Coolify supporte Redis nativement : **New Resource → Redis**.
 
@@ -414,13 +424,13 @@ Estimation du refactoring : 3-5h de développement.
 ## Checklist de migration complète
 
 ### Préparation du code
-- [x] Supprimer `runtimeErrorOverlay()` de `vite.config.ts`
-- [ ] Désinstaller `@replit/vite-plugin-runtime-error-modal` du `package.json` (hors Replit)
-- [x] Ajouter `max: DB_POOL_MAX` au Pool PostgreSQL dans `server/db.ts`
-- [x] Ajouter `server.keepAliveTimeout = 65_000` dans `server/index.ts`
-- [x] Créer `Dockerfile` à la racine
-- [x] Créer `.dockerignore` à la racine
-- [x] Mettre à jour `.env.example` avec toutes les variables
+- [ ] Supprimer `runtimeErrorOverlay()` de `vite.config.ts`
+- [ ] Désinstaller `@replit/vite-plugin-runtime-error-modal` du `package.json`
+- [ ] Ajouter `max: 30` au Pool PostgreSQL dans `server/db.ts`
+- [ ] Ajouter `server.keepAliveTimeout = 65_000` dans `server/index.ts`
+- [ ] Créer `Dockerfile` à la racine (voir Section 4)
+- [ ] Créer `.dockerignore` à la racine (voir Section 4)
+- [ ] Mettre à jour `.env.example` avec toutes les variables
 
 ### Infrastructure
 - [ ] Serveur VPS provisionné (Ubuntu 22.04, 4 vCPU, 8 GB RAM)
@@ -439,8 +449,8 @@ Estimation du refactoring : 3-5h de développement.
 - [ ] `GET /api/health/load` répond avec les bonnes métriques
 
 ### Tests de charge
-- [ ] Test à 10 sessions simultanées sur staging (`SESSIONS=10 npm run test:load:class`)
-- [ ] Test à 30 sessions simultanées (`SESSIONS=30 npm run test:load:class`)
+- [ ] Test à 10 sessions simultanées sur staging
+- [ ] Test à 30 sessions simultanées
 - [ ] Aucun `ChatAdmissionTimeoutError` ni timeout DB
 
 ### Bascule production
