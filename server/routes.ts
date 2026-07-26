@@ -224,6 +224,28 @@ setInterval(() => {
   });
 }, 60_000);
 
+// Réécrit en place les champs de taille d'un WAV streamé (placeholders 0xFFFFFFFF)
+// pour que le navigateur connaisse la durée exacte de l'audio.
+function fixWavHeader(buf: Buffer): void {
+  if (buf.byteLength < 44) return;
+  if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return;
+  // RIFF chunk size = taille totale - 8
+  buf.writeUInt32LE(buf.byteLength - 8, 4);
+  // Parcourir les sous-chunks pour trouver "data" et corriger sa taille
+  let offset = 12;
+  while (offset + 8 <= buf.byteLength) {
+    const chunkId = buf.toString('ascii', offset, offset + 4);
+    if (chunkId === 'data') {
+      buf.writeUInt32LE(buf.byteLength - offset - 8, offset + 4);
+      return;
+    }
+    const chunkSize = buf.readUInt32LE(offset + 4);
+    // Taille placeholder ou corrompue → impossible d'avancer de manière fiable
+    if (chunkSize === 0xffffffff || chunkSize > buf.byteLength) return;
+    offset += 8 + chunkSize + (chunkSize % 2);
+  }
+}
+
 // Helper: Generate TTS audio from Gradium (returns Buffer)
 // previousText: conservé dans la signature pour compatibilité des appelants — non utilisé par l'API REST Gradium
 // quality: paramètre conservé pour compatibilité — Gradium utilise un modèle unique ("default")
@@ -293,6 +315,12 @@ async function generateTtsAudio(
     if (audioBuffer.byteLength === 0) {
       throw new Error('Received empty audio from Gradium');
     }
+
+    // Gradium streame le WAV avec des tailles d'en-tête placeholder (0xFFFFFFFF).
+    // Sans correction, le navigateur ne connaît pas la durée réelle → lecture
+    // superposée / séquencement cassé dans la file audio. On réécrit les champs
+    // RIFF size et data size avec les vraies longueurs.
+    fixWavHeader(audioBuffer);
 
     // Cache the result
     if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
