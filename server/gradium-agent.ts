@@ -1,20 +1,20 @@
 import { Agent, fetch as undiciFetch } from 'undici';
 
-const elevenLabsAgent = new Agent({
+const gradiumAgent = new Agent({
   keepAliveTimeout: 35_000,
   keepAliveMaxTimeout: 300_000,
 });
 
-process.once('SIGTERM', () => elevenLabsAgent.close());
-process.once('SIGINT', () => elevenLabsAgent.close());
+process.once('SIGTERM', () => gradiumAgent.close());
+process.once('SIGINT', () => gradiumAgent.close());
 
-export function elevenLabsFetch(
+export function gradiumFetch(
   url: string,
   options?: Parameters<typeof undiciFetch>[1]
 ): ReturnType<typeof undiciFetch> {
   return undiciFetch(url, {
     ...options,
-    dispatcher: elevenLabsAgent,
+    dispatcher: gradiumAgent,
   });
 }
 
@@ -45,7 +45,7 @@ function safeNum(v: unknown): number {
 }
 
 export function getPoolStats(): PoolStatsSnapshot {
-  const stats = (elevenLabsAgent as unknown as { stats?: Record<string, Record<string, unknown>> }).stats || {};
+  const stats = (gradiumAgent as unknown as { stats?: Record<string, Record<string, unknown>> }).stats || {};
   const byOrigin: PoolStatsSnapshot['byOrigin'] = {};
   const totals = { connected: 0, free: 0, pending: 0, queued: 0, running: 0, size: 0 };
   let origins = 0;
@@ -70,7 +70,7 @@ export function getPoolStats(): PoolStatsSnapshot {
   return { origins, ...totals, byOrigin };
 }
 
-// Shared cadence for the ElevenLabs warming tick + pool sampling.
+// Shared cadence for the Gradium warming tick + pool sampling.
 export const POOL_SAMPLE_INTERVAL_MS = 30_000;
 // Ring buffer of recent pool samples — 60 samples = 30 min at 30s tick.
 export const POOL_HISTORY_CAPACITY = 60;

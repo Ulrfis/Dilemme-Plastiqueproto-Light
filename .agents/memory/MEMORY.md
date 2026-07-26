@@ -1,0 +1,1 @@
+- [Migration ElevenLabs → Gradium](gradium-migration.md) — TTS remplacé par Gradium REST API ; clés GRADIUM_API_KEY / GRADIUM_VOICE_ID ; fichier agent renommé gradium-agent.ts

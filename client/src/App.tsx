@@ -164,7 +164,7 @@ function readPostHogContext(): { session_id?: string; user_name?: string } {
 // Infer the upstream service from an API endpoint path.
 function serviceFromEndpoint(endpoint?: string): string | undefined {
   if (!endpoint || typeof endpoint !== 'string') return undefined;
-  if (endpoint.includes('/tts/')) return 'elevenlabs';
+  if (endpoint.includes('/tts/')) return 'gradium';
   if (endpoint.includes('/speech-to-text')) return 'whisper';
   if (endpoint.includes('/chat') || endpoint.includes('/sessions/') || endpoint.includes('/synthesis') || endpoint.includes('/resume')) return 'openai';
   if (endpoint.includes('deepgram')) return 'deepgram';

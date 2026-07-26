@@ -8,7 +8,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
-import { elevenLabsFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY, POOL_SAMPLE_INTERVAL_MS } from "./elevenlabs-agent";
+import { gradiumFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY, POOL_SAMPLE_INTERVAL_MS } from "./gradium-agent";
 import { captureServerError, captureServerEvent, captureServerTiming } from "./posthog";
 import { BoundedPriorityQueue, QueueOverloadedError, type QueuePriority } from "./concurrency-limit";
 import { createRateLimiter, positiveIntFromEnv } from "./request-limiter";
@@ -53,8 +53,8 @@ const ttsLimiter = createRateLimiter(60, 15 * 60 * 1000);
 const sttLimiter = createRateLimiter(60, 15 * 60 * 1000);
 
 const elevenLabsQueue = new BoundedPriorityQueue({
-  maxConcurrent: positiveIntFromEnv('ELEVENLABS_MAX_CONCURRENT', 5),
-  maxQueued: positiveIntFromEnv('ELEVENLABS_MAX_QUEUED', 100),
+  maxConcurrent: positiveIntFromEnv('GRADIUM_MAX_CONCURRENT', 5),
+  maxQueued: positiveIntFromEnv('GRADIUM_MAX_QUEUED', 100),
 });
 const resumePregenQueue = new BoundedPriorityQueue({
   maxConcurrent: 1,
@@ -224,10 +224,9 @@ setInterval(() => {
   });
 }, 60_000);
 
-// Helper: Generate TTS audio from ElevenLabs (returns Buffer)
-// previousText: text spoken before this segment, used by ElevenLabs to maintain prosody continuity
-// quality: 'fast' uses eleven_flash_v2_5 for lowest latency (Phase 1)
-//          'quality' uses eleven_multilingual_v2 for best prosody continuity (Phase 2)
+// Helper: Generate TTS audio from Gradium (returns Buffer)
+// previousText: conservé dans la signature pour compatibilité des appelants — non utilisé par l'API REST Gradium
+// quality: paramètre conservé pour compatibilité — Gradium utilise un modèle unique ("default")
 async function generateTtsAudio(
   text: string,
   previousText?: string,
@@ -235,57 +234,49 @@ async function generateTtsAudio(
   priority: QueuePriority = 'foreground',
   dropIfBusy = false,
 ): Promise<Buffer> {
-  const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-  const VOICE_ID = 'R8IjtpeRZsjoJfq1wwj3';
+  const GRADIUM_API_KEY = process.env.GRADIUM_API_KEY;
+  const GRADIUM_VOICE_ID = process.env.GRADIUM_VOICE_ID;
 
-  if (!ELEVENLABS_API_KEY) {
-    throw new Error('ElevenLabs API key not configured');
+  if (!GRADIUM_API_KEY) {
+    throw new Error('Gradium API key not configured (GRADIUM_API_KEY)');
+  }
+  if (!GRADIUM_VOICE_ID) {
+    throw new Error('Gradium voice ID not configured (GRADIUM_VOICE_ID)');
   }
 
-  // Cache key includes text + quality level to avoid cross-phase cache pollution
-  // (flash model audio should not be returned when quality model is requested and vice-versa)
-  const textHash = crypto.createHash('md5').update(`${quality}:${text}`).digest('hex');
+  // Cache key inclut le texte (le modèle est unique, pas besoin de différencier fast/quality)
+  const textHash = crypto.createHash('md5').update(`gradium:${text}`).digest('hex');
   if (!previousText && ttsCache.has(textHash)) {
-    console.log('[TTS] Cache HIT:', textHash.substring(0, 8), `(${quality})`);
+    console.log('[TTS] Cache HIT:', textHash.substring(0, 8));
     return ttsCache.get(textHash)!;
   }
 
-  // Phase 1 (fast): eleven_flash_v2_5, latency opt 3 → fast first audio without heavy compression artifacts
-  // Phase 2 (quality): eleven_multilingual_v2, latency opt 2 → natural prosody for bulk of response
-  const modelId = quality === 'fast' ? 'eleven_flash_v2_5' : 'eleven_multilingual_v2';
-  const latencyOpt = quality === 'fast' ? 3 : 2;  // Was 4 for fast — level 4 causes compression artifacts on loud phonemes
+  console.log('[TTS]', quality.toUpperCase(), 'mode — generating', text.length, 'chars [Gradium default]');
 
-  console.log('[TTS]', quality.toUpperCase(), 'mode — generating', text.length, 'chars', previousText ? `(with ${previousText.length} chars context)` : '', `[${modelId}]`);
   const body: Record<string, unknown> = {
     text,
-    model_id: modelId,
-    voice_settings: {
-      stability: 0.75,          // Was 0.70 — slightly more stable, reduces amplitude spikes on "!"
-      similarity_boost: 0.75,
-      style: 0.0,               // Was 0.2 — neutral on flash model; expressivity on flash amplifies clipping on "!"
-      use_speaker_boost: false  // Was true — speaker boost artificially amplifies peaks, causing saturation on exclamations
+    voice_id: GRADIUM_VOICE_ID,
+    model_name: 'default',
+    output_format: 'mp3',
+    only_audio: true,
+    json_config: {
+      language: 'fr',
     },
-    optimize_streaming_latency: latencyOpt,
   };
 
-  if (previousText) {
-    body.previous_text = previousText;
-  }
-
   return elevenLabsQueue.run(async () => {
-    const response = await elevenLabsFetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/stream`, {
+    const response = await gradiumFetch('https://api.gradium.ai/api/post/speech/tts', {
       method: 'POST',
       headers: {
-        'Accept': 'audio/mpeg',
         'Content-Type': 'application/json',
-        'xi-api-key': ELEVENLABS_API_KEY
+        'x-api-key': GRADIUM_API_KEY,
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+      throw new Error(`Gradium API error: ${response.status} - ${errorText}`);
     }
 
     const chunks: Buffer[] = [];
@@ -300,7 +291,7 @@ async function generateTtsAudio(
 
     const audioBuffer = Buffer.concat(chunks);
     if (audioBuffer.byteLength === 0) {
-      throw new Error('Received empty audio from ElevenLabs');
+      throw new Error('Received empty audio from Gradium');
     }
 
     // Cache the result
@@ -509,7 +500,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 </html>`);
   });
 
-  // Snapshot of the undici connection pool used for ElevenLabs (point-in-time).
+  // Snapshot of the undici connection pool used for Gradium (point-in-time).
   app.get('/api/health/connections', async (req, res) => {
     if (!requireAdmin(req, res)) return;
     res.json({
@@ -539,7 +530,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       activeChatStreams,
       maxConcurrentChatStreams: MAX_CONCURRENT_CHAT_STREAMS,
       openai: chatTurnController.getStats(),
-      elevenlabs: elevenLabsQueue.getStats(),
+      gradium: elevenLabsQueue.getStats(),
       resumePregen: resumePregenQueue.getStats(),
       stores: {
         ttsRequests: ttsRequestStore.size,
@@ -562,7 +553,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const results: Record<string, { status: string; message: string }> = {
       openai: { status: 'unknown', message: '' },
       assistant: { status: 'unknown', message: '' },
-      elevenlabs: { status: 'unknown', message: '' },
+      gradium: { status: 'unknown', message: '' },
     };
 
     // Test OpenAI
@@ -581,19 +572,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       results.assistant = { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
     }
 
-    // Test ElevenLabs
+    // Test Gradium — ping the TTS endpoint; 422 (body validation) is acceptable and confirms auth
     try {
-      const response = await elevenLabsFetch('https://api.elevenlabs.io/v1/user', {
-        headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY || '' }
+      const response = await gradiumFetch('https://api.gradium.ai/api/post/speech/tts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.GRADIUM_API_KEY || '',
+        },
+        body: JSON.stringify({ text: '', voice_id: process.env.GRADIUM_VOICE_ID || '', output_format: 'mp3', only_audio: true }),
       });
-      if (response.ok) {
-        const data = await response.json() as { subscription?: { character_count?: number } };
-        results.elevenlabs = { status: 'ok', message: `Characters: ${data.subscription?.character_count || 'N/A'}` };
+      await response.arrayBuffer(); // consume body to free socket
+      if (response.ok || response.status === 422) {
+        results.gradium = { status: 'ok', message: `API reachable (HTTP ${response.status})` };
+      } else if (response.status === 401 || response.status === 403) {
+        results.gradium = { status: 'error', message: `Auth failed — check GRADIUM_API_KEY (HTTP ${response.status})` };
       } else {
-        results.elevenlabs = { status: 'error', message: `HTTP ${response.status}` };
+        results.gradium = { status: 'error', message: `HTTP ${response.status}` };
       }
     } catch (error) {
-      results.elevenlabs = { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
+      results.gradium = { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
     }
 
     res.json(results);
@@ -754,7 +752,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const session = await storage.createSession(sessionData);
 
       // Pre-generate welcome message TTS in background so TutorialScreen can play it immediately
-      // without waiting for an on-demand ElevenLabs call after navigation.
+      // without waiting for an on-demand Gradium call after navigation.
       const welcomeText = `Bienvenue ${data.userName} dans cette courte expérience. Tente de trouver 6 indices dans cette image pendant les ${CLUE_CHALLENGE_EXCHANGES} premiers échanges, en racontant ce que tu vois et ce qui attire ton attention sur l'impact du plastique sur la santé. Ensuite, tu pourras continuer à chercher et à discuter avec moi jusqu'à ${MAX_CONVERSATION_EXCHANGES} échanges au total.`;
       const welcomeAudioToken = crypto.randomUUID();
       const welcomeT0 = Date.now();
@@ -1543,10 +1541,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sentenceTtsPromises: Promise<void>[] = [];
 
       // ── 2-PHASE TTS STRATEGY ───────────────────────────────────────────────
-      // Phase 1 (FAST): first group of sentences sent to ElevenLabs immediately
-      //   using eleven_flash_v2_5 + optimize_streaming_latency:4 → first audio ~2-3s
-      // Phase 2 (QUALITY): remaining sentences sent as ONE single ElevenLabs call
-      //   using eleven_multilingual_v2 + previous_text=phase1 → natural prosody for 70-80% of response
+      // Phase 1 (FAST): first group of sentences sent to Gradium immediately
+      //   → first audio ~2-3s
+      // Phase 2 (QUALITY): remaining sentences sent as separate Gradium calls
+      //   → natural prosody for 70-80% of response
       //
       // Short sentences (< MIN_SENTENCE_CHARS) are grouped with the next one to avoid
       // unnatural micro-segments. Phase 1 fires as soon as the combined buffer reaches
@@ -1576,15 +1574,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phase1Done = true;
         const phase1T0 = Date.now();
 
-        console.log(`[Chat Stream API] Phase 1 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model — uniforme)`);
+        console.log(`[Chat Stream API] Phase 1 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." [Gradium]`);
 
-        // Use 'quality' (eleven_multilingual_v2) for Phase 1 too, to keep a consistent voice
-        // across all sentences. The flash model was producing saturated/exaggerated output
-        // on sentences ending with "!" (different acoustic profile from multilingual_v2).
         const ttsPromise = generateTtsAudio(combined, undefined, 'quality')
           .then((audioBuffer) => {
             captureServerTiming(sessionId, {
-              step: 'elevenlabs_phase1',
+              step: 'gradium_phase1',
               duration_ms: Date.now() - phase1T0,
               success: true,
               endpoint: '/api/chat/stream',
@@ -1607,7 +1602,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .catch((ttsErr) => {
             captureServerTiming(sessionId, {
-              step: 'elevenlabs_phase1',
+              step: 'gradium_phase1',
               duration_ms: Date.now() - phase1T0,
               success: false,
               endpoint: '/api/chat/stream',
@@ -1634,7 +1629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phase2aText = combined;
         phase2Dispatched = true;
 
-        console.log(`[Chat Stream API] Phase 2a TTS (${dispatchedMidStream ? 'MID-STREAM' : 'AT-COMPLETION'}): ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
+        console.log(`[Chat Stream API] Phase 2a TTS (${dispatchedMidStream ? 'MID-STREAM' : 'AT-COMPLETION'}): ${count} sentence(s) → "${combined.substring(0, 60)}..." [Gradium]`);
         const phase2aT0 = Date.now();
 
         // Emit timing metadata immediately so the client can fire a PostHog event
@@ -1649,7 +1644,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ttsPromise = generateTtsAudio(combined, phase1Text || undefined, 'quality')
           .then((audioBuffer) => {
             captureServerTiming(sessionId, {
-              step: 'elevenlabs_phase2a',
+              step: 'gradium_phase2a',
               duration_ms: Date.now() - phase2aT0,
               success: true,
               endpoint: '/api/chat/stream',
@@ -1673,7 +1668,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .catch((ttsErr) => {
             captureServerTiming(sessionId, {
-              step: 'elevenlabs_phase2a',
+              step: 'gradium_phase2a',
               duration_ms: Date.now() - phase2aT0,
               success: false,
               endpoint: '/api/chat/stream',
@@ -1698,13 +1693,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const count = sentences.length;
         const prevText = [phase1Text, phase2aText].filter(Boolean).join(' ') || undefined;
 
-        console.log(`[Chat Stream API] Phase 2b TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." (quality model)`);
+        console.log(`[Chat Stream API] Phase 2b TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." [Gradium]`);
         const phase2bT0 = Date.now();
 
         const ttsPromise = generateTtsAudio(combined, prevText, 'quality')
           .then((audioBuffer) => {
             captureServerTiming(sessionId, {
-              step: 'elevenlabs_phase2b',
+              step: 'gradium_phase2b',
               duration_ms: Date.now() - phase2bT0,
               success: true,
               endpoint: '/api/chat/stream',
@@ -1727,7 +1722,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })
           .catch((ttsErr) => {
             captureServerTiming(sessionId, {
-              step: 'elevenlabs_phase2b',
+              step: 'gradium_phase2b',
               duration_ms: Date.now() - phase2bT0,
               success: false,
               endpoint: '/api/chat/stream',
@@ -1869,7 +1864,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           // Dispatch Phase 2b for any sentences accumulated after Phase 2a fired.
           // Do not regenerate a merged 2a+2b block: the earlier request may
-          // already be running, which wastes ElevenLabs capacity under load.
+          // already be running, which wastes Gradium capacity under load.
           if (phase2bBuffer.length > 0) {
             dispatchPhase2bTts(phase2bBuffer, phase2bStartIndex);
           }

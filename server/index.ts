@@ -2,7 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import OpenAI from "openai";
-import { elevenLabsFetch, recordPoolSample, POOL_SAMPLE_INTERVAL_MS } from "./elevenlabs-agent";
+import { gradiumFetch, recordPoolSample, POOL_SAMPLE_INTERVAL_MS } from "./gradium-agent";
 import { backfillSessionTokens } from "./backfill-session-tokens";
 import { shutdownPostHog } from "./posthog";
 
@@ -108,37 +108,43 @@ process.once('SIGINT', handleShutdown);
       log('[Connection Warming] OpenAI connection warming enabled (every 30s)');
     }
 
-    // PHASE 1 OPTIMIZATION: Connection warming for ElevenLabs API
+    // PHASE 1 OPTIMIZATION: Connection warming for Gradium API
     // Keeps TCP+TLS connection alive to reduce first-audio latency by ~200-400ms.
-    // Stops after repeated 401/403 to avoid spamming ElevenLabs when the API key is invalid.
-    if (process.env.ELEVENLABS_API_KEY) {
+    // Stops after repeated 401/403 to avoid spamming Gradium when the API key is invalid.
+    if (process.env.GRADIUM_API_KEY) {
       const MAX_CONSECUTIVE_AUTH_FAILURES = 3;
       let consecutiveAuthFailures = 0;
       let warmingInterval: ReturnType<typeof setInterval> | null = null;
 
-      const stopElevenLabsWarming = (reason: string) => {
+      const stopGradiumWarming = (reason: string) => {
         if (warmingInterval) {
           clearInterval(warmingInterval);
           warmingInterval = null;
         }
-        log(`[Connection Warming] ElevenLabs warming disabled: ${reason}`);
+        log(`[Connection Warming] Gradium warming disabled: ${reason}`);
       };
 
-      const warmElevenLabsConnection = async () => {
+      const warmGradiumConnection = async () => {
         try {
-          const response = await elevenLabsFetch('https://api.elevenlabs.io/v1/models', {
-            headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY! }
+          // HEAD-like ping: POST with minimal payload; 422 (validation error) is fine — it confirms auth is valid
+          const response = await gradiumFetch('https://api.gradium.ai/api/post/speech/tts', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': process.env.GRADIUM_API_KEY!,
+            },
+            body: JSON.stringify({ text: ' ', voice_id: process.env.GRADIUM_VOICE_ID || '', output_format: 'mp3', only_audio: true }),
           });
           await response.arrayBuffer(); // Consume body to free socket for reuse
 
-          if (response.ok) {
+          if (response.ok || response.status === 422) {
             consecutiveAuthFailures = 0;
-            log('[Connection Warming] ElevenLabs connection kept alive');
+            log('[Connection Warming] Gradium connection kept alive');
           } else if (response.status === 401 || response.status === 403) {
             consecutiveAuthFailures += 1;
             if (consecutiveAuthFailures >= MAX_CONSECUTIVE_AUTH_FAILURES) {
-              stopElevenLabsWarming(
-                `${response.status} after ${consecutiveAuthFailures} attempts — check ELEVENLABS_API_KEY`
+              stopGradiumWarming(
+                `${response.status} after ${consecutiveAuthFailures} attempts — check GRADIUM_API_KEY`
               );
             }
           }
@@ -152,12 +158,12 @@ process.once('SIGINT', handleShutdown);
       };
 
       // Initial warmup after 6 seconds (staggered from OpenAI warmup at 5s)
-      setTimeout(warmElevenLabsConnection, 6000);
+      setTimeout(warmGradiumConnection, 6000);
 
       // Then keep warm at the shared cadence
-      warmingInterval = setInterval(warmElevenLabsConnection, POOL_SAMPLE_INTERVAL_MS);
+      warmingInterval = setInterval(warmGradiumConnection, POOL_SAMPLE_INTERVAL_MS);
 
-      log(`[Connection Warming] ElevenLabs connection warming enabled (every ${POOL_SAMPLE_INTERVAL_MS / 1000}s)`);
+      log(`[Connection Warming] Gradium connection warming enabled (every ${POOL_SAMPLE_INTERVAL_MS / 1000}s)`);
     }
   });
 })();
