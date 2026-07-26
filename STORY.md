@@ -3,7 +3,7 @@
 > **Status**: 🟡 In Progress  
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-07-15 (Bugs silencieux corrigés, portabilité complète Replit → Coolify)
+> **Last Updated**: 2026-07-26 (Migration TTS ElevenLabs → Gradium, correction en-tête WAV)
 
 ---
 
@@ -54,7 +54,7 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 | Express.js | Backend API & session management |
 | PostgreSQL | Persistent data storage |
 | OpenAI API | Speech-to-Text (Whisper) & Conversational AI (GPT Assistant) |
-| ElevenLabs API | Text-to-Speech voice synthesis |
+| Gradium API | Text-to-Speech voice synthesis (remplace ElevenLabs depuis juillet 2026) |
 | PostHog | Analytics & session recording |
 | Google Sheets | Real-time analytics sync |
 
@@ -63,6 +63,34 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 ## Feature Chronicle
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
+
+### [2026-07-26] — Migration TTS ElevenLabs → Gradium + correction en-tête WAV 🔷
+
+**Intent**: Remplacer ElevenLabs par Gradium pour la synthèse vocale de Peter, en français, sans régression fonctionnelle. Exigence ferme : l'audio doit dire exactement le texte affiché, sans superposition ni décalage.
+
+**Prompt(s)**:
+```
+Remplacer ElevenLabs par Gradium pour le TTS de Peter.
+Doc : https://docs.gradium.ai
+En français, streaming/réactif, naturel, sans rien casser, sans valeurs hard-codées.
+```
+
+**Tool**: Replit Agent
+
+**Outcome**:
+
+*Migration API* : `server/elevenlabs-agent.ts` supprimé, remplacé par `server/gradium-agent.ts` (pool undici persistant vers `api.gradium.ai`). Fonction `generateTtsAudio()` réécrite pour l'endpoint REST Gradium : `POST /api/post/speech/tts`, header `x-api-key`, format `wav`, modèle `default`, langue `fr`.
+
+*Pièges découverts et résolus* (trois pertes de temps significatives) :
+- **Format MP3 silencieux** : `output_format: "mp3"` retourne HTTP 200 avec un body vide — aucune erreur. Seul `"wav"` fonctionne.
+- **Header d'auth différent** : Gradium utilise `x-api-key`, pas `xi-api-key` comme ElevenLabs. Cause de 401/403 inexplicables si on migre mécaniquement.
+- **En-tête WAV avec tailles placeholder** : Gradium streame le WAV avec `RIFF size` et `data size` à `0xFFFFFFFF`. Les navigateurs déduisent `duration = Infinity`, ce qui rend les événements `ended` peu fiables → les phrases de Peter se superposaient et se mélangeaient. Corrigé par `fixWavHeader()` qui réécrit les vrais champs de taille après concaténation du buffer complet côté serveur.
+
+*Warming de connexion* : un POST minimal toutes les 30s maintient la connexion TCP vivante (HTTP 422 attendu = API joignable). S'arrête automatiquement après 5 échecs 401/403 consécutifs.
+
+*Guide réutilisable* : toutes les leçons documentées dans `docs/integrations/gradium.md` pour les projets futurs.
+
+---
 
 ### [2026-07-15] — Deux bugs silencieux + portabilité complète Replit → Coolify 🔷
 
@@ -1470,6 +1498,9 @@ Client sets audio.src = /api/tts/play/token → Browser streams + plays natively
 - [2026-02-16]: Une passe "fiabilité" sans changement fonctionnel peut améliorer fortement l'expérience perçue (moins de crashes, moins de glitches) en ciblant storage, listeners et viewport.
 - [2026-06-07]: Un modèle conversationnel ne doit jamais être la source de vérité d'une règle pédagogique ; les validations doivent rester déterministes côté serveur.
 - [2026-06-07]: Un timeout utile doit annuler le travail distant et empêcher ses écritures tardives, pas seulement afficher une erreur au client.
+- [2026-07-26]: Les APIs TTS streamées envoient souvent des en-têtes WAV avec des tailles placeholder (`0xFFFFFFFF`). Sans correction côté serveur, `audio.duration = Infinity` dans le navigateur → séquencement cassé. Toujours réécrire les champs RIFF size et data size après concaténation du buffer complet.
+- [2026-07-26]: HTTP 200 avec body vide est le pire type d'erreur API — aucun signal d'échec, juste du silence. Vérifier `audioBuffer.byteLength === 0` explicitement après chaque réponse TTS, avec un message d'erreur qui oriente directement vers le format.
+- [2026-07-26]: Avant toute migration d'API tierce, lister les différences de nommage des headers d'auth. ElevenLabs → `xi-api-key`, Gradium → `x-api-key`. Une lettre de différence, des heures de débogage.
 
 ---
 

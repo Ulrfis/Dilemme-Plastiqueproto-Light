@@ -6,6 +6,50 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [3.0.0] - 2026-07-26
+
+### Modifié — Migration TTS ElevenLabs → Gradium
+
+#### Contexte
+ElevenLabs remplacé intégralement par [Gradium](https://docs.gradium.ai) comme moteur de synthèse vocale de Peter. L'objectif : voix française naturelle, latence comparable, sans aucune régression fonctionnelle.
+
+#### `server/gradium-agent.ts` (nouveau — remplace `server/elevenlabs-agent.ts`)
+- Pool de connexions persistantes vers `api.gradium.ai` via `undici` (`Agent` avec `keepAliveTimeout: 35s`, `keepAliveMaxTimeout: 5min`).
+- Export `gradiumFetch()` : wrapper undici réutilisant le pool.
+- Exports `getPoolStats()`, `recordPoolSample()`, `getPoolHistory()` : télémétrie du pool (ring buffer 60 échantillons = 30 min).
+- Fermeture propre du pool sur `SIGTERM`/`SIGINT`.
+
+#### `server/routes.ts`
+- Fonction `generateTtsAudio()` réécrite :
+  - Endpoint : `POST https://api.gradium.ai/api/post/speech/tts`
+  - Auth : header `x-api-key` (≠ `xi-api-key` d'ElevenLabs).
+  - Body : `{ text, voice_id, model_name: "default", output_format: "wav", only_audio: true, json_config: { language: "fr" } }`.
+  - **`output_format: "mp3"` n'est pas supporté** — retourne HTTP 200 avec body vide. Seul `"wav"` fonctionne.
+  - Cache key renommée `gradium:${text}` (était `elevenlabs:${text}`).
+- Ajout de `fixWavHeader()` : réécrit en place les champs de taille RIFF et `data` du WAV streamé (Gradium envoie des placeholders `0xFFFFFFFF` en streaming → durée inconnue → séquencement audio cassé côté navigateur). Correction appliquée après concaténation du buffer complet.
+- Trois endpoints audio servent désormais `Content-Type: audio/wav` : `/api/tts/play/:token`, `/api/text-to-speech`, `/api/text-to-speech/stream`.
+- Métriques PostHog renommées : `gradium_phase1`, `gradium_phase2a`, `gradium_phase2b`.
+- Health check `/api/health/ai` : teste Gradium (422 = API joignable, auth invalide seulement si clé absente).
+- Queue TTS : variables d'environnement `GRADIUM_MAX_CONCURRENT` / `GRADIUM_MAX_QUEUED` (défauts : 5 / 100).
+
+#### `server/index.ts`
+- Warming de connexion Gradium : POST minimal toutes les 30s sur `GRADIUM_API_KEY` présente ; s'arrête automatiquement après 5 échecs 401/403 consécutifs pour ne pas spammer l'API.
+- Pool sampling toutes les 30s (ring buffer télémétrie).
+
+#### `client/src/App.tsx`
+- Label service `'elevenlabs'` → `'gradium'` (seul changement côté client).
+
+#### `.env.example`
+- Variables `ELEVENLABS_*` → `GRADIUM_API_KEY`, `GRADIUM_VOICE_ID`, `GRADIUM_MAX_CONCURRENT`, `GRADIUM_MAX_QUEUED`.
+
+### Corrigé — En-tête WAV streamé (superposition audio Peter)
+
+**Problème** : Gradium livre le fichier WAV en mode streaming avec les champs de taille d'en-tête à `0xFFFFFFFF` (valeur placeholder). Les navigateurs interprètent alors `duration` comme `Infinity`, ce qui rend les événements `ended` peu fiables. Résultat : les phrases de Peter se superposaient et se mélangeaient, sans correspondre au texte affiché.
+
+**Correction** : la fonction `fixWavHeader(buf)` réécrit le champ `RIFF size` (offset 4) et le champ `data size` (sous-chunk `data`) avec les longueurs réelles, après concaténation du buffer complet côté serveur. La durée est maintenant exacte ; les phrases se jouent strictement en séquence.
+
+---
+
 ## [2.9.0] - 2026-07-15
 
 ### Corrigé — Deux bugs silencieux en production
