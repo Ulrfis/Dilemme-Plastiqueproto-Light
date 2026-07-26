@@ -133,7 +133,7 @@ process.once('SIGINT', handleShutdown);
               'Content-Type': 'application/json',
               'x-api-key': process.env.GRADIUM_API_KEY!,
             },
-            body: JSON.stringify({ text: ' ', voice_id: process.env.GRADIUM_VOICE_ID || '', output_format: 'mp3', only_audio: true }),
+            body: JSON.stringify({ text: ' ', voice_id: process.env.GRADIUM_VOICE_ID || '', output_format: 'wav', only_audio: true }),
           });
           await response.arrayBuffer(); // Consume body to free socket for reuse
 

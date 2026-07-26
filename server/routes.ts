@@ -257,7 +257,7 @@ async function generateTtsAudio(
     text,
     voice_id: GRADIUM_VOICE_ID,
     model_name: 'default',
-    output_format: 'mp3',
+    output_format: 'wav',
     only_audio: true,
     json_config: {
       language: 'fr',
@@ -580,7 +580,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Content-Type': 'application/json',
           'x-api-key': process.env.GRADIUM_API_KEY || '',
         },
-        body: JSON.stringify({ text: '', voice_id: process.env.GRADIUM_VOICE_ID || '', output_format: 'mp3', only_audio: true }),
+        body: JSON.stringify({ text: '', voice_id: process.env.GRADIUM_VOICE_ID || '', output_format: 'wav', only_audio: true }),
       });
       await response.arrayBuffer(); // consume body to free socket
       if (response.ok || response.status === 422) {
@@ -1001,7 +1001,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Clean up the token after use
       ttsRequestStore.delete(token);
 
-      res.set('Content-Type', 'audio/mpeg');
+      res.set('Content-Type', 'audio/wav');
       res.set('Content-Length', String(audioBuffer.byteLength));
       res.set('Accept-Ranges', 'bytes');
       res.set('Cache-Control', 'no-cache');
@@ -1041,7 +1041,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!session) return;
 
       const audioBuffer = await generateTtsAudio(text, undefined, 'quality');
-      res.set('Content-Type', 'audio/mpeg');
+      res.set('Content-Type', 'audio/wav');
       res.send(audioBuffer);
     } catch (error) {
       console.error('[TTS Stream API] Error:', error);
@@ -1075,7 +1075,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!session) return;
 
       const audioBuffer = await generateTtsAudio(text, undefined, 'quality');
-      res.set('Content-Type', 'audio/mpeg');
+      res.set('Content-Type', 'audio/wav');
       res.send(audioBuffer);
     } catch (error) {
       console.error('[TTS API] Error generating speech:', error);
