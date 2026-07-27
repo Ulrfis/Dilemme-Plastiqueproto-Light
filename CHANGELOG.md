@@ -8,6 +8,28 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ## [Unreleased]
 
+### Déployé — Migration production Replit vers Coolify
+
+- Bascule de l'application publique
+  [`proto-dilemme2.edugami.app`](https://proto-dilemme2.edugami.app) vers le
+  serveur Coolify `lime`.
+- Déploiement Docker validé sur le commit `cc255ca`, avec mise à jour roulante
+  et health check applicatif vert.
+- Migration vers PostgreSQL 16 dans Coolify confirmée avec 1 209 messages,
+  201 sessions et 20 retours importés.
+- `GET /api/health` validé en production avec HTTP 200 et connexion PostgreSQL
+  opérationnelle.
+- CNAME Cloudflare configuré vers `lime.1024b.net`, en mode DNS only, puis
+  certificat Let's Encrypt émis et vérifié.
+- Sauvegarde PostgreSQL quotidienne activée dans Coolify, avec rétention de
+  14 sauvegardes, 30 jours et 2 Go.
+- Publication Replit désactivée après validation du DNS, du HTTPS, de la page
+  publique et de la base. L'ancienne URL Replit retourne désormais HTTP 404.
+- Le projet et l'ancienne base Replit sont conservés comme archive de reprise,
+  mais ne participent plus au fonctionnement de la production.
+- Aucun second import n'a été effectué lors de la bascule finale : le déploiement
+  a réutilisé l'application et la base Coolify déjà vérifiées.
+
 ### Modifié — Préparation PostgreSQL Replit vers Coolify
 
 - Remplacement du pilote Neon WebSocket par le pilote PostgreSQL standard `pg`,
@@ -931,6 +953,9 @@ App.tsx (wouter routes)
 
 ## Notes
 
-- Tous les commits "Published your App" sont des déploiements automatiques
+- Les anciens commits "Published your App" correspondent aux déploiements
+  automatiques Replit antérieurs à la migration Coolify.
 - Les dates sont au format UTC (temps universel)
-- Version actuelle : 1.5.0
+- Version publiée actuelle : 3.0.0
+- Les changements de migration production du 27 juillet 2026 restent dans
+  `[Unreleased]` jusqu'à la prochaine version.

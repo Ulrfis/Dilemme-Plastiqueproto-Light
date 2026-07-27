@@ -2,17 +2,47 @@
 
 > Application éducative interactive avec IA vocale pour découvrir les enjeux environnementaux à travers l'analyse d'images guidée par un assistant virtuel.
 
-![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)
+![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Node](https://img.shields.io/badge/node-20.x-brightgreen.svg)
 ![Mobile](https://img.shields.io/badge/mobile-optimized-success.svg)
 ![Latency](https://img.shields.io/badge/latency-⚡_3--10s-success.svg)
 ![Database](https://img.shields.io/badge/database-PostgreSQL-blue.svg)
+![Deployment](https://img.shields.io/badge/deployment-Coolify-success.svg)
 ![Google Sheets](https://img.shields.io/badge/sync-Google_Sheets-green.svg)
 
 ---
 
-## 🆕 Version Actuelle (v2.2.0 - May 2)
+## ✅ Production actuelle — Coolify
+
+- **Application publique** : [https://proto-dilemme2.edugami.app](https://proto-dilemme2.edugami.app)
+- **Hébergement** : Coolify sur le serveur `lime`, avec déploiement Docker depuis la branche `main`.
+- **Base de données** : PostgreSQL 16 hébergé dans Coolify ; l'application n'utilise plus la base Replit.
+- **DNS et HTTPS** : CNAME Cloudflare vers `lime.1024b.net`, certificat Let's Encrypt valide.
+- **Supervision** : `GET /api/health` vérifie l'application et la connexion PostgreSQL.
+- **Sauvegardes** : sauvegarde PostgreSQL quotidienne dans Coolify, avec rétention configurée.
+- **Indépendance Replit** : la publication Replit est désactivée. Le projet et son ancienne base sont conservés uniquement comme archive de secours.
+
+Le déroulé complet et les procédures de reprise sont documentés dans
+[Migration Dilemme — Replit → Coolify](./docs/ops/migration-coolify-complete.md).
+
+---
+
+## 🆕 Version actuelle (v3.0.0 - 26 juillet 2026)
+
+### 🔊 Migration TTS ElevenLabs → Gradium
+
+- Gradium assure désormais toute la synthèse vocale française de Peter.
+- Les réponses audio sont générées en WAV et leur en-tête est corrigé côté
+  serveur afin de garantir une lecture séquentielle, sans superposition.
+- Les connexions Gradium sont réutilisées et maintenues actives pour réduire la
+  latence.
+- Le guide d'intégration et les pièges connus sont documentés dans
+  [`docs/integrations/gradium.md`](./docs/integrations/gradium.md).
+
+---
+
+## 🚀 Améliorations précédentes (v2.2.0 - 2 mai 2026)
 
 ### 💬 Peter reprend la conversation au retour sur le tutoriel
 
@@ -307,7 +337,7 @@ L'utilisateur interagit **vocalement** avec **Peter**, un assistant IA éducatif
 ### 🎤 Interaction Vocale (Voice-First)
 
 - **Speech-to-Text** : Reconnaissance vocale en français via OpenAI Whisper
-- **Text-to-Speech** : Synthèse vocale naturelle via ElevenLabs (voix multilingue)
+- **Text-to-Speech** : Synthèse vocale française via Gradium
 - **Conversation IA** : Assistant conversationnel GPT-4o-mini avec personnalité "Peter"
 - **Fallback automatique** : Passage en mode texte si problème micro/audio
 
@@ -363,12 +393,12 @@ L'utilisateur interagit **vocalement** avec **Peter**, un assistant IA éducatif
 │  │                                           │   │
 │  │  POST /api/chat/stream (Phase 2)         │   │
 │  │  ├─ GPT-4o-mini (Streaming SSE)          │   │
-│  │  ├─ MemStorage (Session + Messages)      │   │
+│  │  ├─ PostgreSQL 16 (Sessions + Messages)  │   │
 │  │  ├─ Clue Detection Logic                 │   │
 │  │  └─ Sentence-by-sentence delivery        │   │
 │  │                                           │   │
 │  │  POST /api/text-to-speech/stream         │   │
-│  │  ├─ ElevenLabs Streaming API (Phase 2)   │   │
+│  │  ├─ Gradium TTS API (WAV)                │   │
 │  │  ├─ TTS Cache (Phase 1)                  │   │
 │  │  └─ Connection Warming (Phase 1)         │   │
 │  └──────────────────────────────────────────┘   │
@@ -387,8 +417,8 @@ User → STT → LLM Sentence 1 ┬→ TTS 1 → Queue → Play immediately
 Audio starts at ~3.3s (vs 7s before!)
 ```
 
-**Architecture Legacy:**
-**1. Enregistrement Audio** → **2. Transcription (Whisper)** → **3. Analyse IA (GPT)** → **4. Synthèse Vocale (ElevenLabs)** → **5. Lecture Audio**
+**Pipeline actuel :**
+**1. Enregistrement Audio** → **2. Transcription (Whisper)** → **3. Analyse IA (GPT)** → **4. Synthèse Vocale (Gradium)** → **5. Lecture Audio**
 
 📖 **Documentation complète** : [ARCHITECTURE.md](./Documentation/ARCHITECTURE.md)
 📊 **Détails Phase 1** : [PHASE1_OPTIMIZATIONS.md](./Documentation/PHASE1_OPTIMIZATIONS.md)
@@ -427,15 +457,15 @@ Audio starts at ~3.3s (vs 7s before!)
 |---------|-------|---------------|
 | **OpenAI Whisper** | Speech-to-Text (français) | [Docs](https://platform.openai.com/docs/guides/speech-to-text) |
 | **OpenAI GPT-4o-mini** | Conversation IA | [Docs](https://platform.openai.com/docs/models/gpt-4o-mini) |
-| **ElevenLabs** | Text-to-Speech (voix custom) | [Docs](https://elevenlabs.io/docs) |
+| **Gradium** | Text-to-Speech français (voix Peter) | [Guide du projet](./docs/integrations/gradium.md) |
 
 ### Base de Données & Stockage
 
 | Technologie | Version | Usage |
 |------------|---------|-------|
-| **PostgreSQL** | 15+ | Base de données principale |
+| **PostgreSQL** | 16 | Base de données principale dans Coolify |
 | **Drizzle ORM** | 0.39.1 | ORM TypeScript |
-| **Neon** | - | PostgreSQL serverless (Replit) |
+| **Coolify** | 4.x | Hébergement de l'application et de PostgreSQL |
 | **Google Sheets API** | v4 | Synchronisation données |
 
 ### Schéma de Base de Données
@@ -489,7 +519,8 @@ La synchronisation Google Sheets permet d'exporter automatiquement :
 - **Sessions** : Données de chaque session de tutoriel
 - **Feedbacks** : Réponses au questionnaire de feedback
 
-Configuration via Replit Connectors (OAuth2 automatique).
+Configuration via l'URL d'un Google Apps Script déployé dans
+`GOOGLE_SCRIPT_URL`, sans dépendance aux connecteurs Replit.
 
 ---
 
@@ -501,7 +532,8 @@ Configuration via Replit Connectors (OAuth2 automatique).
 - **npm** >= 10.x
 - **Clés API** :
   - `OPENAI_API_KEY` (OpenAI)
-  - `ELEVENLABS_API_KEY` (ElevenLabs)
+  - `GRADIUM_API_KEY` et `GRADIUM_VOICE_ID` (Gradium)
+- **PostgreSQL** accessible via `DATABASE_URL`
 
 ### Installation
 
@@ -521,20 +553,22 @@ Créer un fichier `.env` à la racine :
 ```env
 # OpenAI API (Whisper + Assistant API)
 OPENAI_API_KEY=sk-...
+OPENAI_ASSISTANT_ID=asst_...
 
-# ElevenLabs API (Text-to-Speech)
-ELEVENLABS_API_KEY=...
+# Gradium API (Text-to-Speech)
+GRADIUM_API_KEY=...
+GRADIUM_VOICE_ID=...
+
+# PostgreSQL
+DATABASE_URL=postgresql://user:password@host:5432/database
 
 # Port serveur (optionnel, défaut: 5000)
 PORT=5000
 ```
 
-**⚠️ Configuration Spécifique OpenAI:**
-- **Organisation**: `org-z0AK8zYLTeapGaiDZFQ5co2N`
-- **Assistant ID**: `asst_P9b5PxMd1k9HjBgbyXI1Cvm9`
-- **Voice ID (ElevenLabs)**: `CBP9p4KAWPqrMHTDtWPR` (Peter mai 2025 FR)
-
-Ces IDs sont configurés dans `server/routes.ts` et doivent correspondre à votre workspace OpenAI.
+Copier `.env.example` pour obtenir la liste complète des variables de runtime,
+de sécurité, d'observabilité et de réglage de charge. Les identifiants OpenAI
+et Gradium doivent toujours être fournis par variables d'environnement.
 
 ### Lancement
 
@@ -899,7 +933,7 @@ Teste la connexion Google Sheets et retourne les informations du spreadsheet.
 ### Données Utilisateur
 
 - **Stockage PostgreSQL** : Sessions et feedbacks persistés en base de données
-- **Google Sheets Sync** : Export optionnel vers Google Sheets (configuré via Replit Connectors)
+- **Google Sheets Sync** : Export optionnel via Google Apps Script
 - **Prénom optionnel** : Utilisé uniquement pour personnaliser l'expérience
 - **Audio non stocké** : Transcription immédiate puis suppression
 - **Conformité RGPD** : Consentement explicite pour email de contact
@@ -908,7 +942,7 @@ Teste la connexion Google Sheets et retourne les informations du spreadsheet.
 
 - **Clés API sécurisées** : Variables d'environnement serveur uniquement
 - **Jamais exposées côté client** : Appels proxy via backend
-- **Google Sheets OAuth2** : Via Replit Connectors (tokens auto-renouvelés)
+- **Google Sheets** : Appels serveur vers `GOOGLE_SCRIPT_URL`, sans secret exposé au client
 - **Rate limiting** : Protection contre les abus (à implémenter)
 
 ### Permissions Navigateur
@@ -924,7 +958,8 @@ Teste la connexion Google Sheets et retourne les informations du spreadsheet.
 - **1 seul niveau** : Tutoriel uniquement (pas de progression multi-niveaux)
 - **Pas de RAG étendu** : Base de connaissances limitée aux 4 indices
 - **Coût API accru (Phase 2)** : 3-5× plus d'appels TTS par message (streaming)
-- **Google Sheets Replit only** : Sync fonctionne uniquement sur Replit avec connecteur
+- **Stockage audio en mémoire** : le cache TTS est local au conteneur et serait
+  à externaliser vers Redis en cas de réplication horizontale.
 - **1 seul jeu** : Un seul jeu de reconstruction de phrase (pas de variantes)
 
 ### ✅ Problèmes Résolus dans v1.4.0
@@ -1014,7 +1049,8 @@ Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
 
 - **Équipe Projet** : Développement initial et concept pédagogique
 - **OpenAI** : APIs Whisper et GPT-4o-mini
-- **ElevenLabs** : API Text-to-Speech
+- **Gradium** : API Text-to-Speech
+- **Coolify** : hébergement de l'application et de PostgreSQL
 - **Communauté Open Source** : shadcn/ui, Radix, Tailwind, et tous les packages utilisés
 
 ---

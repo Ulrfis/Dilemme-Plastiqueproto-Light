@@ -1,9 +1,9 @@
 # Dilemme Plastique — Development Story
 
-> **Status**: 🟡 In Progress  
+> **Status**: 🟢 Production on Coolify — ongoing development
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-07-26 (Migration TTS ElevenLabs → Gradium, correction en-tête WAV)
+> **Last Updated**: 2026-07-27 (Migration production Replit → Coolify terminée)
 
 ---
 
@@ -49,10 +49,13 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 
 | Tool | Role |
 |------|------|
-| Replit Agent | Full-stack development, backend/frontend integration |
+| Replit Agent | Développement full-stack historique ; publication désormais arrêtée |
+| Codex | Audit, préparation, migration et vérification de production |
 | React + TypeScript | Frontend UI & interactions |
 | Express.js | Backend API & session management |
-| PostgreSQL | Persistent data storage |
+| PostgreSQL 16 | Stockage persistant auto-hébergé dans Coolify |
+| Coolify + Docker | Build, déploiement, health checks, logs et sauvegardes |
+| Cloudflare | DNS du domaine de production |
 | OpenAI API | Speech-to-Text (Whisper) & Conversational AI (GPT Assistant) |
 | Gradium API | Text-to-Speech voice synthesis (remplace ElevenLabs depuis juillet 2026) |
 | PostHog | Analytics & session recording |
@@ -63,6 +66,64 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 ## Feature Chronicle
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
+
+### [2026-07-27] — Bascule production Replit → Coolify, autonomie complète 🔷
+
+**Intent**: Achever la migration préparée le 15 juillet et rendre la production
+totalement indépendante de Replit, sans reconstruire inutilement ce qui était
+déjà prêt et sans interrompre le domaine public.
+
+**Prompt(s)**:
+```
+Il faut faire un maximum de ton côté et lancer les opérations de manière
+autonome. Déployer à partir de l'existant, sans tout refaire ni réimporter la
+base sauf nécessité absolue.
+```
+
+**Tool**: Codex + Coolify + Cloudflare
+
+**Outcome**:
+
+- PostgreSQL 16 Coolify validé à partir de l'import existant : 1 209 messages,
+  201 sessions et 20 retours. Aucun second import lors de la bascule finale.
+- Application déployée depuis GitHub sur le serveur `lime`, commit `cc255ca`,
+  avec Dockerfile multi-stage et health check connecté à PostgreSQL.
+- Configuration du domaine appliquée par un redéploiement roulant ; le second
+  redéploiement a réutilisé l'image existante, sans rebuild.
+- CNAME Cloudflare `proto-dilemme2` configuré vers `lime.1024b.net`, résolvant
+  vers `185.131.204.133`.
+- Certificat Let's Encrypt obtenu après une nouvelle application de la
+  configuration, le premier essai ayant précédé la propagation DNS.
+- Validation finale : page publique HTTP 200, TLS valide, `/api/health`
+  retourne `status: ok`, `database: ok`, avec une latence PostgreSQL de 9 ms.
+- Publication Replit supprimée seulement après ces contrôles ; l'ancienne URL
+  Replit retourne HTTP 404. Le projet et son ancienne base restent archivés
+  pour permettre une reprise manuelle, mais ne servent plus la production.
+- Sauvegardes PostgreSQL Coolify planifiées quotidiennement avec rétention
+  bornée.
+
+**Architecture Delta**:
+```
+Avant :
+  Domaine public → Replit autoscale → PostgreSQL de production Replit
+
+Après :
+  Cloudflare CNAME → Coolify/Traefik → conteneur Node.js
+                                   └→ PostgreSQL 16 Coolify
+```
+
+**Surprise**: le domaine était bien enregistré dans Coolify, mais la
+configuration n'avait pas encore été appliquée au conteneur. Puis la première
+demande de certificat a échoué silencieusement car le DNS pointait encore vers
+Replit. Une nouvelle mise à jour roulante après propagation a déclenché
+immédiatement le certificat Let's Encrypt.
+
+**Insight**: lors d'une bascule d'hébergement, séparer quatre preuves :
+résolution DNS, routage HTTP, santé applicative/base et validité TLS. Un HTTP
+200 obtenu en ignorant le certificat ne suffit pas à déclarer la migration
+terminée.
+
+---
 
 ### [2026-07-26] — Migration TTS ElevenLabs → Gradium + correction en-tête WAV 🔷
 
@@ -1501,6 +1562,8 @@ Client sets audio.src = /api/tts/play/token → Browser streams + plays natively
 - [2026-07-26]: Les APIs TTS streamées envoient souvent des en-têtes WAV avec des tailles placeholder (`0xFFFFFFFF`). Sans correction côté serveur, `audio.duration = Infinity` dans le navigateur → séquencement cassé. Toujours réécrire les champs RIFF size et data size après concaténation du buffer complet.
 - [2026-07-26]: HTTP 200 avec body vide est le pire type d'erreur API — aucun signal d'échec, juste du silence. Vérifier `audioBuffer.byteLength === 0` explicitement après chaque réponse TTS, avec un message d'erreur qui oriente directement vers le format.
 - [2026-07-26]: Avant toute migration d'API tierce, lister les différences de nommage des headers d'auth. ElevenLabs → `xi-api-key`, Gradium → `x-api-key`. Une lettre de différence, des heures de débogage.
+- [2026-07-27]: Une bascule DNS ne se valide pas avec un seul test. Vérifier séparément la résolution vers la nouvelle IP, le HTTP 200, la santé de la base et la chaîne TLS sans désactiver la vérification du certificat.
+- [2026-07-27]: Appliquer la configuration du domaine avant la propagation DNS peut laisser Traefik avec son certificat par défaut. Rejouer une mise à jour roulante après propagation relance proprement l'émission Let's Encrypt.
 
 ---
 
@@ -1512,6 +1575,8 @@ Client sets audio.src = /api/tts/play/token → Browser streams + plays natively
 |------|------|---------------|------|
 | 2024-12-12 | Live App | http://localhost:5000 | Development server running |
 | 2024-12-12 | PostHog Dashboard | https://us.i.posthog.com | Analytics live |
+| 2026-07-27 | Live App | https://proto-dilemme2.edugami.app | Production Coolify, HTTPS et PostgreSQL validés |
+| 2026-07-27 | Runbook | docs/ops/migration-coolify-complete.md | Procédure de migration et checklist opérationnelle |
 
 ---
 
