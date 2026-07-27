@@ -16,6 +16,8 @@ import { ChatAdmissionTimeoutError, ChatTurnConflictError, ChatTurnController, t
 import { detectClues, TARGET_CLUES } from "./clue-detection";
 import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, TOTAL_TUTORIAL_CLUES, canStartTutorialExchange } from "@shared/tutorial-config";
 import { buildPeterExchangeInstructions, buildPeterGameContext } from "./peter-game-context";
+import { pool } from "./db";
+import { checkDatabaseHealth } from "./database-health";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -355,6 +357,28 @@ async function validateAssistant() {
 validateAssistant();
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Public liveness/readiness endpoint used by Docker and Coolify. It checks
+  // PostgreSQL but never returns connection details or raw database errors.
+  app.get('/api/health', async (_req, res) => {
+    const database = await checkDatabaseHealth(pool);
+    res.set('Cache-Control', 'no-store');
+
+    if (!database.ok) {
+      return res.status(503).json({
+        status: 'error',
+        database: 'unavailable',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return res.json({
+      status: 'ok',
+      database: 'ok',
+      databaseLatencyMs: database.latencyMs,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // Rate-limit global API
   app.use('/api', generalLimiter);
 
@@ -629,84 +653,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/health/sheets', async (req, res) => {
     if (!requireAdmin(req, res)) return;
 
-    const result: { status: string; message: string; details?: any } = {
-      status: 'unknown',
-      message: '',
-    };
-
     try {
-      // Vérifier les variables d'environnement
-      const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
-      const hasReplIdentity = !!process.env.REPL_IDENTITY;
-      const hasWebReplRenewal = !!process.env.WEB_REPL_RENEWAL;
-
-      result.details = {
-        REPLIT_CONNECTORS_HOSTNAME: hostname ? 'SET' : 'NOT SET',
-        REPL_IDENTITY: hasReplIdentity ? 'SET' : 'NOT SET',
-        WEB_REPL_RENEWAL: hasWebReplRenewal ? 'SET' : 'NOT SET',
-      };
-
-      if (!hostname) {
-        result.status = 'error';
-        result.message = 'REPLIT_CONNECTORS_HOSTNAME not set - Not running on Replit?';
-        return res.json(result);
-      }
-
-      if (!hasReplIdentity && !hasWebReplRenewal) {
-        result.status = 'error';
-        result.message = 'No Replit token available (REPL_IDENTITY or WEB_REPL_RENEWAL)';
-        return res.json(result);
-      }
-
-      // Tester la connexion au connecteur
-      const xReplitToken = hasReplIdentity
-        ? 'repl ' + process.env.REPL_IDENTITY
-        : 'depl ' + process.env.WEB_REPL_RENEWAL;
-
-      const url = 'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=google-sheet';
-      const response = await fetch(url, {
-        headers: {
-          'Accept': 'application/json',
-          'X_REPLIT_TOKEN': xReplitToken
-        }
+      const { testGoogleSheetsConnection } = await import('./google-sheets-sync');
+      const result = await testGoogleSheetsConnection();
+      res.status(result.success ? 200 : 503).json({
+        status: result.success ? 'ok' : 'error',
+        message: result.message,
+        details: result.details,
       });
-
-      if (!response.ok) {
-        result.status = 'error';
-        result.message = `Connector API error: ${response.status} ${response.statusText}`;
-        return res.json(result);
-      }
-
-      const data = await response.json();
-      const connector = data.items?.[0];
-
-      if (!connector) {
-        result.status = 'error';
-        result.message = 'No Google Sheet connector found. Please add Google Sheets connection in Replit panel.';
-        result.details.connectorCount = data.items?.length || 0;
-        return res.json(result);
-      }
-
-      result.details.connectorName = connector.connector_name;
-      result.details.hasAccessToken = !!(connector.settings?.access_token || connector.settings?.oauth?.credentials?.access_token);
-      result.details.settingsKeys = Object.keys(connector.settings || {});
-      result.details.spreadsheetId = connector.settings?.spreadsheet_id || 'NOT SET (will use hardcoded)';
-
-      if (!result.details.hasAccessToken) {
-        result.status = 'error';
-        result.message = 'Google Sheet connector found but no access token';
-        return res.json(result);
-      }
-
-      result.status = 'ok';
-      result.message = 'Google Sheets connection is configured correctly';
-
     } catch (error) {
-      result.status = 'error';
-      result.message = error instanceof Error ? error.message : 'Unknown error';
+      res.status(503).json({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
-
-    res.json(result);
   });
 
   // Endpoint de TEST complet pour Google Sheets (essaie vraiment d'écrire)

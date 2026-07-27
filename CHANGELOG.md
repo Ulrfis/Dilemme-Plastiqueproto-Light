@@ -6,6 +6,28 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+## [Unreleased]
+
+### Modifié — Préparation PostgreSQL Replit vers Coolify
+
+- Remplacement du pilote Neon WebSocket par le pilote PostgreSQL standard `pg`,
+  compatible avec PostgreSQL Replit, Neon et Coolify.
+- Suppression des trois plugins et packages de développement Replit.
+- Ajout de `GET /api/health`, qui exécute un contrôle PostgreSQL borné à trois
+  secondes et retourne HTTP 503 sans exposer les détails de connexion.
+- Ajout des timeouts HTTP adaptés au reverse proxy Coolify.
+- Ajout de `.env.example` avec les variables Gradium et Coolify actuelles.
+- Ajout de `npm run db:verify` pour contrôler le schéma et le nombre de lignes
+  avant et après import.
+- Remplacement du diagnostic Google Sheets basé sur Replit Connectors par le
+  test Google Apps Script indépendant déjà utilisé par l'application.
+- Mise à jour des métadonnées publiques vers `proto-dilemme2.edugami.app` et
+  des préconnexions audio vers Gradium.
+- Ajout du guide opérationnel
+  `docs/ops/migration-replit-postgres-to-coolify.md`.
+
+---
+
 ## [3.0.0] - 2026-07-26
 
 ### Modifié — Migration TTS ElevenLabs → Gradium

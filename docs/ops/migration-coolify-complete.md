@@ -4,6 +4,13 @@
 > auto-hébergé avec Coolify. Après cette migration, l'application tourne
 > entièrement hors de Replit, sans aucun SDK ni plugin propre à cette plateforme.
 
+> **Mise à jour 2026-07-27** : ce projet n'a pas de compte Neon autonome. Les
+> bases Replit récentes peuvent utiliser une URL limitée à l'environnement
+> Replit. La procédure retenue est désormais l'export de la base réellement
+> utilisée vers PostgreSQL Coolify. Voir
+> [`migration-replit-postgres-to-coolify.md`](migration-replit-postgres-to-coolify.md).
+> Le code utilise le pilote PostgreSQL standard `pg`.
+
 ---
 
 ## 1. Cartographie des dépendances Replit
@@ -292,11 +299,10 @@ DATABASE_URL=postgresql://...        # Neon cloud OU PostgreSQL Coolify
 
 # ── APIs tierces ──────────────────────────────────────────────
 OPENAI_API_KEY=sk-...
-ELEVENLABS_API_KEY=...
+GRADIUM_API_KEY=...
+GRADIUM_VOICE_ID=...
 DEEPGRAM_API_KEY=...
 POSTHOG_API_KEY=phc_...
-POSTHOG_PERSONAL_API_KEY=phx_...
-POSTHOG_PROJECT_ID=107669
 SESSION_SECRET=<chaîne_aléatoire_32+_chars>
 
 # ── Google Sheets (optionnel) ─────────────────────────────────
@@ -308,11 +314,11 @@ ADMIN_TOKEN=<token_secret_pour_dashboard_admin>
 
 # ── Tuning charge (30 élèves simultanés) ─────────────────────
 DB_POOL_MAX=30
-ELEVENLABS_MAX_CONCURRENT=10        # Selon plan ElevenLabs (Creator=5, Scale=10+)
-ELEVENLABS_MAX_QUEUED=100
-OPENAI_MAX_CONCURRENT_STREAMS=20
-OPENAI_MAX_QUEUED_STREAMS=60
-OPENAI_QUEUE_WAIT_TIMEOUT_MS=30000
+GRADIUM_MAX_CONCURRENT=5
+GRADIUM_MAX_QUEUED=100
+OPENAI_MAX_CONCURRENT_STREAMS=10
+OPENAI_MAX_QUEUED_STREAMS=30
+OPENAI_QUEUE_WAIT_TIMEOUT_MS=15000
 OPENAI_RUN_TIMEOUT_MS=45000
 ```
 
@@ -424,26 +430,29 @@ Estimation du refactoring : 3-5h de développement.
 ## Checklist de migration complète
 
 ### Préparation du code
-- [ ] Supprimer `runtimeErrorOverlay()` de `vite.config.ts`
-- [ ] Désinstaller `@replit/vite-plugin-runtime-error-modal` du `package.json`
-- [ ] Ajouter `max: 30` au Pool PostgreSQL dans `server/db.ts`
-- [ ] Ajouter `server.keepAliveTimeout = 65_000` dans `server/index.ts`
-- [ ] Créer `Dockerfile` à la racine (voir Section 4)
-- [ ] Créer `.dockerignore` à la racine (voir Section 4)
-- [ ] Mettre à jour `.env.example` avec toutes les variables
+- [x] Supprimer les plugins Replit de `vite.config.ts`
+- [x] Désinstaller les packages `@replit/*`
+- [x] Utiliser le pilote PostgreSQL standard `pg`
+- [x] Ajouter `max: 30` au Pool PostgreSQL dans `server/db.ts`
+- [x] Ajouter les timeouts HTTP pour le reverse proxy
+- [x] Créer `Dockerfile` et `.dockerignore`
+- [x] Ajouter une vraie route `GET /api/health` qui vérifie PostgreSQL
+- [x] Mettre à jour `.env.example` avec toutes les variables
 
 ### Infrastructure
-- [ ] Serveur VPS provisionné (Ubuntu 22.04, 4 vCPU, 8 GB RAM)
-- [ ] Coolify installé et accessible sur port 8000
-- [ ] Dépôt Git connecté à Coolify via OAuth
+- [x] Serveur `lime` provisionné
+- [x] Coolify installé et accessible
+- [x] Dépôt Git connecté à Coolify
 
 ### Base de données
-- [ ] Choisir entre Neon cloud (Option A) ou PostgreSQL local (Option B)
-- [ ] Si Option A : copier `DATABASE_URL` Neon dans Coolify env vars
-- [ ] Si Option B : créer la DB, pousser le schéma, importer les données
+- [x] Choisir PostgreSQL local Coolify, faute de compte Neon autonome
+- [x] Identifier Replit Production comme source réelle
+- [x] Créer et vérifier un dump PostgreSQL 16
+- [x] Créer PostgreSQL 16 dans Coolify et importer le dump
+- [x] Comparer les nombres de lignes : 1 209 messages, 201 sessions, 20 retours
 
 ### Déploiement
-- [ ] Toutes les variables d'environnement configurées dans Coolify
+- [x] Toutes les variables d'environnement configurées dans Coolify
 - [ ] Premier deploy réussi (build vert, conteneur en cours)
 - [ ] `GET /api/health` répond 200
 - [ ] `GET /api/health/load` répond avec les bonnes métriques
