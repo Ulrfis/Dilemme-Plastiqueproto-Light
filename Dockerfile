@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Copier les manifestes en premier pour tirer parti du cache Docker
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --include=dev
 
 # Copier le code source et builder
 COPY . .
