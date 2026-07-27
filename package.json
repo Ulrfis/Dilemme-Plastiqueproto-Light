@@ -5,7 +5,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "NODE_ENV=development tsx server/index.ts",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist --external:./vite",
     "start": "NODE_ENV=production node dist/index.js",
     "test": "node --experimental-strip-types --test server/**/*.test.ts",
     "test:load:class": "node scripts/load-test-class.mjs",
