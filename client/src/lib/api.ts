@@ -10,7 +10,12 @@ function sessionAuthHeaders(): Record<string, string> {
   return {};
 }
 
-export async function createSession(data: InsertTutorialSession): Promise<TutorialSession> {
+export type CreatedTutorialSession = TutorialSession & {
+  welcomeMessage: string;
+  welcomeAudioToken: string;
+};
+
+export async function createSession(data: InsertTutorialSession): Promise<CreatedTutorialSession> {
   const response = await fetch('/api/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -170,7 +175,6 @@ export interface StreamChatCallbacks {
 
 export interface StreamChatOptions {
   exchangeCount?: number; // Current exchange number (1-15)
-  userName?: string; // User's name for personalized goodbye
   turnId: string;
 }
 
@@ -189,8 +193,7 @@ export async function sendChatMessageStreaming(
       userMessage,
       accessToken: stored?.accessToken,
       turnId: options?.turnId,
-      exchangeCount: options?.exchangeCount,
-      userName: options?.userName
+      exchangeCount: options?.exchangeCount
     }),
   });
 

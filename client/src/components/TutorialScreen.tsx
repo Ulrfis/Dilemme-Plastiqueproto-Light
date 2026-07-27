@@ -14,7 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { captureEvent } from "@/App";
 import { useSessionFlow } from "@/contexts/SessionFlowContext";
 import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, MIN_CLUES_FOR_EARLY_EXIT, TOTAL_TUTORIAL_CLUES } from "@shared/tutorial-config";
-import { WELCOME_AUDIO_URL, WELCOME_MESSAGE } from "@shared/welcome-audio";
+import { getWelcomeMessage } from "@shared/welcome-audio";
 
 interface Message {
   id?: string;
@@ -57,7 +57,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [audioUnlocked, setAudioUnlockedLocal] = useState(() => sessionFlow.audioUnlocked);
   const [exchangeCount, setExchangeCountLocal] = useState(() => sessionFlow.exchangeCount);
   const [conversationEnded, setConversationEndedLocal] = useState(() => sessionFlow.conversationEnded);
-  const welcomeMessage = WELCOME_MESSAGE;
+  const welcomeMessage = sessionFlow.welcomeMessage || getWelcomeMessage(userName);
   
   const setFoundClues = (clues: string[]) => {
     setFoundCluesLocal(clues);
@@ -212,42 +212,35 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       const welcomeStartTime = Date.now();
       try {
         let audioBlob: Blob | null = null;
-        let usedStaticAsset = false;
+        let usedPregen = false;
 
-        try {
-          console.log('[TutorialScreen] Loading cached welcome audio:', WELCOME_AUDIO_URL);
-          const audioResponse = await fetch(WELCOME_AUDIO_URL, { cache: 'force-cache' });
+        if (sessionFlow.welcomeAudioToken) {
+          console.log('[TutorialScreen] Loading pre-generated personalized welcome audio');
+          const audioResponse = await fetch(`/api/tts/play/${sessionFlow.welcomeAudioToken}`);
           if (audioResponse.ok) {
             audioBlob = await audioResponse.blob();
-            usedStaticAsset = audioBlob.size >= 100;
-            console.log('[TutorialScreen] Cached welcome audio ready, size:', audioBlob.size);
+            usedPregen = audioBlob.size >= 100;
+            console.log('[TutorialScreen] Personalized welcome audio ready, size:', audioBlob.size);
           } else {
             captureEvent('api_error', {
-              endpoint: WELCOME_AUDIO_URL,
+              endpoint: '/api/tts/play',
               status: audioResponse.status,
-              context: 'welcome_static_audio',
+              context: 'welcome_pregen_audio',
               fallback_triggered: true,
             });
-            console.warn('[TutorialScreen] Cached welcome audio returned', audioResponse.status, '— falling back');
+            console.warn('[TutorialScreen] Personalized welcome audio returned', audioResponse.status, '— falling back');
           }
-        } catch (staticAudioError) {
-          captureEvent('api_error', {
-            endpoint: WELCOME_AUDIO_URL,
-            context: 'welcome_static_audio',
-            fallback_triggered: true,
-            error_message: staticAudioError instanceof Error ? staticAudioError.message : String(staticAudioError),
-          });
-          console.warn('[TutorialScreen] Cached welcome audio failed, falling back:', staticAudioError);
         }
 
-        // Keep a resilient fallback if the static asset cannot be loaded.
+        // Keep a resilient fallback if the pre-generated personalized audio
+        // expired or could not be loaded.
         if (!audioBlob || audioBlob.size < 100) {
-          console.log('[TutorialScreen] Generating welcome audio on-demand (static asset unavailable)');
+          console.log('[TutorialScreen] Generating personalized welcome audio on demand');
           audioBlob = await textToSpeechWithRetry(welcomeMessage);
         }
 
         captureEvent('welcome_audio_latency', {
-          source: usedStaticAsset ? 'static_asset' : 'live_fallback',
+          source: usedPregen ? 'personalized_pregen' : 'live_fallback',
           latency_ms: Date.now() - welcomeStartTime,
         });
 
@@ -316,7 +309,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 accessToken: sessionFlow.accessToken,
-                userName,
               }),
             });
             if (resumeRes.ok) {
@@ -389,7 +381,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     setAudioUnlocked(true);
     captureEvent('audio_context_unlocked', {
       is_returning_user: isReturningUser,
-      welcome_audio_source: isReturningUser ? 'resume' : 'static_asset',
+      welcome_audio_source: isReturningUser ? 'resume' : 'personalized',
     });
   };
 
@@ -961,7 +953,6 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
         },
       }, {
         exchangeCount: currentExchange,
-        userName: userName,
         turnId,
       });
     } catch (error) {

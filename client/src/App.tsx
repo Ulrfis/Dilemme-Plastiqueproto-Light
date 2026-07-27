@@ -376,7 +376,7 @@ function VideoPage() {
 
 function WelcomePage() {
   const [, setLocation] = useLocation();
-  const { setUserName, setSessionId, setAccessToken, setAudioUnlocked, setMessages, setExchangeCount, setConversationEnded } = useSessionFlow();
+  const { setUserName, setSessionId, setAccessToken, setWelcome, setAudioUnlocked, setMessages, setExchangeCount, setConversationEnded } = useSessionFlow();
 
   const handleComplete = async (name: string) => {
     // CRITICAL: Reset audio and conversation state for new session
@@ -406,6 +406,7 @@ function WelcomePage() {
       });
       setSessionId(session.id);
       setAccessToken(session.accessToken || '');
+      setWelcome(session.welcomeMessage, session.welcomeAudioToken);
       captureFeatureUsed('session_created', { sessionId: session.id, userName: name });
       setLocation('/tutorial');
     } catch (error) {

@@ -16,6 +16,7 @@ import { ChatAdmissionTimeoutError, ChatTurnConflictError, ChatTurnController, t
 import { detectClues, TARGET_CLUES } from "./clue-detection";
 import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, TOTAL_TUTORIAL_CLUES, canStartTutorialExchange } from "@shared/tutorial-config";
 import { buildPeterExchangeInstructions, buildPeterGameContext } from "./peter-game-context";
+import { getWelcomeMessage } from "@shared/welcome-audio";
 import { pool } from "./db";
 import { checkDatabaseHealth } from "./database-health";
 
@@ -734,15 +735,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/sessions', async (req, res) => {
     try {
-      const data = insertTutorialSessionSchema.parse(req.body);
+      const sessionCreationSchema = insertTutorialSessionSchema.extend({
+        userName: z.string().trim().min(1).max(80).transform(name => name.replace(/\s+/g, ' ')),
+      });
+      const data = sessionCreationSchema.parse(req.body);
       const accessToken = crypto.randomBytes(16).toString('hex');
       const sessionData: InsertTutorialSessionWithToken = { ...data, accessToken };
       const session = await storage.createSession(sessionData);
 
-      // The first Peter message is a versioned static WAV served by the client
-      // bundle. Session creation no longer spends a Gradium request or creates
-      // a short-lived TTS token; all later turns keep their live TTS pipeline.
-      res.json(session);
+      // Start the personalized first Peter message while the client navigates
+      // to the tutorial. The visible text and the voice use the exact same
+      // server-validated name stored on the session.
+      const welcomeMessage = getWelcomeMessage(session.userName);
+      const welcomeAudioToken = crypto.randomUUID();
+      ttsRequestStore.set(welcomeAudioToken, {
+        promise: generateTtsAudio(welcomeMessage, undefined, 'quality'),
+        createdAt: Date.now(),
+        sessionId: session.id,
+        userName: session.userName,
+      });
+
+      res.json({ ...session, welcomeMessage, welcomeAudioToken });
     } catch (error) {
       console.error('Error creating session:', error);
       res.status(400).json({ error: 'Invalid session data' });
@@ -880,7 +893,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'No audio file provided' });
       }
 
-      const sttBody = (req as unknown as { body?: { sessionId?: string; userName?: string } }).body;
+      const sttBody = (req as unknown as { body?: { sessionId?: string } }).body;
       if (!sttBody?.sessionId) {
         return res.status(400).json({ error: 'Missing sessionId' });
       }
@@ -909,19 +922,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           audio_bytes: audioBuffer.byteLength,
           transcript_chars: transcription.text?.length ?? 0,
         },
-        sttBody?.userName ?? null,
+        session.userName,
       );
 
       res.json({ text: transcription.text });
     } catch (error) {
       console.error('Error transcribing audio:', error);
-      const sttBody = (req as unknown as { body?: { sessionId?: string; userName?: string } }).body;
+      const sttBody = (req as unknown as { body?: { sessionId?: string } }).body;
+      const sessionForName = sttBody?.sessionId
+        ? await storage.getSession(sttBody.sessionId).catch(() => null)
+        : null;
       captureServerError(
         '/api/speech-to-text',
         sttBody?.sessionId ?? null,
         error,
         { context: 'whisper_transcription' },
-        sttBody?.userName ?? null,
+        sessionForName?.userName,
       );
       res.status(500).json({ error: 'Transcription failed' });
     }
@@ -988,12 +1004,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(audioBuffer);
     } catch (error) {
       console.error('[TTS Stream API] Error:', error);
+      const sessionForName = req.body?.sessionId
+        ? await storage.getSession(req.body.sessionId).catch(() => null)
+        : null;
       captureServerError(
         '/api/text-to-speech/stream',
         (req.body?.sessionId as string | undefined) ?? null,
         error,
         { context: 'tts_stream' },
-        (req.body?.userName as string | undefined) ?? null,
+        sessionForName?.userName,
       );
       const status = error instanceof QueueOverloadedError ? 503 : 500;
       res.status(status).json({
@@ -1022,12 +1041,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.send(audioBuffer);
     } catch (error) {
       console.error('[TTS API] Error generating speech:', error);
+      const sessionForName = req.body?.sessionId
+        ? await storage.getSession(req.body.sessionId).catch(() => null)
+        : null;
       captureServerError(
         '/api/text-to-speech',
         (req.body?.sessionId as string | undefined) ?? null,
         error,
         { context: 'tts_full' },
-        (req.body?.userName as string | undefined) ?? null,
+        sessionForName?.userName,
       );
       const status = error instanceof QueueOverloadedError ? 503 : 500;
       res.status(status).json({
@@ -1233,7 +1255,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const session = await verifySessionToken(sessionId, req, res);
       if (!session) return;
 
-      const userName = (req.body.userName as string | undefined) || 'toi';
+      const userName = session.userName;
 
       const allTargetKeywords = TARGET_CLUES.map(c => c.keyword);
       const foundClues = session.foundClues || [];
@@ -1336,9 +1358,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[Chat Stream API] Request received:', {
         sessionId: req.body.sessionId,
         messageLength: req.body.userMessage?.length,
-        userName: req.body.userName
       });
-      const { sessionId, userMessage, userName } = req.body;
+      const { sessionId, userMessage } = req.body;
       const turnId = typeof req.body.turnId === 'string' && req.body.turnId.length <= 100
         ? req.body.turnId
         : crypto.randomUUID();
@@ -1353,6 +1374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const session = await verifySessionToken(sessionId, req, res);
       if (!session) return;
+      const userName = session.userName;
       if (!canStartTutorialExchange(session.messageCount ?? 0)) {
         return res.status(409).json({
           error: `La conversation a atteint sa limite de ${MAX_CONVERSATION_EXCHANGES} échanges. Clique sur Poursuivre pour continuer l'expérience.`,
@@ -1366,7 +1388,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         duration_ms: Date.now() - queueStartedAt,
         success: true,
         endpoint: '/api/chat/stream',
-      }, userName);
+      }, session.userName);
       activeChatStreams += 1;
       countedChatStream = true;
       res.once('close', () => {
@@ -1402,7 +1424,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('[Chat Stream API] Using OpenAI Assistant:', ASSISTANT_ID);
 
-      const userNameToUse = userName || 'mon ami';
+      const userNameToUse = session.userName;
 
       // Compute the current clue state (already found + newly detected from user message)
       const allTargetKeywords = TARGET_CLUES.map(c => c.keyword);
@@ -1468,7 +1490,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           context: 'stream_timeout',
           error_message: `Assistant stream blocked >${OPENAI_RUN_TIMEOUT_MS}ms`,
           turn_id: turnId,
-        }, userName);
+        }, session.userName);
         if (!res.writableEnded) {
           res.write(`data: ${JSON.stringify({
             type: 'error',
@@ -2016,7 +2038,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const combined2 = [...session.foundClues, ...detectedClues];
       const allFoundSoFarNS = combined2.filter((v, i) => combined2.indexOf(v) === i);
       const missingCluesNS = allTargetKeywordsNS.filter(k => !allFoundSoFarNS.includes(k));
-      const userNameToUseNS = (req.body.userName as string | undefined) || 'mon ami';
+      const userNameToUseNS = session.userName;
 
       // Use server-side message count as the authoritative exchange counter
       const serverExchangeCountNS = (session.messageCount ?? 0) + 1;

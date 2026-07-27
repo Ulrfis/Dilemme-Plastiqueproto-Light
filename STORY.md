@@ -3,7 +3,7 @@
 > **Status**: 🟢 Production on Coolify — ongoing development
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-07-27 (Playback WAV immédiat pour l'accueil de Peter)
+> **Last Updated**: 2026-07-27 (Prénom de session utilisé partout)
 
 ---
 
@@ -67,6 +67,31 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
 
+### [2026-07-27] — Prénom de session utilisé partout par Peter et le système 🔹
+
+**Intent**: Peter appelait chaque nouvel utilisateur « ulrich » dans son premier
+message, car le texte et le WAV d'accueil étaient statiques. Les échanges
+suivants acceptaient aussi un prénom renvoyé par le client au lieu d'utiliser
+exclusivement la valeur persistée dans la session.
+
+**Outcome**:
+
+- Le prénom est normalisé, validé et stocké à la création de session.
+- Le texte d'accueil et sa voix sont générés à partir de cette valeur unique.
+- La génération audio démarre en arrière-plan pendant la navigation afin de
+  conserver un démarrage rapide ; un fallback live couvre les tokens expirés.
+- Les conversations streamées, non streamées et les reprises utilisent toutes
+  `session.userName`, y compris pour la télémétrie serveur.
+- Le texte personnalisé et le token audio sont persistés dans le flux de
+  session côté navigateur pour rester cohérents pendant la navigation.
+- Tests TypeScript, 28 tests automatisés et build de production validés.
+
+**Insight**: une optimisation statique ne doit pas figer une donnée
+personnalisée. La bonne unité de cache est ici la session, avec le prénom
+serveur comme source de vérité.
+
+---
+
 ### [2026-07-27] — Première phrase de Peter en playback statique 🔹
 
 **Intent**: faire entendre immédiatement la phrase d'accueil dès le chargement
@@ -92,6 +117,10 @@ direct.
 versionné est plus rapide, moins coûteux et plus fiable qu'une promesse TTS
 éphémère. La version dans le nom rend un cache `immutable` compatible avec les
 futures corrections de voix ou de texte.
+
+> Superseded le 27 juillet 2026 : la phrase n'est pas réellement fixe puisqu'elle
+> contient le prénom de chaque utilisateur. Elle est maintenant pré-générée par
+> session.
 
 ---
 

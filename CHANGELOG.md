@@ -8,6 +8,22 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ## [Unreleased]
 
+### Corrigé — Prénom de l'utilisateur cohérent partout
+
+- Suppression du prénom « ulrich » figé dans le premier message texte et audio
+  de Peter.
+- Le message d'accueil est désormais construit avec le prénom validé et
+  enregistré lors de la création de session.
+- L'audio personnalisé reste pré-généré pendant la navigation vers le tutoriel
+  pour limiter la latence, avec un fallback Gradium à la demande.
+- Les conversations normales et les messages de reprise utilisent
+  systématiquement le prénom de la session serveur, sans faire confiance à une
+  valeur renvoyée par le navigateur.
+- Le même prénom alimente l'interface, les instructions de Peter et la
+  télémétrie serveur.
+- Ajout de tests sur la personnalisation, la normalisation des espaces et
+  l'injection du prénom dans le contexte de Peter.
+
 ### Amélioré — Playback immédiat de la première phrase de Peter
 
 - Génération et ajout du WAV versionné
@@ -23,6 +39,9 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 - Les tours de parole suivants conservent le pipeline TTS live existant.
 - Ajout de tests vérifiant le texte, le préchargement HTML et l'intégrité RIFF
   du fichier WAV.
+
+> Cette optimisation statique a été remplacée le 27 juillet 2026 par la
+> pré-génération personnalisée décrite ci-dessus.
 
 ### Déployé — Migration production Replit vers Coolify
 

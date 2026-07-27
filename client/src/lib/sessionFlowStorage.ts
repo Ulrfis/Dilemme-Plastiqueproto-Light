@@ -9,6 +9,8 @@ export interface StoredSessionFlow {
   userName?: string;
   sessionId?: string;
   accessToken?: string;
+  welcomeMessage?: string;
+  welcomeAudioToken?: string;
   foundClues?: string[];
 }
 

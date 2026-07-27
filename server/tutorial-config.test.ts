@@ -32,6 +32,7 @@ test("keeps clues valid after challenge and closes only on exchange 15", () => {
   const context15 = buildPeterGameContext({ ...baseInput, exchangeNumber: 15 });
 
   assert.match(context9, /Indices toujours validables : oui/);
+  assert.match(context9, /Prénom de l'utilisateur : Lina/);
   assert.match(context9, /Conversation encore possible après cette réponse : oui/);
   assert.match(context15, /Dernier échange autorisé : oui/);
   assert.match(context15, /Conversation encore possible après cette réponse : non/);

@@ -11,6 +11,8 @@ interface SessionFlowState {
   userName: string;
   sessionId: string;
   accessToken: string;
+  welcomeMessage: string;
+  welcomeAudioToken: string;
   foundClues: string[];
   messages: Message[];
   exchangeCount: number;
@@ -26,6 +28,7 @@ interface SessionFlowContextType extends SessionFlowState {
   setUserName: (name: string) => void;
   setSessionId: (id: string) => void;
   setAccessToken: (token: string) => void;
+  setWelcome: (message: string, audioToken: string) => void;
   setFoundClues: (clues: string[]) => void;
   setMessages: (messages: Message[] | ((prev: Message[]) => Message[])) => void;
   setExchangeCount: (count: number | ((prev: number) => number)) => void;
@@ -45,6 +48,8 @@ const initialState: SessionFlowState = {
   userName: '',
   sessionId: '',
   accessToken: '',
+  welcomeMessage: '',
+  welcomeAudioToken: '',
   foundClues: [],
   messages: [],
   exchangeCount: 0,
@@ -153,6 +158,21 @@ export function SessionFlowProvider({ children }: { children: ReactNode }) {
     setState(prev => ({ ...prev, accessToken: token }));
   }, []);
 
+  const setWelcome = useCallback((message: string, audioToken: string) => {
+    const currentState = readStoredSessionFlow() ?? initialState;
+    const newState = {
+      ...currentState,
+      welcomeMessage: message,
+      welcomeAudioToken: audioToken,
+    };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
+    setState(prev => ({
+      ...prev,
+      welcomeMessage: message,
+      welcomeAudioToken: audioToken,
+    }));
+  }, []);
+
   const setFoundClues = useCallback((clues: string[]) => {
     setState(prev => ({ ...prev, foundClues: clues }));
   }, []);
@@ -219,6 +239,7 @@ export function SessionFlowProvider({ children }: { children: ReactNode }) {
       setUserName,
       setSessionId,
       setAccessToken,
+      setWelcome,
       setFoundClues,
       setMessages,
       setExchangeCount,
