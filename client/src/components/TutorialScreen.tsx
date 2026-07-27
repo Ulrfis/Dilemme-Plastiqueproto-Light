@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { captureEvent } from "@/App";
 import { useSessionFlow } from "@/contexts/SessionFlowContext";
 import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, MIN_CLUES_FOR_EARLY_EXIT, TOTAL_TUTORIAL_CLUES } from "@shared/tutorial-config";
+import { WELCOME_AUDIO_URL, WELCOME_MESSAGE } from "@shared/welcome-audio";
 
 interface Message {
   id?: string;
@@ -56,7 +57,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   const [audioUnlocked, setAudioUnlockedLocal] = useState(() => sessionFlow.audioUnlocked);
   const [exchangeCount, setExchangeCountLocal] = useState(() => sessionFlow.exchangeCount);
   const [conversationEnded, setConversationEndedLocal] = useState(() => sessionFlow.conversationEnded);
-  const [welcomeMessage] = useState(`Bienvenue ${userName} dans cette courte expérience. Tente de trouver 6 indices dans cette image pendant les 8 premiers échanges, en racontant ce que tu vois et ce qui attire ton attention sur l'impact du plastique sur la santé. Ensuite, tu pourras continuer à chercher et à discuter avec Peter jusqu'à 15 échanges au total.`);
+  const welcomeMessage = WELCOME_MESSAGE;
   
   const setFoundClues = (clues: string[]) => {
     setFoundCluesLocal(clues);
@@ -210,44 +211,43 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       
       const welcomeStartTime = Date.now();
       try {
-        // Try to use the pre-generated welcome audio token (kicked off at session creation)
         let audioBlob: Blob | null = null;
-        let usedPregen = false;
-        const pregenToken = sessionStorage.getItem('welcomeAudioToken');
-        if (pregenToken) {
-          sessionStorage.removeItem('welcomeAudioToken'); // consume immediately to prevent stale reuse
-          try {
-            console.log('[TutorialScreen] Using pre-generated welcome audio, token:', pregenToken.substring(0, 8));
-            const audioResponse = await fetch(`/api/tts/play/${pregenToken}`);
-            if (audioResponse.ok) {
-              audioBlob = await audioResponse.blob();
-              console.log('[TutorialScreen] Pre-generated welcome audio ready, size:', audioBlob.size);
-            } else {
-              captureEvent('api_error', { endpoint: '/api/tts/play', status: audioResponse.status, context: 'welcome_pregen', fallback_triggered: true });
-              console.warn('[TutorialScreen] Pre-generated token returned', audioResponse.status, '— falling back');
-            }
-          } catch (pregenErr) {
+        let usedStaticAsset = false;
+
+        try {
+          console.log('[TutorialScreen] Loading cached welcome audio:', WELCOME_AUDIO_URL);
+          const audioResponse = await fetch(WELCOME_AUDIO_URL, { cache: 'force-cache' });
+          if (audioResponse.ok) {
+            audioBlob = await audioResponse.blob();
+            usedStaticAsset = audioBlob.size >= 100;
+            console.log('[TutorialScreen] Cached welcome audio ready, size:', audioBlob.size);
+          } else {
             captureEvent('api_error', {
-              endpoint: '/api/tts/play',
-              context: 'welcome_pregen',
+              endpoint: WELCOME_AUDIO_URL,
+              status: audioResponse.status,
+              context: 'welcome_static_audio',
               fallback_triggered: true,
-              error_message: pregenErr instanceof Error ? pregenErr.message : String(pregenErr),
             });
-            console.warn('[TutorialScreen] Pre-generated audio fetch failed, falling back:', pregenErr);
-            audioBlob = null;
+            console.warn('[TutorialScreen] Cached welcome audio returned', audioResponse.status, '— falling back');
           }
+        } catch (staticAudioError) {
+          captureEvent('api_error', {
+            endpoint: WELCOME_AUDIO_URL,
+            context: 'welcome_static_audio',
+            fallback_triggered: true,
+            error_message: staticAudioError instanceof Error ? staticAudioError.message : String(staticAudioError),
+          });
+          console.warn('[TutorialScreen] Cached welcome audio failed, falling back:', staticAudioError);
         }
 
-        // Fallback: generate on-demand if pre-gen token was unavailable or failed
+        // Keep a resilient fallback if the static asset cannot be loaded.
         if (!audioBlob || audioBlob.size < 100) {
-          console.log('[TutorialScreen] Generating welcome audio on-demand (no pre-gen token)');
+          console.log('[TutorialScreen] Generating welcome audio on-demand (static asset unavailable)');
           audioBlob = await textToSpeechWithRetry(welcomeMessage);
-        } else {
-          usedPregen = true;
         }
 
         captureEvent('welcome_audio_latency', {
-          used_pregen: usedPregen,
+          source: usedStaticAsset ? 'static_asset' : 'live_fallback',
           latency_ms: Date.now() - welcomeStartTime,
         });
 
@@ -389,7 +389,7 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     setAudioUnlocked(true);
     captureEvent('audio_context_unlocked', {
       is_returning_user: isReturningUser,
-      had_pregen_token: typeof sessionStorage !== 'undefined' && !!sessionStorage.getItem('welcomeAudioToken'),
+      welcome_audio_source: isReturningUser ? 'resume' : 'static_asset',
     });
   };
 

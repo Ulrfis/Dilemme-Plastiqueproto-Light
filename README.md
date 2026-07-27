@@ -37,6 +37,8 @@ Le déroulé complet et les procédures de reprise sont documentés dans
   serveur afin de garantir une lecture séquentielle, sans superposition.
 - Les connexions Gradium sont réutilisées et maintenues actives pour réduire la
   latence.
+- La phrase d'accueil de Peter est un WAV versionné préchargé par le navigateur
+  pour démarrer immédiatement ; les tours suivants restent générés en direct.
 - Le guide d'intégration et les pièges connus sont documentés dans
   [`docs/integrations/gradium.md`](./docs/integrations/gradium.md).
 

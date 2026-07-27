@@ -36,7 +36,8 @@ Several strategies are implemented to optimize performance, especially reducing 
 - **Phase 3 Optimizations (Task #26)**:
   - `MIN_SENTENCE_CHARS=55`: Phase 1 groups short sentences to avoid TTS on fragments.
   - Phase 2a rolling dispatch: fires mid-stream when ≥120 chars or ≥3 sentences accumulated (not only at stream completion), closing silence gap between Phase 1 and Phase 2 audio.
-  - Welcome audio pre-generation: TTS token generated at session creation, stored in `sessionStorage('welcomeAudioToken')`, consumed immediately in `handleUnlockAudio`.
+  - Welcome audio playback: versioned static WAV preloaded by the browser and
+    played immediately in `handleUnlockAudio`; later Peter turns keep live TTS.
 - **"Peter is Thinking" Bubble**: Animated visual indicator during AI processing.
 - **Resume Pre-generation (Task #30)**: After each chat exchange, `schedulePregenResume()` runs in the background (fire-and-forget) to silently generate + TTS the next session-resume message. Stored in `pregenResumeStore` (keyed by sessionId, 5 min TTL). `TutorialScreen` tries `GET /api/sessions/:id/resume-token` first when a returning user arrives; on 404 it falls back to the existing `POST /api/sessions/:id/resume` on-demand path. A `resume_audio_latency` PostHog event records `used_pregen` and `latency_ms`.
 
@@ -116,12 +117,12 @@ exported as an alias for clarity at call sites. Events added in Task #32:
 - `synthesis_submitted` (enriched) — adds `input_mode`.
 - `video_intro_outcome` — `outcome: completed|skipped|error` with `time_in_video_ms, video_current_time, video_duration`.
 - `api_error` — captured in `catch` of fetches: `endpoint, status?, context, error_message?`.
-  Endpoints instrumented: `/api/tts/play` (welcome_pregen, resume, streaming_sentence_block),
+  Endpoints instrumented: static welcome WAV (fallback monitoring), `/api/tts/play` (resume, streaming_sentence_block),
   `/api/sessions/{id}/resume`, `/api/sessions/{id}/synthesis`, `/api/speech-to-text`.
 
 ### Media Management
 
-The application manages audio context for recording and playback, requiring user gesture-based unlock on mobile. Voice interaction involves MediaRecorder for audio capture, Whisper for transcription, and ElevenLabs for synthesis. Video content is hosted on Gumlet, supporting HLS streaming, autoplay, and fullscreen.
+The application manages audio context for recording and playback, requiring user gesture-based unlock on mobile. Voice interaction involves MediaRecorder for audio capture, Whisper for transcription, and Gradium for synthesis. Video content is hosted on Gumlet, supporting HLS streaming, autoplay, and fullscreen.
 
 ## External Dependencies
 

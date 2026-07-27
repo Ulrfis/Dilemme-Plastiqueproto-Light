@@ -3,7 +3,7 @@
 > **Status**: 🟢 Production on Coolify — ongoing development
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-07-27 (Migration production Replit → Coolify terminée)
+> **Last Updated**: 2026-07-27 (Playback WAV immédiat pour l'accueil de Peter)
 
 ---
 
@@ -66,6 +66,34 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 ## Feature Chronicle
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
+
+### [2026-07-27] — Première phrase de Peter en playback statique 🔹
+
+**Intent**: faire entendre immédiatement la phrase d'accueil dès le chargement
+de l'expérience conversationnelle, sans attendre une synthèse Gradium déclenchée
+à chaque création de session. Les réponses suivantes doivent rester générées en
+direct.
+
+**Outcome**:
+
+- Génération d'un WAV Gradium de 14,8 secondes pour le texte d'accueil exact.
+- En-tête RIFF corrigé et validé : PCM mono, 48 kHz, 16 bits.
+- Asset versionné et préchargé par le navigateur avant l'arrivée sur le
+  tutoriel.
+- Cache HTTP immuable d'un an en production, sûr grâce au nom de fichier
+  versionné.
+- Suppression du coût et de la latence de pré-génération TTS lors de
+  `POST /api/sessions`.
+- Fallback live conservé uniquement si l'asset statique est indisponible.
+- Tests automatiques pour empêcher toute divergence entre le texte affiché, le
+  chemin préchargé et le fichier audio.
+
+**Insight**: pour une phrase fixe et rejouée à chaque session, un asset audio
+versionné est plus rapide, moins coûteux et plus fiable qu'une promesse TTS
+éphémère. La version dans le nom rend un cache `immutable` compatible avec les
+futures corrections de voix ou de texte.
+
+---
 
 ### [2026-07-27] — Bascule production Replit → Coolify, autonomie complète 🔷
 

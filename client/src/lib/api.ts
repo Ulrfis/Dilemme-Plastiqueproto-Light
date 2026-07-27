@@ -10,7 +10,7 @@ function sessionAuthHeaders(): Record<string, string> {
   return {};
 }
 
-export async function createSession(data: InsertTutorialSession): Promise<TutorialSession & { welcomeAudioToken?: string }> {
+export async function createSession(data: InsertTutorialSession): Promise<TutorialSession> {
   const response = await fetch('/api/sessions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

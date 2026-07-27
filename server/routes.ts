@@ -739,55 +739,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const sessionData: InsertTutorialSessionWithToken = { ...data, accessToken };
       const session = await storage.createSession(sessionData);
 
-      // Pre-generate welcome message TTS in background so TutorialScreen can play it immediately
-      // without waiting for an on-demand Gradium call after navigation.
-      const welcomeText = `Bienvenue ${data.userName} dans cette courte expérience. Tente de trouver 6 indices dans cette image pendant les ${CLUE_CHALLENGE_EXCHANGES} premiers échanges, en racontant ce que tu vois et ce qui attire ton attention sur l'impact du plastique sur la santé. Ensuite, tu pourras continuer à chercher et à discuter avec moi jusqu'à ${MAX_CONVERSATION_EXCHANGES} échanges au total.`;
-      const welcomeAudioToken = crypto.randomUUID();
-      const welcomeT0 = Date.now();
-      const welcomePromise = generateTtsAudio(welcomeText, undefined, 'quality');
-      welcomePromise
-        .then(() => {
-          captureServerTiming(
-            session.id,
-            {
-              step: 'welcome_pregen_tts',
-              duration_ms: Date.now() - welcomeT0,
-              success: true,
-              endpoint: '/api/sessions',
-              chars: welcomeText.length,
-            },
-            data.userName,
-          );
-        })
-        .catch((err) => {
-          captureServerTiming(
-            session.id,
-            {
-              step: 'welcome_pregen_tts',
-              duration_ms: Date.now() - welcomeT0,
-              success: false,
-              endpoint: '/api/sessions',
-            },
-            data.userName,
-          );
-          captureServerError(
-            '/api/sessions',
-            session.id,
-            err,
-            { context: 'welcome_pregen_tts' },
-            data.userName,
-          );
-        });
-      ttsRequestStore.set(welcomeAudioToken, {
-        promise: welcomePromise,
-        createdAt: Date.now(),
-        sessionId: session.id,
-        userName: data.userName,
-      });
-      console.log('[Session Create] Pre-generating welcome TTS in background, token:', welcomeAudioToken.substring(0, 8));
-
-      // Return accessToken once so the client can persist it; also include welcomeAudioToken
-      res.json({ ...session, welcomeAudioToken });
+      // The first Peter message is a versioned static WAV served by the client
+      // bundle. Session creation no longer spends a Gradium request or creates
+      // a short-lived TTS token; all later turns keep their live TTS pipeline.
+      res.json(session);
     } catch (error) {
       console.error('Error creating session:', error);
       res.status(400).json({ error: 'Invalid session data' });

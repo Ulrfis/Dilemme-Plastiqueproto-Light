@@ -8,6 +8,22 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ## [Unreleased]
 
+### Amélioré — Playback immédiat de la première phrase de Peter
+
+- Génération et ajout du WAV versionné
+  `client/public/audio/peter-welcome-ulrich-v1.wav` pour la phrase d'accueil
+  exacte affichée au début d'une nouvelle expérience.
+- Préchargement du WAV dès le document HTML et lecture avec le cache navigateur
+  `force-cache`.
+- En production, l'asset est servi avec
+  `Cache-Control: public, max-age=31536000, immutable`.
+- Suppression de la génération Gradium et du token TTS temporaire à chaque
+  création de session : le démarrage n'attend plus un appel réseau TTS.
+- Fallback Gradium live conservé si le fichier statique ne peut pas être chargé.
+- Les tours de parole suivants conservent le pipeline TTS live existant.
+- Ajout de tests vérifiant le texte, le préchargement HTML et l'intégrité RIFF
+  du fichier WAV.
+
 ### Déployé — Migration production Replit vers Coolify
 
 - Bascule de l'application publique

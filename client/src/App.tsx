@@ -406,10 +406,6 @@ function WelcomePage() {
       });
       setSessionId(session.id);
       setAccessToken(session.accessToken || '');
-      // Store the pre-generated welcome audio token so TutorialScreen can play it immediately
-      if (session.welcomeAudioToken) {
-        sessionStorage.setItem('welcomeAudioToken', session.welcomeAudioToken);
-      }
       captureFeatureUsed('session_created', { sessionId: session.id, userName: name });
       setLocation('/tutorial');
     } catch (error) {
