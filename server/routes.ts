@@ -16,7 +16,7 @@ import { ChatAdmissionTimeoutError, ChatTurnConflictError, ChatTurnController, t
 import { detectClues, TARGET_CLUES } from "./clue-detection";
 import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, TOTAL_TUTORIAL_CLUES, canStartTutorialExchange } from "@shared/tutorial-config";
 import { buildPeterExchangeInstructions, buildPeterGameContext } from "./peter-game-context";
-import { getWelcomeMessage } from "@shared/welcome-audio";
+import { buildWelcomePayload } from "@shared/welcome-audio";
 import { pool } from "./db";
 import { checkDatabaseHealth } from "./database-health";
 
@@ -746,16 +746,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Start the personalized first Peter message while the client navigates
       // to the tutorial. The visible text and the voice use the exact same
       // server-validated name stored on the session.
-      const welcomeMessage = getWelcomeMessage(session.userName);
       const welcomeAudioToken = crypto.randomUUID();
+      const welcomePayload = buildWelcomePayload(session.userName, welcomeAudioToken);
       ttsRequestStore.set(welcomeAudioToken, {
-        promise: generateTtsAudio(welcomeMessage, undefined, 'quality'),
+        promise: generateTtsAudio(welcomePayload.welcomeMessage, undefined, 'quality'),
         createdAt: Date.now(),
         sessionId: session.id,
         userName: session.userName,
       });
 
-      res.json({ ...session, welcomeMessage, welcomeAudioToken });
+      res.json({ ...session, ...welcomePayload });
     } catch (error) {
       console.error('Error creating session:', error);
       res.status(400).json({ error: 'Invalid session data' });
