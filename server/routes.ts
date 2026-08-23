@@ -19,6 +19,7 @@ import { buildPeterExchangeInstructions, buildPeterGameContext } from "./peter-g
 import { getWelcomeMessage } from "@shared/welcome-audio";
 import { pool } from "./db";
 import { checkDatabaseHealth } from "./database-health";
+import { normalizeSessionUserName } from "./session-user-name";
 
 const AUDIO_MIME_WHITELIST = new Set([
   "audio/webm",
@@ -735,10 +736,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/sessions', async (req, res) => {
     try {
-      const sessionCreationSchema = insertTutorialSessionSchema.extend({
-        userName: z.string().trim().min(1).max(80).transform(name => name.replace(/\s+/g, ' ')),
-      });
-      const data = sessionCreationSchema.parse(req.body);
+      const parsed = insertTutorialSessionSchema.parse(req.body);
+      const data = {
+        ...parsed,
+        userName: normalizeSessionUserName(parsed.userName),
+      };
       const accessToken = crypto.randomBytes(16).toString('hex');
       const sessionData: InsertTutorialSessionWithToken = { ...data, accessToken };
       const session = await storage.createSession(sessionData);
