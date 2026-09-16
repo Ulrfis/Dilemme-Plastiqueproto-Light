@@ -3,7 +3,7 @@
 > **Status**: 🟢 Production on Coolify — ongoing development
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-07-27 (Prénom de session utilisé partout)
+> **Last Updated**: 2026-09-16 (STT en iframe + format audio Safari)
 
 ---
 
@@ -66,6 +66,64 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 ## Feature Chronicle
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
+
+### [2026-09-16] — STT en intégration iframe + format audio Safari 🔷
+
+**Intent**: en testant l'app intégrée dans un autre site, le STT échouait alors
+que la voix de Peter fonctionnait. Vérifier la mécanique STT de bout en bout,
+corriger si l'embed est réparable, et auditer le reste sans régression.
+
+**Cause racine (embed)**: une iframe cross-origin n'a **pas** accès au micro
+tant que la page hôte ne délègue pas la permission avec `allow="microphone"`.
+La *Permissions Policy* de la fonctionnalité `microphone` vaut `self` par
+défaut : elle ne couvre que le document de premier niveau. Sans cet attribut,
+`getUserMedia()` rejette avec `NotAllowedError` **sans jamais afficher de
+demande de permission**, alors que la lecture audio reste autorisée — d'où le
+symptôme exact « Peter parle, le micro échoue ». Reproduit et vérifié sous
+Chromium, avec et sans l'attribut `allow`.
+
+**Ce n'est pas réparable depuis l'app** : c'est une garantie de sécurité du
+navigateur (sinon n'importe quel site écouterait ses visiteurs via une iframe
+cachée). La correction appartient au site hôte. L'app peut en revanche le
+détecter et le dire correctement.
+
+**Outcome**:
+
+- `client/src/lib/embedContext.ts` : détection du contexte iframe et de la
+  policy micro via `document.featurePolicy.allowsFeature('microphone')`, sans
+  déclencher de demande de permission. Classification des erreurs micro en six
+  causes distinctes au lieu d'un booléen « erreur définitive ».
+- Le tutoriel bascule en mode texte **dès le chargement** quand le micro est
+  bloqué par l'intégration — l'élève n'est jamais bloqué —, avec un message
+  explicite et un bouton « Plein écran » vers un onglet où le micro marche.
+- `docs/integrations/embed-iframe.md` : le snippet d'iframe à donner au site
+  hôte, les limites par navigateur, le diagnostic PostHog.
+
+**Deuxième bug, indépendant de l'embed (Safari iOS/macOS)**: `stopRecording()`
+étiquetait le Blob audio en `audio/webm` et le nommait `recording.webm` quel que
+soit le format réellement enregistré. Safari n'enregistrant qu'en `audio/mp4`,
+Whisper recevait un contenu MP4 annoncé en WebM. `FeedbackSurvey` imposait en
+plus `mimeType: 'audio/webm'` au constructeur `MediaRecorder` : l'exception
+Safari était attrapée sans aucun retour visible. Les quatre points d'entrée
+vocaux partagent maintenant `client/src/lib/audioRecording.ts`, qui négocie un
+format réellement supporté et le propage jusqu'au nom de fichier.
+
+**Aussi corrigé**: le micro restait actif (voyant allumé) si `getUserMedia`
+réussissait mais que la construction du `MediaRecorder` échouait ensuite.
+
+**Vérification**: `npm run check` propre, 50 tests automatisés (28 serveur + 22
+nouveaux), build de production, et validation du module réel dans une vraie
+iframe cross-origin sous Chromium (Playwright) — blocage détecté sans `allow`,
+micro fonctionnel avec.
+
+**Insight**: deux causes indépendantes produisaient le même symptôme « le STT ne
+marche pas ». La première n'est pas corrigeable dans l'app et se règle par une
+ligne de HTML chez l'hôte ; la seconde était un bug bien réel, masqué parce que
+l'échec était silencieux. L'observabilité (`mic_policy`, `mic_error_reason`,
+`audio_mime`) est ici la vraie correction de fond : sans elle, ces deux cas
+restaient indiscernables en production.
+
+---
 
 ### [2026-07-27] — Prénom de session utilisé partout par Peter et le système 🔹
 

@@ -8,6 +8,72 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ## [Unreleased]
 
+### Corrigé — STT en intégration iframe et sur Safari
+
+**Cause du bug signalé** (embed dans un autre site : Peter parle, le micro
+échoue) : une iframe cross-origin n'a pas accès au micro tant que la page hôte
+ne délègue pas la permission avec `allow="microphone"`. `getUserMedia` rejette
+alors avec `NotAllowedError` sans jamais afficher de demande de permission,
+tandis que la lecture audio (TTS) reste autorisée. Ce blocage est une garantie
+de sécurité du navigateur : il n'est pas contournable depuis l'app, la
+correction est à faire côté site hôte. Comportement reproduit et vérifié sous
+Chromium (avec et sans l'attribut `allow`).
+
+- **Nouveau `client/src/lib/embedContext.ts`** : détection du contexte iframe et
+  de la Permissions Policy micro via `document.featurePolicy.allowsFeature()`,
+  sans déclencher de demande de permission.
+  `classifyMicError()` distingue désormais un blocage d'iframe
+  (`embed_policy_blocked` / `embed_policy_suspected`) d'un refus élève
+  (`mic_denied`), d'un micro absent, d'un navigateur non supporté et d'une
+  erreur transitoire.
+- **TutorialScreen** : bascule en mode texte dès le chargement quand le micro
+  est bloqué par l'intégration, avec un message explicite (au lieu de
+  « permission refusée », trompeur) et un bouton « Plein écran » qui rouvre
+  l'app dans un nouvel onglet où le micro fonctionne.
+- **SynthesisScreen / ScoreScreen / FeedbackSurvey** : même classification pour
+  les messages d'erreur de la dictée vocale.
+- **Documentation** : `docs/integrations/embed-iframe.md` — snippet d'iframe à
+  donner au site hôte, limites par navigateur, et diagnostic via PostHog.
+
+### Corrigé — Format audio envoyé à Whisper (Safari iOS/macOS)
+
+- `useVoiceInteraction.stopRecording()` étiquetait le Blob en `audio/webm` et le
+  nommait `recording.webm` **quel que soit le format réellement enregistré**.
+  Safari n'enregistrant qu'en `audio/mp4`, Whisper recevait un contenu MP4
+  annoncé en WebM — transcription peu fiable ou en échec sur iPhone/iPad.
+  Le type réel produit par le `MediaRecorder` est maintenant propagé au Blob et
+  au nom de fichier.
+- `FeedbackSurvey` imposait `mimeType: 'audio/webm'` au constructeur
+  `MediaRecorder` : sur Safari, l'exception `NotSupportedError` était attrapée
+  sans aucun retour visible, la dictée paraissait simplement inerte. Le format
+  est désormais négocié, et l'échec est affiché à l'élève et remonté à PostHog.
+- **Nouveau `client/src/lib/audioRecording.ts`** : sélection du format
+  d'enregistrement partagée par les quatre points d'entrée vocaux, alignée sur
+  la whitelist MIME du serveur (`server/routes.ts`). Les paramètres de codec
+  sont retirés du type envoyé, sinon `audio/webm;codecs=opus` serait rejeté par
+  le filtre multer.
+
+### Corrigé — Micro laissé actif après un échec de démarrage
+
+- Si `getUserMedia` réussissait mais que la suite échouait (construction du
+  `MediaRecorder`), les pistes du `MediaStream` n'étaient jamais arrêtées : le
+  voyant micro restait allumé et le micro monopolisé jusqu'au rechargement de
+  la page. Corrigé dans `useVoiceInteraction` et `FeedbackSurvey`.
+
+### Ajouté — Observabilité micro et transcription
+
+- Contexte d'embed (`is_embedded`, `mic_policy`, `secure_context`,
+  `embed_referrer` réduit à l'origine) joint aux évènements `mic_permission`,
+  `microphone_permission` et `fallback_mode_activated`.
+- `mic_error_reason` sur tous les évènements d'échec micro.
+- `audio_mime` sur `whisper_stt_complete` et sur les `api_error` de
+  `/api/speech-to-text`, pour corréler les échecs de transcription au format.
+- `deepgram_fallback_to_whisper` émis quand la transcription live est
+  indisponible (Safari sans WebM, jeton de session manquant) — le cas était
+  silencieux, invisible en production.
+- 22 tests unitaires sur `embedContext` et `audioRecording`. Le script
+  `npm test` couvre désormais aussi `client/src/**/*.test.ts`.
+
 ### Corrigé — Prénom de l'utilisateur cohérent partout
 
 - Suppression du prénom « ulrich » figé dans le premier message texte et audio

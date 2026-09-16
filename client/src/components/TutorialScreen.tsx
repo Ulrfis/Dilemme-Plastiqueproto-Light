@@ -11,7 +11,17 @@ import { useVoiceInteraction } from "@/hooks/useVoiceInteraction";
 import { useAudioQueue } from "@/hooks/useAudioQueue";
 import { sendChatMessage, textToSpeech, sendChatMessageStreaming } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { captureEvent } from "@/App";
+import {
+  classifyMicError,
+  describeMicError,
+  getEmbedDiagnostics,
+  isEmbedRelated,
+  isMicBlockedByEmbed,
+  openStandalone,
+  type MicErrorReason,
+} from "@/lib/embedContext";
 import { useSessionFlow } from "@/contexts/SessionFlowContext";
 import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, MIN_CLUES_FOR_EARLY_EXIT, TOTAL_TUTORIAL_CLUES } from "@shared/tutorial-config";
 import { getWelcomeMessage } from "@shared/welcome-audio";
@@ -385,26 +395,68 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     });
   };
 
+  // Bascule en mode texte avec un message adapté à la cause réelle, et propose
+  // l'ouverture en plein écran quand c'est l'intégration en iframe qui bloque
+  // le micro (le site hôte doit ajouter allow="microphone" — l'app ne peut pas
+  // le contourner elle-même).
+  const activateTextFallback = useCallback((reason: MicErrorReason, errorName?: string) => {
+    captureEvent('fallback_mode_activated', {
+      reason:
+        reason === 'embed_policy_blocked' || reason === 'embed_policy_suspected'
+          ? 'mic_blocked_in_embed'
+          : reason === 'mic_denied'
+            ? 'mic_denied'
+            : reason === 'mic_not_found'
+              ? 'mic_not_found'
+              : 'mic_unsupported',
+      mic_error_reason: reason,
+      error_name: errorName,
+      exchange_index: exchangeCount,
+      ...getEmbedDiagnostics(),
+    });
+    setFallbackMode(true);
+    toast({
+      title: "Mode texte activé",
+      description: describeMicError(reason),
+      variant: "default",
+      duration: isEmbedRelated(reason) ? 10000 : 6000,
+      action: isEmbedRelated(reason) ? (
+        <ToastAction
+          altText="Ouvrir l'application en plein écran dans un nouvel onglet"
+          data-testid="button-open-standalone"
+          onClick={() => {
+            captureEvent('embed_open_standalone_clicked', getEmbedDiagnostics());
+            openStandalone();
+          }}
+        >
+          Plein écran
+        </ToastAction>
+      ) : undefined,
+    });
+  }, [exchangeCount, toast]);
+
   // MOBILE FIX: Détecter automatiquement si MediaRecorder est supporté
-  // et activer le fallback mode si nécessaire (Safari iOS ancien)
+  // et activer le fallback mode si nécessaire (Safari iOS ancien).
+  // EMBED FIX: détecter aussi un micro bloqué par la Permissions Policy de
+  // l'iframe hôte, pour l'annoncer avant que l'élève ne tape sur le micro.
   useEffect(() => {
     console.log('[TutorialScreen] Checking MediaRecorder support...');
     const isSupported = checkMediaRecorderSupport();
 
     if (!isSupported) {
-      console.warn('[TutorialScreen] MediaRecorder NOT supported - activating text fallback mode');
-      captureEvent('fallback_mode_activated', { reason: 'no_mediarecorder', exchange_index: exchangeCount });
-      setFallbackMode(true);
-      toast({
-        title: "Mode texte activé",
-        description: "Votre navigateur ne supporte pas l'enregistrement vocal. Utilisez le mode texte pour discuter avec Peter.",
-        variant: "default",
-        duration: 5000,
-      });
+      const blockedByEmbed = isMicBlockedByEmbed();
+      console.warn(
+        '[TutorialScreen] Voice input unavailable - activating text fallback mode',
+        { blockedByEmbed },
+      );
+      activateTextFallback(blockedByEmbed ? 'embed_policy_blocked' : 'mic_unsupported');
     } else {
       console.log('[TutorialScreen] MediaRecorder is supported - voice mode available');
     }
-  }, [checkMediaRecorderSupport, toast]);
+    // activateTextFallback dépend de exchangeCount, qui change à chaque tour :
+    // ce check ne doit tourner qu'au montage, d'où l'omission volontaire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkMediaRecorderSupport]);
 
   // Note: Le message de bienvenue est maintenant joué directement dans handleUnlockAudio
   // pour garantir qu'il fonctionne sur mobile (dans le contexte du clic utilisateur)
@@ -474,50 +526,29 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
 
       console.log('[TutorialScreen] Error details:', { errorName, errorMessage });
 
-      // Détecter les erreurs définitives:
-      // - Permission refusée
-      // - Microphone non trouvé (NotFoundError)
-      // - Microphone non disponible (NotAllowedError, NotSupportedError)
-      const isPermanentError =
-        errorMessage.includes('denied') ||
-        errorMessage.includes('permission') ||
-        errorMessage.includes('not found') ||
-        errorMessage.includes('NotFound') ||
-        errorName === 'NotFoundError' ||
-        errorName === 'NotAllowedError' ||
-        errorName === 'NotSupportedError';
+      // Classer l'erreur en tenant compte du contexte d'embed : dans une
+      // iframe sans allow="microphone", getUserMedia rejette avec
+      // NotAllowedError sans jamais demander la permission à l'élève — le
+      // message "permission refusée" serait trompeur.
+      const reason = classifyMicError(error);
+      console.log('[TutorialScreen] Mic error reason:', reason);
 
-      if (isPermanentError) {
-        // Basculer en fallbackMode pour les erreurs définitives
-        console.log('[TutorialScreen] Permanent error detected - switching to text mode');
-        captureEvent('fallback_mode_activated', {
-          reason: errorName === 'NotAllowedError' || errorMessage.includes('denied') || errorMessage.includes('permission')
-            ? 'mic_denied'
-            : (errorName === 'NotFoundError' || errorMessage.includes('NotFound') || errorMessage.includes('not found'))
-              ? 'mic_not_found'
-              : 'mic_unsupported',
-          error_name: errorName,
-          exchange_index: exchangeCount,
-        });
-        // IMPORTANT: Réinitialiser l'état audio AVANT de passer en mode texte
-        // Sinon audioState peut rester bloqué et désactiver le bouton d'envoi
-        recoverFromError();
-        setFallbackMode(true);
-        toast({
-          title: "Mode texte activé",
-          description: "Microphone non disponible ou permission refusée. Utilisez le mode texte pour discuter avec Peter.",
-          variant: "default",
-          duration: 6000,
-        });
-      } else {
+      if (reason === 'transient') {
         // Erreur temporaire, afficher un message mais garder le mode vocal
         console.log('[TutorialScreen] Temporary error - suggesting retry');
         toast({
           title: "Erreur temporaire",
-          description: "Problème d'enregistrement. Veuillez réessayer d'appuyer sur le microphone.",
+          description: describeMicError(reason),
           variant: "default",
         });
         recoverFromError();
+      } else {
+        // Basculer en fallbackMode pour les erreurs définitives.
+        // IMPORTANT: Réinitialiser l'état audio AVANT de passer en mode texte
+        // Sinon audioState peut rester bloqué et désactiver le bouton d'envoi
+        console.log('[TutorialScreen] Permanent error detected - switching to text mode');
+        recoverFromError();
+        activateTextFallback(reason, errorName);
       }
     }
   };

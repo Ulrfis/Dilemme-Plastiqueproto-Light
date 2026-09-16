@@ -10,6 +10,13 @@ import { Link } from "wouter";
 import type { TutorialSession } from "@shared/schema";
 import FeedbackSurvey from "@/components/FeedbackSurvey";
 import { readStoredSessionFlow } from "@/lib/sessionFlowStorage";
+import { classifyMicError, describeMicError } from "@/lib/embedContext";
+import {
+  effectiveMimeType,
+  fileNameForMimeType,
+  pickRecorderMimeType,
+  recorderOptions,
+} from "@/lib/audioRecording";
 
 interface ScoreScreenProps {
   score: number;
@@ -66,16 +73,17 @@ export default function ScoreScreen({
 
       audioChunksRef.current = [];
       
-      let mimeType = 'audio/webm';
-      if (MediaRecorder.isTypeSupported && !MediaRecorder.isTypeSupported('audio/webm')) {
-        if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4';
-        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
-          mimeType = 'audio/ogg';
-        }
+      // Safari n'enregistre pas en WebM : imposer 'audio/webm' y lève un
+      // NotSupportedError, et un Blob mal étiqueté fait échouer Whisper.
+      const requestedMimeType = pickRecorderMimeType();
+      if (requestedMimeType === null) {
+        throw Object.assign(
+          new Error('No MediaRecorder audio format supported by this browser'),
+          { name: 'NotSupportedError' },
+        );
       }
 
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions(requestedMimeType));
       
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -90,9 +98,10 @@ export default function ScoreScreen({
         // Transcrire l'audio
         setIsTranscribing(true);
         try {
-          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+          const recordedMimeType = effectiveMimeType(mediaRecorder, requestedMimeType);
+          const audioBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
           const formData = new FormData();
-          formData.append('audio', audioBlob, 'synthesis.webm');
+          formData.append('audio', audioBlob, fileNameForMimeType(recordedMimeType, 'synthesis'));
           formData.append('sessionId', sessionId);
           formData.append('userName', userName);
           const storedSession = readStoredSessionFlow();
@@ -137,8 +146,11 @@ export default function ScoreScreen({
     } catch (error) {
       console.error('Recording error:', error);
       toast({
-        title: "Erreur d'enregistrement",
-        description: "Impossible d'accéder au microphone.",
+        title: "Dictée vocale indisponible",
+        // Message adapté à la cause (iframe sans allow="microphone", refus de
+        // permission, navigateur sans MediaRecorder) : la saisie clavier reste
+        // toujours disponible.
+        description: describeMicError(classifyMicError(error)),
         variant: "destructive",
       });
     }

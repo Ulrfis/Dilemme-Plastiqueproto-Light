@@ -43,6 +43,25 @@ Le déroulé complet et les procédures de reprise sont documentés dans
 - Le guide d'intégration et les pièges connus sont documentés dans
   [`docs/integrations/gradium.md`](./docs/integrations/gradium.md).
 
+### 🔌 Intégrer l'app dans un autre site (iframe)
+
+L'iframe **doit** porter `allow="microphone"`, sinon le navigateur bloque le
+micro : Peter parle, mais la reconnaissance vocale échoue.
+
+```html
+<iframe
+  src="https://proto-dilemme2.edugami.app"
+  allow="microphone; autoplay; fullscreen"
+  width="100%" height="800" style="border: 0"
+  title="Dilemme Plastique"
+></iframe>
+```
+
+Sans cet attribut, l'app le détecte au chargement, bascule en mode texte et
+propose d'ouvrir le jeu en plein écran. Snippet complet, limites par navigateur
+et diagnostic PostHog :
+[`docs/integrations/embed-iframe.md`](./docs/integrations/embed-iframe.md).
+
 ---
 
 ## 🚀 Améliorations précédentes (v2.2.0 - 2 mai 2026)

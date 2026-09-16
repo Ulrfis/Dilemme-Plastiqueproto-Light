@@ -7,6 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ChevronLeft, ChevronRight, Check, X, Share2, ExternalLink, Mic, MicOff, Loader2 } from "lucide-react";
 import { readStoredSessionFlow } from "@/lib/sessionFlowStorage";
+import { classifyMicError, describeMicError, getEmbedDiagnostics } from "@/lib/embedContext";
+import {
+  effectiveMimeType,
+  fileNameForMimeType,
+  pickRecorderMimeType,
+  recorderOptions,
+} from "@/lib/audioRecording";
 
 interface FeedbackSurveyProps {
   sessionId: string;
@@ -162,13 +169,30 @@ function VoiceTextInput({
 }) {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  // Message affiché sous le champ quand la dictée échoue : sans lui, un micro
+  // bloqué (iframe sans allow="microphone", Safari, permission refusée) ne
+  // produisait aucun retour visible.
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
   const startRecording = async () => {
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // 'audio/webm' était imposé en dur : sur Safari (iOS/macOS) le
+      // constructeur levait un NotSupportedError, attrapé sans aucun retour
+      // visible — la dictée y paraissait simplement inerte.
+      const requestedMimeType = pickRecorderMimeType();
+      if (requestedMimeType === null) {
+        throw Object.assign(
+          new Error('No MediaRecorder audio format supported by this browser'),
+          { name: 'NotSupportedError' },
+        );
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions(requestedMimeType));
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
 
@@ -179,15 +203,38 @@ function VoiceTextInput({
       };
 
       mediaRecorder.onstop = async () => {
-        stream.getTracks().forEach(track => track.stop());
-        const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        await transcribeAudio(audioBlob);
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        const recordedMimeType = effectiveMimeType(mediaRecorder, requestedMimeType);
+        const audioBlob = new Blob(chunksRef.current, { type: recordedMimeType });
+        await transcribeAudio(audioBlob, recordedMimeType);
       };
 
       mediaRecorder.start();
       setIsRecording(true);
     } catch (error) {
       console.error('[VoiceTextInput] Error starting recording:', error);
+
+      // Libérer le micro si getUserMedia a réussi mais pas la suite.
+      if (stream) {
+        stream.getTracks().forEach(track => {
+          try { track.stop(); } catch {}
+        });
+      }
+
+      const err = error as Error;
+      const reason = classifyMicError(error);
+      // L'échec était totalement silencieux : on le remonte à l'analytics et
+      // on l'annonce à l'élève, qui peut répondre au clavier.
+      captureEvent('microphone_permission', {
+        outcome: reason === 'mic_denied' ? 'denied' : 'unavailable',
+        source: 'feedback_survey',
+        error_name: err?.name,
+        error_message: err?.message,
+        mic_error_reason: reason,
+        ...getEmbedDiagnostics(),
+      });
+      setIsRecording(false);
+      setVoiceError(describeMicError(reason));
     }
   };
 
@@ -198,11 +245,12 @@ function VoiceTextInput({
     }
   };
 
-  const transcribeAudio = async (audioBlob: Blob) => {
+  const transcribeAudio = async (audioBlob: Blob, mimeType: string) => {
     setIsTranscribing(true);
+    setVoiceError(null);
     try {
       const formData = new FormData();
-      formData.append('audio', audioBlob, 'audio.webm');
+      formData.append('audio', audioBlob, fileNameForMimeType(mimeType, 'audio'));
       formData.append('sessionId', sessionId);
       if (userName) formData.append('userName', userName);
       const storedSession = readStoredSessionFlow();
@@ -213,15 +261,24 @@ function VoiceTextInput({
         body: formData,
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data.text) {
-          // Append to existing text or set new text
-          onChange(value ? `${value} ${data.text}` : data.text);
-        }
+      if (!response.ok) {
+        throw new Error(`Transcription failed with status ${response.status}`);
+      }
+      const data = await response.json();
+      if (data.text) {
+        // Append to existing text or set new text
+        onChange(value ? `${value} ${data.text}` : data.text);
       }
     } catch (error) {
       console.error('[VoiceTextInput] Transcription error:', error);
+      captureEvent('api_error', {
+        endpoint: '/api/speech-to-text',
+        context: 'feedback_survey',
+        error_message: error instanceof Error ? error.message : String(error),
+        audio_mime: mimeType,
+        audio_bytes: audioBlob.size,
+      });
+      setVoiceError("La transcription a échoué. Vous pouvez écrire votre réponse au clavier.");
     } finally {
       setIsTranscribing(false);
     }
@@ -239,7 +296,11 @@ function VoiceTextInput({
         />
         <button
           type="button"
-          onClick={isRecording ? stopRecording : startRecording}
+          onClick={() => {
+            setVoiceError(null);
+            if (isRecording) stopRecording();
+            else void startRecording();
+          }}
           disabled={isTranscribing}
           data-testid="button-voice-input"
           className={`absolute right-2 top-2 p-2 rounded-full transition-all duration-200 ${
@@ -259,8 +320,17 @@ function VoiceTextInput({
           )}
         </button>
       </div>
-      <p className="text-xs text-muted-foreground text-center">
-        {isRecording ? "Parle maintenant... Clique pour arrêter" : isTranscribing ? "Transcription en cours..." : "Clique sur le micro pour dicter"}
+      <p
+        className={`text-xs text-center ${voiceError ? 'text-destructive' : 'text-muted-foreground'}`}
+        data-testid="text-voice-hint"
+      >
+        {voiceError
+          ? voiceError
+          : isRecording
+            ? "Parle maintenant... Clique pour arrêter"
+            : isTranscribing
+              ? "Transcription en cours..."
+              : "Clique sur le micro pour dicter"}
       </p>
     </div>
   );

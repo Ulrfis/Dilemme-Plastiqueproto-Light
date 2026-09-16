@@ -57,6 +57,10 @@ export function useDeepgramTranscription(): DeepgramHook {
       sessionStartedAtRef.current = Date.now();
       firstInterimCapturedRef.current = false;
 
+      // Le relais serveur parle à Deepgram en Opus : on n'envoie donc que du
+      // WebM/Opus. Safari (iOS/macOS) n'enregistre qu'en MP4/AAC — la
+      // transcription live y est indisponible, mais Whisper prend le relais au
+      // stop et la conversation reste complète.
       const mimeType = MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
         : MediaRecorder.isTypeSupported?.('audio/webm')
@@ -65,6 +69,10 @@ export function useDeepgramTranscription(): DeepgramHook {
 
       if (!mimeType) {
         console.warn('[Deepgram] No supported MIME type for live transcription');
+        captureEvent('deepgram_fallback_to_whisper', {
+          stage: 'start',
+          reason: 'no_webm_support',
+        });
         return;
       }
 
@@ -73,6 +81,10 @@ export function useDeepgramTranscription(): DeepgramHook {
       const token = stored?.accessToken;
       if (!sessionId || !token) {
         console.warn('[Deepgram] No session token available — skipping live transcription');
+        captureEvent('deepgram_fallback_to_whisper', {
+          stage: 'start',
+          reason: 'no_session_token',
+        });
         return;
       }
 

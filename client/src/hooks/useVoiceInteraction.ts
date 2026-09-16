@@ -2,6 +2,19 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useDeepgramTranscription } from './useDeepgramTranscription';
 import { captureEvent } from '@/App';
 import { readStoredSessionFlow } from '@/lib/sessionFlowStorage';
+import {
+  classifyMicError,
+  getEmbedDiagnostics,
+  getMicPolicyStatus,
+  isEmbedRelated,
+  isSecureContextForMic,
+} from '@/lib/embedContext';
+import {
+  effectiveMimeType,
+  fileNameForMimeType,
+  pickRecorderMimeType,
+  recorderOptions,
+} from '@/lib/audioRecording';
 
 export type AudioState = 'idle' | 'recording' | 'processing' | 'playing' | 'error';
 
@@ -42,6 +55,10 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  // Format réellement produit par le MediaRecorder de la prise en cours.
+  // Safari enregistre en audio/mp4 : étiqueter le Blob en audio/webm envoyait
+  // à Whisper un fichier dont le contenu ne correspond pas à l'extension.
+  const recordingMimeTypeRef = useRef<string>('audio/webm');
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
   const audioExplicitlyStoppedRef = useRef(false);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -266,6 +283,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       mediaRecorder: hasMR,
       getUserMedia: hasGUM,
       audioContext: typeof (window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext) !== 'undefined',
+      // Contexte d'embed : un micro bloqué par la Permissions Policy de l'iframe
+      // hôte se lit ici, sans quoi l'échec est indiscernable d'un refus élève.
+      ...getEmbedDiagnostics(),
     };
   }, []);
 
@@ -294,6 +314,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
         browser_support,
         error_name: err?.name,
         error_message: err?.message,
+        mic_error_reason: classifyMicError(error),
       };
       captureEvent('mic_permission', { state: 'denied', ...props });
       captureEvent('microphone_permission', props);
@@ -319,6 +340,15 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       finalSupported = webmSupported || oggSupported || mp4Supported;
     }
 
+    // Un micro bloqué par la Permissions Policy de l'iframe hôte rend
+    // l'enregistrement impossible même si MediaRecorder est parfaitement
+    // supporté : on le traite ici pour basculer en mode texte AVANT que
+    // l'élève ne tape sur le bouton micro et ne voie une erreur.
+    const micPolicy = getMicPolicyStatus();
+    if (micPolicy === 'blocked-by-embed' || !isSecureContextForMic()) {
+      finalSupported = false;
+    }
+
     const browser_support = {
       ...browserSupportSummary(),
       mime_webm: webmSupported,
@@ -342,9 +372,10 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
     // MOBILE FIX: Débloquer et activer le contexte audio immédiatement
     unlockAudioContext();
 
+    let stream: MediaStream | null = null;
     try {
       console.log('[useVoiceInteraction] Requesting microphone access...');
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -355,21 +386,19 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
       audioChunksRef.current = [];
 
-      // Déterminer le meilleur format MIME supporté
-      let mimeType = 'audio/webm';
-      if (MediaRecorder.isTypeSupported && !MediaRecorder.isTypeSupported('audio/webm')) {
-        if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4';
-        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
-          mimeType = 'audio/ogg';
-        }
+      // Déterminer le meilleur format MIME réellement supporté par ce navigateur.
+      // Safari (iOS/macOS) ne produit pas de WebM : imposer 'audio/webm' y lève
+      // un NotSupportedError.
+      const requestedMimeType = pickRecorderMimeType();
+      if (requestedMimeType === null) {
+        throw Object.assign(
+          new Error('No MediaRecorder audio format supported by this browser'),
+          { name: 'NotSupportedError' },
+        );
       }
-      console.log('[useVoiceInteraction] Using MIME type:', mimeType);
+      console.log('[useVoiceInteraction] Requested MIME type:', requestedMimeType || '(navigateur)');
 
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: mimeType,
-      });
-      console.log('[useVoiceInteraction] MediaRecorder created with type:', mimeType);
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions(requestedMimeType));
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -379,6 +408,11 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       };
 
       mediaRecorder.start();
+      // Après start(), `mediaRecorder.mimeType` donne le format effectivement
+      // produit. On le mémorise pour étiqueter le Blob et le nom de fichier
+      // envoyés à Whisper : un contenu MP4 annoncé en WebM se transcrit mal.
+      recordingMimeTypeRef.current = effectiveMimeType(mediaRecorder, requestedMimeType);
+      console.log('[useVoiceInteraction] Recording MIME type:', recordingMimeTypeRef.current);
       mediaRecorderRef.current = mediaRecorder;
       setAudioState('recording');
 
@@ -425,21 +459,34 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
       });
     } catch (error) {
       console.error('[useVoiceInteraction] Error starting recording:', error);
+
+      // Si getUserMedia a réussi mais que la suite a échoué (MediaRecorder non
+      // constructible par exemple), le micro resterait actif — voyant rouge
+      // allumé et micro monopolisé jusqu'au rechargement de la page.
+      if (stream) {
+        stream.getTracks().forEach(track => {
+          try { track.stop(); } catch {}
+        });
+      }
+
       const err = error as Error;
-      const isUnavailable = err?.name === 'NotFoundError' || err?.name === 'NotSupportedError';
+      const reason = classifyMicError(error);
+      const isUnavailable =
+        reason === 'mic_not_found' || reason === 'mic_unsupported' || isEmbedRelated(reason);
       const outcome = isUnavailable ? 'unavailable' : 'denied';
       const propsBase = {
         source: 'start_recording' as const,
         browser_support: browserSupportSummary(),
         error_name: err?.name,
         error_message: err?.message,
+        mic_error_reason: reason,
       };
       captureEvent('mic_permission', { state: outcome, outcome, ...propsBase });
       captureEvent('microphone_permission', { outcome, ...propsBase });
       setAudioState('error');
       throw error;
     }
-  }, [initializeAudioElement, unlockAudioContext, startAudioLevelSampling]);
+  }, [initializeAudioElement, unlockAudioContext, startAudioLevelSampling, browserSupportSummary]);
 
   const stopRecording = useCallback(async (): Promise<string | null> => {
     return new Promise((resolve) => {
@@ -461,8 +508,9 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
       mediaRecorder.onstop = async () => {
         console.log('[useVoiceInteraction] Recording stopped, chunks:', audioChunksRef.current.length);
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        console.log('[useVoiceInteraction] Audio blob created, size:', audioBlob.size);
+        const recordedMimeType = recordingMimeTypeRef.current;
+        const audioBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
+        console.log('[useVoiceInteraction] Audio blob created, size:', audioBlob.size, 'type:', recordedMimeType);
 
         // MOBILE FIX: S'assurer que toutes les tracks sont arrêtées pour libérer le micro
         mediaRecorder.stream.getTracks().forEach(track => {
@@ -479,7 +527,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
 
         try {
           const formData = new FormData();
-          formData.append('audio', audioBlob, 'recording.webm');
+          formData.append('audio', audioBlob, fileNameForMimeType(recordedMimeType));
           const storedSession = readStoredSessionFlow();
           if (storedSession?.sessionId) formData.append('sessionId', storedSession.sessionId);
           if (storedSession?.userName) formData.append('userName', storedSession.userName);
@@ -502,6 +550,7 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
           captureEvent('whisper_stt_complete', {
             duration_ms: whisperMs,
             audio_bytes: audioBlob.size,
+            audio_mime: recordedMimeType,
             transcript_chars: typeof data.text === 'string' ? data.text.length : 0,
           });
           const dgText = lastDeepgramInterimRef.current.trim();
@@ -525,6 +574,8 @@ export function useVoiceInteraction(options?: UseVoiceInteractionOptions): UseVo
             endpoint: '/api/speech-to-text',
             context: 'stop_recording',
             error_message: err?.message,
+            audio_mime: recordedMimeType,
+            audio_bytes: audioBlob.size,
           });
           setAudioState('idle'); // MOBILE FIX: Retourner à idle même en cas d'erreur
           resolve(null);

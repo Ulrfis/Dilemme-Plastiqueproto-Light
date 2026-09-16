@@ -9,6 +9,13 @@ import { useMutation } from "@tanstack/react-query";
 import { captureEvent } from "@/App";
 import { useSessionFlow } from "@/contexts/SessionFlowContext";
 import { readStoredSessionFlow } from "@/lib/sessionFlowStorage";
+import { classifyMicError, describeMicError, getEmbedDiagnostics } from "@/lib/embedContext";
+import {
+  effectiveMimeType,
+  fileNameForMimeType,
+  pickRecorderMimeType,
+  recorderOptions,
+} from "@/lib/audioRecording";
 
 interface SynthesisScreenProps {
   userName: string;
@@ -65,16 +72,17 @@ export default function SynthesisScreen({
 
       audioChunksRef.current = [];
       
-      let mimeType = 'audio/webm';
-      if (MediaRecorder.isTypeSupported && !MediaRecorder.isTypeSupported('audio/webm')) {
-        if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4';
-        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
-          mimeType = 'audio/ogg';
-        }
+      // Safari n'enregistre pas en WebM : imposer 'audio/webm' y lève un
+      // NotSupportedError, et un Blob mal étiqueté fait échouer Whisper.
+      const requestedMimeType = pickRecorderMimeType();
+      if (requestedMimeType === null) {
+        throw Object.assign(
+          new Error('No MediaRecorder audio format supported by this browser'),
+          { name: 'NotSupportedError' },
+        );
       }
 
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions(requestedMimeType));
       
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -87,9 +95,10 @@ export default function SynthesisScreen({
         
         setIsTranscribing(true);
         try {
-          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+          const recordedMimeType = effectiveMimeType(mediaRecorder, requestedMimeType);
+          const audioBlob = new Blob(audioChunksRef.current, { type: recordedMimeType });
           const formData = new FormData();
-          formData.append('audio', audioBlob, 'synthesis.webm');
+          formData.append('audio', audioBlob, fileNameForMimeType(recordedMimeType, 'synthesis'));
           formData.append('sessionId', sessionId);
           formData.append('userName', userName);
           const storedSession = readStoredSessionFlow();
@@ -142,19 +151,23 @@ export default function SynthesisScreen({
         mediaRecorder: typeof MediaRecorder !== 'undefined',
         getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
       };
-      const isUnavailable = err?.name === 'NotFoundError' || err?.name === 'NotSupportedError';
+      const reason = classifyMicError(error);
+      const isUnavailable = reason !== 'mic_denied' && reason !== 'transient';
       const outcome = isUnavailable ? 'unavailable' : 'denied';
       const baseProps = {
         source: 'synthesis' as const,
-        browser_support,
+        browser_support: { ...browser_support, ...getEmbedDiagnostics() },
         error_name: err?.name,
         error_message: err?.message,
+        mic_error_reason: reason,
       };
       captureEvent('mic_permission', { state: outcome, outcome, ...baseProps });
       captureEvent('microphone_permission', { outcome, ...baseProps });
       toast({
-        title: "Erreur d'enregistrement",
-        description: "Impossible d'accéder au microphone.",
+        title: "Dictée vocale indisponible",
+        // Le message distingue un blocage d'iframe d'un refus de permission :
+        // l'élève peut toujours écrire sa synthèse au clavier.
+        description: describeMicError(reason),
         variant: "destructive",
       });
     }
