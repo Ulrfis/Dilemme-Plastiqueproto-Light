@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic, log } from "./static";
 import OpenAI from "openai";
 import { gradiumFetch, recordPoolSample, POOL_SAMPLE_INTERVAL_MS } from "./gradium-agent";
+import { ensureSchema } from "./ensure-schema";
 import { backfillSessionTokens } from "./backfill-session-tokens";
 import { shutdownPostHog } from "./posthog";
 
@@ -45,6 +46,10 @@ process.once('SIGTERM', handleShutdown);
 process.once('SIGINT', handleShutdown);
 
 (async () => {
+  // Aligner le schéma AVANT toute requête : une colonne manquante ferait échouer
+  // chaque lecture de session, y compris le backfill juste en dessous.
+  await ensureSchema();
+
   // Backfill access tokens synchronously before accepting any requests
   // This ensures every session has a token before the null-token bypass is removed
   await backfillSessionTokens();

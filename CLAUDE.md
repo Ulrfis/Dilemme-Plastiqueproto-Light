@@ -17,7 +17,8 @@ Application éducative mobile-first pour enseigner la pollution plastique à des
 - Backend : Express.js (API + session management)
 - Base de données : PostgreSQL (Drizzle ORM — `drizzle.config.ts`)
 - STT : OpenAI Whisper
-- LLM : GPT-4 (OpenAI Assistant — "Peter")
+- LLM : OpenAI Responses API + Conversations API (modèle via `OPENAI_MODEL`,
+  défaut `gpt-5.6-terra`). L'Assistants API a été fermée le 26 août 2026.
 - TTS : ElevenLabs
 - Analytics : PostHog + Google Sheets (sync via `google-apps-script.js`)
 - Déploiement : Replit (intégré, secrets gérés dans Replit)
@@ -25,9 +26,14 @@ Application éducative mobile-first pour enseigner la pollution plastique à des
 ## Architecture clé
 
 - Sessions persistées en PostgreSQL avec structure unifiée
-- Peter = GPT Assistant avec mémoire de conversation dans la session
+- Peter = Responses API, mémoire portée par une Conversation OpenAI
+  (`conversation_id` en session ; `thread_id` est un vestige en lecture seule)
+- Prompt Peter : source de vérité `docs/PROMPT_PETERBOT_V5_COMPLET.md`, compilé
+  dans `server/peter-prompt.ts` par `npm run peter:prompt:build`. Il est envoyé
+  à chaque tour — il ne vit plus chez OpenAI. Ne jamais éditer le `.ts` à la main
+- Contexte de jeu passé en `instructions` par tour (ex-`additional_instructions`) :
+  il ne doit JAMAIS entrer dans l'historique de conversation
 - Comptage des indices trouvés — logique sensible (cf. STORY.md §Fiabilité comptage)
-- `additional_instructions` et `prompt Peter v3` → voir STORY.md pour le versioning exact
 - Retour sur /tutorial : Peter reprend la conversation contextuellement (voir STORY.md 2026-05-02)
 
 ## Règles projet (fenêtres cassées connues)
@@ -35,7 +41,10 @@ Application éducative mobile-first pour enseigner la pollution plastique à des
 - **Ne pas modifier le comptage des indices sans lire STORY.md §Fiabilité** — logique fragile, a déjà cassé
 - **Secrets dans Replit uniquement** — ne jamais mettre les clés API dans le code ou les commits
 - **Avant de changer le prompt Peter** : versionner dans STORY.md, pas de modification silencieuse
-- Drizzle migrations : utiliser `npm run db:push` (voir AGENTS.md pour commandes complètes)
+- Drizzle migrations : utiliser `npm run db:push` (voir AGENTS.md pour commandes complètes).
+  Toute NOUVELLE colonne doit aussi être déclarée dans `server/ensure-schema.ts` :
+  la production n'exécute aucune migration au déploiement, et une colonne
+  manquante fait échouer toutes les requêtes de session
 - Vérifier `npm run check` (TypeScript) avant tout commit
 - PostHog + Google Sheets Analytics : ne pas désactiver sans accord explicite
 

@@ -1,0 +1,242 @@
+/**
+ * Fournisseur de conversation pour Peter — Responses API + Conversations API.
+ *
+ * Pourquoi ce module existe
+ * -------------------------
+ * OpenAI a fermé l'Assistants API le 26 août 2026 : tout appel à `/v1/assistants`,
+ * `/v1/threads` et `/v1/threads/runs` échoue désormais, sans mode dégradé. Toute la
+ * couche conversationnelle de Peter reposait dessus.
+ *
+ * Correspondances avec l'ancienne implémentation :
+ *
+ *   Assistants API (fermée)              Responses API (ici)
+ *   ─────────────────────────────────    ────────────────────────────────────────
+ *   Assistant hébergé chez OpenAI        `PETER_INSTRUCTIONS` compilé dans le bundle
+ *   Thread                               Conversation (`conv_...`)
+ *   `runs.stream(...)`                   `responses.create({ stream: true })`
+ *   `additional_instructions`            `instructions` (par tour)
+ *   `thread.message.delta`               `response.output_text.delta`
+ *   `thread.run.completed`               `response.completed`
+ *   `runs.cancel(...)`                   `responses.cancel(...)`
+ *
+ * Ce module normalise les évènements OpenAI en `PeterStreamEvent`, pour que la
+ * logique pédagogique des routes (découpage en phrases, TTS en deux phases,
+ * détection des indices) reste inchangée.
+ *
+ * Invariant : ce module ne connaît RIEN du jeu. Il ne lit ni n'écrit `foundClues`,
+ * ne compte pas les échanges et ne décide jamais de l'état pédagogique. Le serveur
+ * et la base restent seuls juges — OpenAI ne produit que du dialogue.
+ */
+import OpenAI from 'openai';
+import { PETER_INSTRUCTIONS, PETER_PROMPT_VERSION } from './peter-prompt.ts';
+
+/**
+ * Modèle utilisé pour Peter. Surchargeable par `OPENAI_MODEL`.
+ *
+ * `gpt-5.6-terra` équilibre intelligence et coût : Peter tient une conversation
+ * pédagogique en français, avec une contrainte de latence forte (la première
+ * phrase part au TTS dès qu'elle est complète) et jusqu'à 25 élèves simultanés.
+ */
+const DEFAULT_MODEL = 'gpt-5.6-terra';
+
+export function getPeterModel(): string {
+  return process.env.OPENAI_MODEL || DEFAULT_MODEL;
+}
+
+/** Évènements normalisés consommés par les routes. */
+export type PeterStreamEvent =
+  | { type: 'created'; responseId: string }
+  | { type: 'text_delta'; text: string }
+  | { type: 'completed'; responseId: string }
+  | { type: 'failed'; responseId?: string; reason: string; message: string };
+
+export interface PeterTurnStream {
+  /** Flux d'évènements normalisés. */
+  events: AsyncIterable<PeterStreamEvent>;
+  /** Interrompt la génération côté client (l'élève a quitté, timeout…). */
+  abort(): void;
+  /** Identifiant de la Response, disponible dès le premier évènement `created`. */
+  getResponseId(): string;
+}
+
+export interface StreamPeterTurnInput {
+  /** Conversation OpenAI de la session (`conv_...`). */
+  conversationId: string;
+  /** Uniquement ce que l'élève a réellement dit — l'historique reste propre. */
+  userMessage: string;
+  /**
+   * Contexte de jeu du tour (indices trouvés/manquants, numéro d'échange).
+   * Passé en `instructions`, donc jamais persisté comme message dans la
+   * conversation — équivalent de l'ancien `additional_instructions`.
+   */
+  dynamicInstructions: string;
+}
+
+/**
+ * Compose les instructions du tour : prompt permanent de Peter + contexte de jeu.
+ *
+ * La Responses API remplace les instructions à chaque tour (elles ne sont pas
+ * héritées de la réponse précédente), il faut donc renvoyer le prompt complet
+ * à chaque appel — contrairement à l'Assistants API où il vivait côté OpenAI.
+ */
+export function buildTurnInstructions(dynamicInstructions: string): string {
+  const dynamic = dynamicInstructions.trim();
+  return dynamic ? `${PETER_INSTRUCTIONS}\n\n${dynamic}` : PETER_INSTRUCTIONS;
+}
+
+export class PeterConversationProvider {
+  // Champ explicite plutôt qu'une propriété de constructeur : `npm test` tourne
+  // avec `node --experimental-strip-types`, qui ne les supporte pas.
+  private readonly openai: OpenAI;
+
+  constructor(openai: OpenAI) {
+    this.openai = openai;
+  }
+
+  /**
+   * Retourne la conversation de la session, en la créant si besoin.
+   * `existingConversationId` provient de la base ; `onCreated` la persiste.
+   */
+  async ensureConversation(
+    existingConversationId: string | null | undefined,
+    onCreated: (conversationId: string) => Promise<void>,
+  ): Promise<string> {
+    if (existingConversationId) return existingConversationId;
+
+    const conversation = await this.openai.conversations.create();
+    await onCreated(conversation.id);
+    return conversation.id;
+  }
+
+  /**
+   * Crée une conversation jetable, sans persistance côté session.
+   * Utilisée pour les générations isolées (message de reprise) qui ne doivent
+   * jamais polluer l'historique de l'élève.
+   */
+  async createEphemeralConversation(): Promise<string> {
+    const conversation = await this.openai.conversations.create();
+    return conversation.id;
+  }
+
+  /** Supprime une conversation jetable. Silencieux en cas d'échec : c'est du ménage. */
+  async deleteConversation(conversationId: string): Promise<void> {
+    try {
+      await this.openai.conversations.delete(conversationId);
+    } catch {
+      // Une conversation orpheline chez OpenAI n'affecte pas l'élève.
+    }
+  }
+
+  /** Lance un tour de Peter en streaming. */
+  async streamTurn(input: StreamPeterTurnInput): Promise<PeterTurnStream> {
+    const controller = new AbortController();
+    let responseId = '';
+
+    const stream = await this.openai.responses.create(
+      {
+        model: getPeterModel(),
+        conversation: input.conversationId,
+        input: [{ role: 'user', content: input.userMessage }],
+        instructions: buildTurnInstructions(input.dynamicInstructions),
+        stream: true,
+      },
+      { signal: controller.signal },
+    );
+
+    async function* normalize(): AsyncGenerator<PeterStreamEvent> {
+      for await (const event of stream) {
+        switch (event.type) {
+          case 'response.created':
+            responseId = event.response.id;
+            yield { type: 'created', responseId };
+            break;
+
+          case 'response.output_text.delta':
+            if (event.delta) yield { type: 'text_delta', text: event.delta };
+            break;
+
+          case 'response.completed':
+            yield { type: 'completed', responseId: event.response.id };
+            break;
+
+          case 'response.failed':
+            yield {
+              type: 'failed',
+              responseId: event.response.id,
+              reason: 'response.failed',
+              message: event.response.error?.message ?? 'Response failed',
+            };
+            return;
+
+          case 'response.incomplete':
+            // Réponse tronquée (limite de tokens, filtre de contenu). Le texte
+            // déjà émis reste valide : on le signale sans le jeter.
+            yield {
+              type: 'failed',
+              responseId: event.response.id,
+              reason: 'response.incomplete',
+              message: event.response.incomplete_details?.reason ?? 'Response incomplete',
+            };
+            return;
+
+          case 'error':
+            yield {
+              type: 'failed',
+              reason: 'stream.error',
+              message: event.message ?? 'Stream error',
+            };
+            return;
+
+          default:
+            // Les autres évènements (item ajouté, annotations, usage…) ne
+            // concernent pas le pipeline texte → TTS.
+            break;
+        }
+      }
+    }
+
+    return {
+      events: normalize(),
+      abort: () => controller.abort(),
+      getResponseId: () => responseId,
+    };
+  }
+
+  /**
+   * Demande l'annulation d'une Response côté OpenAI, en complément de `abort()`
+   * qui coupe déjà le transport. Best-effort et volontairement silencieux :
+   * une réponse déjà terminée, ou non annulable dans son état courant, renvoie
+   * une erreur qui n'a aucune conséquence pour l'élève.
+   */
+  async cancelResponse(responseId: string): Promise<void> {
+    if (!responseId) return;
+    try {
+      await this.openai.responses.cancel(responseId);
+    } catch {
+      // Déjà terminée ou déjà annulée — rien à faire.
+    }
+  }
+
+  /**
+   * Vérifie que le modèle configuré est accessible avec la clé courante.
+   * Remplace l'ancien `validateAssistant()`, qui interrogeait un objet Assistant
+   * aujourd'hui inexistant.
+   */
+  async validateModel(): Promise<{ ok: boolean; model: string; message: string }> {
+    const model = getPeterModel();
+    try {
+      const retrieved = await this.openai.models.retrieve(model);
+      return {
+        ok: true,
+        model,
+        message: `Modèle ${retrieved.id} accessible (prompt Peter v${PETER_PROMPT_VERSION})`,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        model,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+}

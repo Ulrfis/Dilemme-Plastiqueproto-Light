@@ -16,6 +16,8 @@ import { ChatAdmissionTimeoutError, ChatTurnConflictError, ChatTurnController, t
 import { detectClues, TARGET_CLUES } from "./clue-detection";
 import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, TOTAL_TUTORIAL_CLUES, canStartTutorialExchange } from "@shared/tutorial-config";
 import { buildPeterExchangeInstructions, buildPeterGameContext } from "./peter-game-context";
+import { PeterConversationProvider, getPeterModel } from "./peter-conversation";
+import { PETER_PROMPT_VERSION } from "./peter-prompt";
 import { getWelcomeMessage } from "@shared/welcome-audio";
 import { pool } from "./db";
 import { checkDatabaseHealth } from "./database-health";
@@ -342,20 +344,25 @@ const openai = new OpenAI({
   organization: 'org-z0AK8zYLTeapGaiDZFQ5co2N',
 });
 
-const ASSISTANT_ID = 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9';
+// Peter tourne sur la Responses API depuis la fermeture de l'Assistants API
+// (26 août 2026). Le prompt n'est plus hébergé chez OpenAI : il est compilé dans
+// le bundle serveur (`server/peter-prompt.ts`) et envoyé à chaque tour.
+const peterConversation = new PeterConversationProvider(openai);
 
-// Vérifier que l'assistant existe au démarrage
-async function validateAssistant() {
-  try {
-    const assistant = await openai.beta.assistants.retrieve(ASSISTANT_ID);
-    console.log('[Server] ✅ Assistant validated:', assistant.name);
-  } catch (error) {
-    console.error('[Server] ❌ CRITICAL: Assistant not found or invalid!', error);
+// Vérifier au démarrage que le modèle configuré est accessible.
+async function validatePeterModel() {
+  const result = await peterConversation.validateModel();
+  if (result.ok) {
+    console.log('[Server] ✅ Peter model validated:', result.message);
+  } else {
+    console.error(
+      `[Server] ❌ CRITICAL: model "${result.model}" unavailable — ${result.message}`,
+    );
   }
 }
 
 // Appeler au démarrage
-validateAssistant();
+validatePeterModel();
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Public liveness/readiness endpoint used by Docker and Coolify. It checks
@@ -605,7 +612,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const results: Record<string, { status: string; message: string }> = {
       openai: { status: 'unknown', message: '' },
-      assistant: { status: 'unknown', message: '' },
+      peterModel: { status: 'unknown', message: '' },
       gradium: { status: 'unknown', message: '' },
     };
 
@@ -617,13 +624,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       results.openai = { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
     }
 
-    // Test Assistant
-    try {
-      const assistant = await openai.beta.assistants.retrieve(ASSISTANT_ID);
-      results.assistant = { status: 'ok', message: `Assistant: ${assistant.name}` };
-    } catch (error) {
-      results.assistant = { status: 'error', message: error instanceof Error ? error.message : 'Unknown error' };
-    }
+    // Test du modèle Peter (remplace l'ancien test d'Assistant, API fermée)
+    const modelCheck = await peterConversation.validateModel();
+    results.peterModel = {
+      status: modelCheck.ok ? 'ok' : 'error',
+      message: modelCheck.message,
+    };
 
     // Test Gradium — ping the TTS endpoint; 422 (body validation) is acceptable and confirms auth
     try {
@@ -783,7 +789,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         score: z.number().int().min(0).max(4).optional(),
         audioMode: z.enum(['voice', 'text']).optional(),
         completed: z.number().int().min(0).max(1).optional(),
-        threadId: z.string().optional().nullable(),
+        // `threadId` retiré : il désignait un thread de l'Assistants API, fermée
+        // le 26 août 2026. Aucun client ne l'envoyait, et laisser un navigateur
+        // réécrire l'identifiant de conversation d'une session n'a pas lieu d'être.
+        // `conversationId` n'est volontairement PAS exposé ici pour la même raison.
       });
 
       const updates = updateSchema.parse(req.body);
@@ -1086,36 +1095,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const resumePrompt = `[REPRISE DE SESSION — NE PAS COMPTER COMME ÉCHANGE]\n${userName} revient après une courte pause. ${foundSummary}. ${missingSummary}.\nAccueille-le chaleureusement en 1-2 phrases MAXIMUM. Si la conversation a déjà eu lieu, fais-y référence naturellement. Guide-le subtilement vers un des indices manquants. N'utilise PAS la phrase de bienvenue initiale ("Bienvenue dans cette courte expérience…"). Sois bref et naturel.`;
 
-      // Create an isolated ephemeral thread — never touches the session's main thread.
-      const ephemeralThread = await openai.beta.threads.create();
-      await openai.beta.threads.messages.create(ephemeralThread.id, {
-        role: 'user',
-        content: resumePrompt,
-      });
-
-      const stream = await openai.beta.threads.runs.stream(ephemeralThread.id, {
-        assistant_id: ASSISTANT_ID,
-      });
+      // Create an isolated ephemeral conversation — never touches the session's own.
+      const ephemeralConversationId = await peterConversation.createEphemeralConversation();
 
       let resumeText = '';
-      for await (const event of stream) {
-        if (event.event === 'thread.message.delta') {
-          const delta = event.data.delta;
-          if (delta.content) {
-            for (const block of delta.content) {
-              if (block.type === 'text') {
-                resumeText += block.text?.value || '';
-              }
+      try {
+        const turn = await peterConversation.streamTurn({
+          conversationId: ephemeralConversationId,
+          userMessage: resumePrompt,
+          dynamicInstructions: '',
+        });
+
+        for await (const event of turn.events) {
+          if (event.type === 'text_delta') {
+            resumeText += event.text;
+          }
+          if (event.type === 'failed') {
+            // `response.incomplete` peut survenir après du texte utilisable :
+            // on ne jette que si rien n'a été produit.
+            if (!resumeText) {
+              throw new Error(`Pregen resume run failed: ${event.reason} — ${event.message}`);
             }
+            break;
           }
         }
-        if (event.event === 'thread.run.failed' ||
-            event.event === 'thread.run.cancelled' ||
-            event.event === 'thread.run.expired') {
-          throw new Error(`Pregen resume run failed: ${event.event}`);
-        }
+      } finally {
+        // Ménage immédiat : cette conversation n'a aucune raison de survivre.
+        void peterConversation.deleteConversation(ephemeralConversationId);
       }
-      // Ephemeral thread is not stored — it will expire on OpenAI's end naturally.
 
       if (!resumeText) {
         resumeText = missingClues.length > 0
@@ -1273,44 +1280,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const resumePrompt = `[REPRISE DE SESSION — NE PAS COMPTER COMME ÉCHANGE]\n${userName} revient après une courte pause. ${foundSummary}. ${missingSummary}.\nAccueille-le chaleureusement en 1-2 phrases MAXIMUM. Si la conversation a déjà eu lieu, fais-y référence naturellement. Guide-le subtilement vers un des indices manquants. N'utilise PAS la phrase de bienvenue initiale ("Bienvenue dans cette courte expérience…"). Sois bref et naturel.`;
 
-      // Reuse or create the thread
-      let threadId = session.threadId;
-      if (!threadId) {
-        const thread = await openai.beta.threads.create();
-        threadId = thread.id;
-        await storage.updateSession(sessionId, { threadId });
-        console.log('[Resume API] Thread created:', threadId);
-      } else {
-        console.log('[Resume API] Reusing thread:', threadId);
-      }
-
-      // Inject the resumption prompt into the thread
-      await openai.beta.threads.messages.create(threadId, {
-        role: 'user',
-        content: resumePrompt,
-      });
-
-      // Run the assistant non-streaming (short response — 1-2 sentences)
-      const stream = await openai.beta.threads.runs.stream(threadId, {
-        assistant_id: ASSISTANT_ID,
-      });
+      // Reuse or create the session's conversation. Le prompt de reprise est
+      // injecté comme message utilisateur : Peter s'appuie ainsi sur l'historique
+      // réel de l'élève, comme avec l'ancien thread.
+      const conversationId = await peterConversation.ensureConversation(
+        session.conversationId,
+        async (created) => {
+          await storage.updateSession(sessionId, { conversationId: created });
+          console.log('[Resume API] Conversation created:', created);
+        },
+      );
 
       let resumeText = '';
-      for await (const event of stream) {
-        if (event.event === 'thread.message.delta') {
-          const delta = event.data.delta;
-          if (delta.content) {
-            for (const block of delta.content) {
-              if (block.type === 'text') {
-                resumeText += block.text?.value || '';
-              }
-            }
-          }
+      const turn = await peterConversation.streamTurn({
+        conversationId,
+        userMessage: resumePrompt,
+        dynamicInstructions: '',
+      });
+
+      for await (const event of turn.events) {
+        if (event.type === 'text_delta') {
+          resumeText += event.text;
         }
-        if (event.event === 'thread.run.failed' ||
-            event.event === 'thread.run.cancelled' ||
-            event.event === 'thread.run.expired') {
-          throw new Error(`Resume run failed: ${event.event}`);
+        if (event.type === 'failed') {
+          if (!resumeText) {
+            throw new Error(`Resume run failed: ${event.reason} — ${event.message}`);
+          }
+          break;
         }
       }
 
@@ -1351,7 +1347,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let countedChatStream = false;
     let turnLease: ChatTurnLease | null = null;
     let assistantStream: { abort: () => void } | null = null;
-    let threadIdForRun = '';
     let runId = '';
     let turnFinished = false;
     try {
@@ -1395,9 +1390,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (turnFinished) return;
         turnLease?.cancel();
         assistantStream?.abort();
-        if (runId && threadIdForRun) {
-          openai.beta.threads.runs.cancel(runId, { thread_id: threadIdForRun }).catch(() => undefined);
-        }
+        // Best-effort en complément de abort() : plus personne n'écoute.
+        void peterConversation.cancelResponse(runId);
       });
 
       console.log('[Chat Stream API] Session found:', { sessionId, foundClues: session.foundClues });
@@ -1422,7 +1416,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let firstLlmDeltaAt: number | null = null;
       let firstSentenceEmittedAt: number | null = null;
 
-      console.log('[Chat Stream API] Using OpenAI Assistant:', ASSISTANT_ID);
+      console.log('[Chat Stream API] Using Responses API model:', getPeterModel(), '(prompt Peter v' + PETER_PROMPT_VERSION + ')');
 
       const userNameToUse = session.userName;
 
@@ -1447,34 +1441,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const cluesContext = buildPeterGameContext(peterContextInput);
       const exchangeInstructions = buildPeterExchangeInstructions(peterContextInput);
 
-      // Reuse or create thread
-      let threadId = session.threadId;
+      // Reuse or create the session's conversation
+      const conversationId = await peterConversation.ensureConversation(
+        session.conversationId,
+        async (created) => {
+          await storage.updateSession(sessionId, { conversationId: created });
+          console.log('[Chat Stream API] Conversation created and saved:', created);
+        },
+      );
 
-      if (!threadId) {
-        console.log('[Chat Stream API] Creating new thread for session...');
-        const thread = await openai.beta.threads.create();
-        threadId = thread.id;
+      // Message content = only what the user actually said (clean conversation history).
+      // Le contexte de jeu passe par `instructions`, donc il n'est jamais persisté
+      // comme message — équivalent de l'ancien `additional_instructions`.
+      console.log('[Chat Stream API] Running Peter with streaming...', { model: getPeterModel(), conversationId, serverExchangeCount });
 
-        await storage.updateSession(sessionId, { threadId });
-        console.log('[Chat Stream API] Thread created and saved:', threadId);
-      }
-      threadIdForRun = threadId;
-
-      // Message content = only what the user actually said (clean thread history)
-      await openai.beta.threads.messages.create(threadId, {
-        role: 'user',
-        content: userMessage,
+      const turn = await peterConversation.streamTurn({
+        conversationId,
+        userMessage,
+        dynamicInstructions: `${cluesContext}${exchangeInstructions}`,
       });
-
-      // Stream the assistant response — clue context passed via additional_instructions
-      // (overrides/supplements the system prompt for this run only, never pollutes thread history)
-      console.log('[Chat Stream API] Running assistant with streaming...', { assistantId: ASSISTANT_ID, threadId, serverExchangeCount });
-
-      const stream = await openai.beta.threads.runs.stream(threadId, {
-        assistant_id: ASSISTANT_ID,
-        additional_instructions: `${cluesContext}${exchangeInstructions}`,
-      });
-      assistantStream = stream;
+      assistantStream = turn;
       console.log('[Chat Stream API] Stream created successfully, starting to process events...');
 
       // Timeout de sécurité pour détecter les streams bloqués
@@ -1482,9 +1468,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error(`[Chat Stream API] ⚠️ TIMEOUT: Stream blocked after ${OPENAI_RUN_TIMEOUT_MS}ms`);
         turnLease?.cancel();
         assistantStream?.abort();
-        if (runId && threadIdForRun) {
-          await openai.beta.threads.runs.cancel(runId, { thread_id: threadIdForRun }).catch(() => undefined);
-        }
+        await peterConversation.cancelResponse(runId);
         captureServerEvent('server_error', sessionId, {
           endpoint: '/api/chat/stream',
           context: 'stream_timeout',
@@ -1760,39 +1744,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       };
 
-      for await (const event of stream) {
-        console.log('[Chat Stream API] Event received:', event.event);
-
-        if (event.event === 'thread.run.created') {
-          runId = event.data.id;
+      // Vide les tampons de fin de tour : dernière phrase partielle, puis les
+      // lots TTS qui n'ont jamais atteint leur seuil de déclenchement.
+      // Appelée à la fin normale du stream ET sur réponse tronquée ayant déjà
+      // produit du texte — sans quoi les dernières phrases resteraient muettes.
+      const finalizeTurnOutput = () => {
+        if (streamTimeout) {
+          clearTimeout(streamTimeout);
+          streamTimeout = null;
         }
 
-        if (event.event === 'thread.message.delta') {
-          const delta = event.data.delta;
-          if (delta.content && delta.content[0]?.type === 'text') {
-            const textDelta = delta.content[0].text?.value || '';
-            if (textDelta && firstLlmDeltaAt === null) {
-              firstLlmDeltaAt = Date.now();
-              captureServerTiming(sessionId, {
-                step: 'openai_first_delta',
-                duration_ms: firstLlmDeltaAt - streamStartedAt,
-                success: true,
-                endpoint: '/api/chat/stream',
-                exchange_index: serverExchangeCount,
-              }, userName);
-            }
-            fullResponse += textDelta;
-            currentSentence += textDelta;
+        // Flush any remaining text as a final sentence
+        if (currentSentence.trim().length > 0) {
+          sendSentence(currentSentence);
+          currentSentence = "";
+        }
 
-            let match;
-            while ((match = currentSentence.match(/^([\s\S]*?[.!?])(\s+|$)/)) !== null) {
-              sendSentence(match[1]);
-              currentSentence = currentSentence.slice(match[0].length);
-            }
+        // Flush Phase 1 buffer if it never reached the threshold (entire response was short)
+        if (!phase1Done && phase1ShortBuffer.length > 0) {
+          dispatchPhase1Tts(phase1ShortBuffer);
+          phase1ShortBuffer = [];
+        }
+
+        // Flush Phase 2a buffer if early threshold was never reached during streaming
+        if (!phase2aDispatched && phase2Buffer.length > 0) {
+          dispatchPhase2aTts(phase2Buffer, phase2StartIndex, false);
+          phase2Buffer = [];
+        }
+
+        // Dispatch Phase 2b for any sentences accumulated after Phase 2a fired.
+        // Do not regenerate a merged 2a+2b block: the earlier request may
+        // already be running, which wastes Gradium capacity under load.
+        if (phase2bBuffer.length > 0) {
+          dispatchPhase2bTts(phase2bBuffer, phase2bStartIndex);
+        }
+      };
+
+      for await (const event of turn.events) {
+        if (event.type === 'created') {
+          runId = event.responseId;
+        }
+
+        if (event.type === 'text_delta') {
+          const textDelta = event.text;
+          if (textDelta && firstLlmDeltaAt === null) {
+            firstLlmDeltaAt = Date.now();
+            captureServerTiming(sessionId, {
+              step: 'openai_first_delta',
+              duration_ms: firstLlmDeltaAt - streamStartedAt,
+              success: true,
+              endpoint: '/api/chat/stream',
+              exchange_index: serverExchangeCount,
+            }, userName);
+          }
+          fullResponse += textDelta;
+          currentSentence += textDelta;
+
+          let match;
+          while ((match = currentSentence.match(/^([\s\S]*?[.!?])(\s+|$)/)) !== null) {
+            sendSentence(match[1]);
+            currentSentence = currentSentence.slice(match[0].length);
           }
         }
 
-        if (event.event === 'thread.run.completed') {
+        if (event.type === 'completed') {
           console.log('[Chat Stream API] ✅ Run completed:', { responseLength: fullResponse.length });
           captureServerTiming(sessionId, {
             step: 'openai_run_complete',
@@ -1804,46 +1819,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             exchange_index: serverExchangeCount,
           }, userName);
 
-          if (streamTimeout) {
-            clearTimeout(streamTimeout);
-            streamTimeout = null;
-          }
-
-          // Flush any remaining text as a final sentence
-          if (currentSentence.trim().length > 0) {
-            sendSentence(currentSentence);
-            currentSentence = "";
-          }
-
-          // Flush Phase 1 buffer if it never reached the threshold (entire response was short)
-          if (!phase1Done && phase1ShortBuffer.length > 0) {
-            dispatchPhase1Tts(phase1ShortBuffer);
-            phase1ShortBuffer = [];
-          }
-
-          // Flush Phase 2a buffer if early threshold was never reached during streaming
-          if (!phase2aDispatched && phase2Buffer.length > 0) {
-            dispatchPhase2aTts(phase2Buffer, phase2StartIndex, false);
-            phase2Buffer = [];
-          }
-
-          // Dispatch Phase 2b for any sentences accumulated after Phase 2a fired.
-          // Do not regenerate a merged 2a+2b block: the earlier request may
-          // already be running, which wastes Gradium capacity under load.
-          if (phase2bBuffer.length > 0) {
-            dispatchPhase2bTts(phase2bBuffer, phase2bStartIndex);
-          }
+          finalizeTurnOutput();
         }
 
-        if (event.event === 'thread.run.failed' ||
-            event.event === 'thread.run.cancelled' ||
-            event.event === 'thread.run.expired') {
-          console.error('[Chat Stream API] ❌ Assistant run failed:', event.event);
+        if (event.type === 'failed') {
+          console.error('[Chat Stream API] ❌ Peter run failed:', event.reason, event.message);
           captureServerEvent('server_error', sessionId, {
             endpoint: '/api/chat/stream',
-            context: 'assistant_run_failed',
-            error_message: `Assistant run ${event.event}`,
-            run_event: event.event,
+            context: 'peter_run_failed',
+            error_message: `Peter run ${event.reason}: ${event.message}`,
+            run_event: event.reason,
+            model: getPeterModel(),
           }, userName);
 
           if (streamTimeout) {
@@ -1851,9 +1837,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             streamTimeout = null;
           }
 
+          // Une réponse tronquée (`response.incomplete`) peut contenir du texte
+          // déjà diffusé. On vide alors les tampons et on termine le tour
+          // normalement : l'élève entend ce que Peter a eu le temps de dire,
+          // plutôt qu'un message d'erreur à la place de la réponse.
+          if (fullResponse.trim().length > 0) {
+            finalizeTurnOutput();
+            break;
+          }
+
           res.write(`data: ${JSON.stringify({
             type: 'error',
-            message: `Assistant run failed: ${event.event}`
+            message: `Peter run failed: ${event.reason}`
           })}\n\n`);
           res.end();
           return;
@@ -2029,9 +2024,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         detectedClue: detectedClues.length > 0 ? detectedClues.join(', ') : undefined,
       });
 
-      // Use OpenAI Assistant API with the specified assistant ID
-      const ASSISTANT_ID = 'asst_P9b5PxMd1k9HjBgbyXI1Cvm9';
-      console.log('[Chat API] Using OpenAI Assistant:', ASSISTANT_ID);
+      console.log('[Chat API] Using Responses API model:', getPeterModel(), '(prompt Peter v' + PETER_PROMPT_VERSION + ')');
 
       // Compute the current clue state for context injection
       const allTargetKeywordsNS = TARGET_CLUES.map(c => c.keyword);
@@ -2054,42 +2047,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const cluesContextNS = buildPeterGameContext(peterContextInputNS);
       const nsInstructions = buildPeterExchangeInstructions(peterContextInputNS);
 
-      // Réutiliser le thread existant ou en créer un nouveau
-      let threadId = session.threadId;
-
-      if (!threadId) {
-        console.log('[Chat API] Creating new thread for session...');
-        const thread = await openai.beta.threads.create();
-        threadId = thread.id;
-        await storage.updateSession(sessionId, { threadId });
-        console.log('[Chat API] Thread created and saved:', threadId);
-      } else {
-        console.log('[Chat API] Reusing existing thread:', threadId);
-      }
-
-      // Message content = only what the user actually said (clean thread history)
-      await openai.beta.threads.messages.create(threadId, {
-        role: 'user',
-        content: userMessage,
-      });
+      // Réutiliser la conversation existante ou en créer une nouvelle
+      const conversationId = await peterConversation.ensureConversation(
+        session.conversationId,
+        async (created) => {
+          await storage.updateSession(sessionId, { conversationId: created });
+          console.log('[Chat API] Conversation created and saved:', created);
+        },
+      );
 
       // Run the assistant — clue context passed via additional_instructions
-      console.log('[Chat API] Running assistant with streaming...', { assistantId: ASSISTANT_ID, threadId, serverExchangeCountNS });
+      console.log('[Chat API] Running Peter with streaming...', { model: getPeterModel(), conversationId, serverExchangeCountNS });
 
       let runId = "";
 
       // Créer le run avec streaming
-      const stream = await openai.beta.threads.runs.stream(threadId, {
-        assistant_id: ASSISTANT_ID,
-        additional_instructions: `${cluesContextNS}${nsInstructions}`,
+      const turn = await peterConversation.streamTurn({
+        conversationId,
+        userMessage,
+        dynamicInstructions: `${cluesContextNS}${nsInstructions}`,
       });
-      assistantStream = stream;
+      assistantStream = turn;
       timeout = setTimeout(async () => {
         turnLease?.cancel();
         assistantStream?.abort();
-        if (runId) {
-          await openai.beta.threads.runs.cancel(runId, { thread_id: threadId }).catch(() => undefined);
-        }
+        await peterConversation.cancelResponse(runId);
       }, OPENAI_RUN_TIMEOUT_MS);
 
       console.log('[Chat API] Stream created, waiting for response...');
@@ -2097,50 +2079,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let assistantResponse = "";
 
       // Écouter les événements du stream
-      for await (const event of stream) {
-        // Capturer le run ID
-        if (event.event === 'thread.run.created') {
-          runId = event.data.id;
-          console.log('[Chat API] Run created:', runId);
+      for await (const event of turn.events) {
+        if (event.type === 'created') {
+          runId = event.responseId;
+          console.log('[Chat API] Response created:', runId);
         }
 
-        // Capturer les deltas de texte au fur et à mesure
-        if (event.event === 'thread.message.delta') {
-          const delta = event.data.delta;
-          if (delta.content && delta.content[0]?.type === 'text') {
-            const textDelta = delta.content[0].text?.value || '';
-            assistantResponse += textDelta;
-          }
+        if (event.type === 'text_delta') {
+          assistantResponse += event.text;
         }
 
-        // Vérifier la complétion
-        if (event.event === 'thread.run.completed') {
+        if (event.type === 'completed') {
           console.log('[Chat API] Run completed via stream:', {
             runId,
-            threadId,
+            conversationId,
             responseLength: assistantResponse.length
           });
         }
 
-        // Gérer les erreurs
-        if (event.event === 'thread.run.failed' ||
-            event.event === 'thread.run.cancelled' ||
-            event.event === 'thread.run.expired') {
-          const errorDetails = {
-            event: event.event,
+        if (event.type === 'failed') {
+          // Réponse tronquée ayant déjà produit du texte : on la garde plutôt
+          // que de renvoyer une erreur à l'élève.
+          if (assistantResponse.trim().length > 0) {
+            console.warn('[Chat API] Peter run ended early but produced text:', event.reason);
+            break;
+          }
+          console.error('[Chat API] Peter run failed via stream:', {
+            reason: event.reason,
+            message: event.message,
             runId,
-            threadId,
-            assistantId: ASSISTANT_ID,
-          };
-          console.error('[Chat API] Assistant run failed via stream:', errorDetails);
+            conversationId,
+          });
           captureServerEvent('server_error', sessionId, {
             endpoint: '/api/chat',
-            context: 'assistant_run_failed',
-            error_message: `Assistant run ${event.event}`,
-            run_event: event.event,
+            context: 'peter_run_failed',
+            error_message: `Peter run ${event.reason}: ${event.message}`,
+            run_event: event.reason,
             run_id: runId,
+            model: getPeterModel(),
           }, session?.userName);
-          throw new Error(`Assistant run failed - Event: ${event.event}, Run ID: ${runId}, Thread ID: ${threadId}`);
+          throw new Error(`Peter run failed - ${event.reason}, Response ID: ${runId}`);
         }
       }
       if (timeout) {
@@ -2160,7 +2138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[Chat API] Final assistant response:', {
         responseLength: assistantResponse.length,
         runId,
-        threadId
+        conversationId
       });
 
       await storage.addMessage({

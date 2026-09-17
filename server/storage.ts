@@ -60,6 +60,7 @@ export class DatabaseStorage implements IStorage {
     if (updates.audioMode !== undefined) updateData.audioMode = updates.audioMode;
     if (updates.completed !== undefined) updateData.completed = updates.completed;
     if (updates.threadId !== undefined) updateData.threadId = updates.threadId;
+    if (updates.conversationId !== undefined) updateData.conversationId = updates.conversationId;
     if (updates.finalSynthesis !== undefined) updateData.finalSynthesis = updates.finalSynthesis;
     if (updates.messageCount !== undefined) updateData.messageCount = updates.messageCount;
     if (updates.upvotes !== undefined) updateData.upvotes = updates.upvotes;

@@ -8,6 +8,73 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ## [Unreleased]
 
+### Corrigé — Peter ne répondait plus : migration Assistants API → Responses API
+
+**Panne.** OpenAI a fermé l'Assistants API le 26 août 2026, sans période de
+grâce : tout appel à `/v1/assistants`, `/v1/threads` et `/v1/threads/runs`
+échoue. Toute la couche conversationnelle de Peter reposait dessus. En
+production, chaque échange échouait depuis trois semaines — masqué par le
+message d'accueil, qui est un playback statique et continuait de fonctionner.
+Le message d'erreur étant volontairement anonymisé en production, la cause
+n'était visible ni dans la console ni pour l'élève.
+
+**Migration.**
+
+- **`server/peter-conversation.ts`** : nouveau fournisseur sur Responses API +
+  Conversations API. Il normalise les évènements OpenAI
+  (`response.output_text.delta`, `response.completed`, `response.failed`,
+  `response.incomplete`) en évènements internes, pour que la logique
+  pédagogique des routes — découpage en phrases, TTS en deux phases, détection
+  serveur des indices — reste inchangée.
+  Invariant conservé : ce module ne lit ni n'écrit `foundClues`, ne compte pas
+  les échanges et ne décide jamais de l'état du jeu.
+- **`server/peter-prompt.ts`** : le prompt v5 (24 405 caractères) vivait dans
+  l'objet Assistant hébergé chez OpenAI, aujourd'hui inaccessible. Il est
+  désormais compilé dans le bundle serveur et renvoyé à chaque tour dans
+  `instructions`. Il ne peut pas être lu depuis `docs/` au runtime : l'image
+  Docker ne copie que `dist/` et `attached_assets/`.
+  `docs/PROMPT_PETERBOT_V5_COMPLET.md` reste la source de vérité, régénérée par
+  `npm run peter:prompt:build` ; un test échoue si les deux divergent.
+- **Contexte de jeu** : l'ancien `additional_instructions` devient
+  `instructions` par tour. Seul le vrai message de l'élève entre dans
+  l'historique de la conversation — un test verrouille cet invariant.
+- **Sessions** : nouvelle colonne `conversation_id`. `thread_id` est conservé
+  en lecture seule comme trace des sessions antérieures ; il n'est plus jamais
+  écrit, et a été retiré du schéma de `PATCH /api/sessions/:id` (aucun client ne
+  l'envoyait, et un navigateur n'a pas à réécrire l'identifiant de conversation
+  d'une session).
+- **Modèle** : configurable par `OPENAI_MODEL`, défaut `gpt-5.6-terra`
+  (équilibre intelligence/coût, adapté à la contrainte de latence et à une
+  classe de 25 élèves). `OPENAI_ASSISTANT_ID` disparaît.
+- **Le déploiement progressif prévu par `docs/MIGRATION_OPENAI_RESPONSES_API.md`
+  n'a pas pu être suivi** : shadow, canary et retour arrière supposent que
+  l'ancienne API réponde encore. La bascule est directe, sans double
+  fournisseur — cet échafaudage n'avait plus d'objet.
+
+### Ajouté — Garde-fou de schéma au démarrage
+
+- **`server/ensure-schema.ts`** : le schéma n'est appliqué qu'à la main
+  (`npm run db:push`), et `drizzle-kit` est absent de l'image de production.
+  Une colonne présente dans le code mais pas en base fait échouer **toutes** les
+  requêtes de session, Drizzle listant explicitement les colonnes dans ses
+  SELECT — un déploiement aurait mis le service entièrement à terre.
+  `ensureSchema()` applique au démarrage, avant tout trafic, les
+  `ADD COLUMN IF NOT EXISTS` manquants. Strictement additif, nullable
+  uniquement, idempotent ; des tests bloquent toute entrée destructive.
+
+### Modifié — Diagnostic et observabilité
+
+- `/api/health/ai` : le test `assistant` (objet inexistant) devient `peterModel`
+  et vérifie que le modèle configuré est accessible.
+- Au démarrage, `validateAssistant()` devient `validatePeterModel()`.
+- Les échecs de tour remontent `model` et une cause précise
+  (`response.failed`, `response.incomplete`, `stream.error`).
+- Une réponse tronquée ayant déjà produit du texte est désormais **diffusée et
+  vocalisée** jusqu'où Peter a pu aller, au lieu d'être remplacée par une
+  erreur.
+- `scripts/update-peter-assistant-prompt.mjs` supprimé (il pilotait l'API
+  fermée) et remplacé par `scripts/build-peter-prompt.mjs`.
+
 ### Corrigé — STT en intégration iframe et sur Safari
 
 **Cause du bug signalé** (embed dans un autre site : Peter parle, le micro

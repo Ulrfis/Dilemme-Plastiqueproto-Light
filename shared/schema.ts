@@ -11,7 +11,13 @@ export const tutorialSessions = pgTable("tutorial_sessions", {
   score: integer("score").default(0).notNull(),
   audioMode: text("audio_mode").$type<'voice' | 'text'>().default('voice').notNull(),
   completed: integer("completed").default(0).notNull(),
+  // Conservé en lecture seule : trace des sessions créées avant la fermeture de
+  // l'Assistants API (26 août 2026). Les threads pointés n'existent plus côté
+  // OpenAI. Plus jamais écrit — voir `conversationId`.
   threadId: text("thread_id"),
+  // Conversation OpenAI (`conv_...`) portant l'historique du dialogue avec Peter,
+  // depuis la migration vers Responses API + Conversations API.
+  conversationId: text("conversation_id"),
   finalSynthesis: text("final_synthesis"),
   messageCount: integer("message_count").default(0).notNull(),
   upvotes: integer("upvotes").default(0).notNull(),

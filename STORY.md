@@ -3,7 +3,7 @@
 > **Status**: 🟢 Production on Coolify — ongoing development
 > **Creator**: Ulrich Fischer  
 > **Started**: 2024-11-12  
-> **Last Updated**: 2026-09-16 (STT en iframe + format audio Safari)
+> **Last Updated**: 2026-09-17 (Migration Assistants API → Responses API)
 
 ---
 
@@ -66,6 +66,54 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 ## Feature Chronicle
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
+
+### [2026-09-17] — Peter migré sur Responses API après la fermeture d'Assistants 🔷
+
+**Intent**: la conversation avec Peter échouait à chaque échange en production.
+Diagnostiquer, puis rétablir.
+
+**Cause racine**: OpenAI a fermé l'Assistants API le **26 août 2026**, sans
+période de grâce — tout appel à `/v1/assistants`, `/v1/threads` et
+`/v1/threads/runs` échoue. Toute la couche conversationnelle reposait dessus.
+La panne datait de trois semaines. Deux choses l'ont masquée : le message
+d'accueil de Peter est un playback statique qui ne passe pas par OpenAI, donnant
+l'impression que « ça marche à moitié » ; et le message d'erreur est
+volontairement anonymisé en production, donc invisible depuis le navigateur.
+
+**Outcome**:
+
+- `server/peter-conversation.ts` : fournisseur Responses API + Conversations API,
+  qui normalise les évènements OpenAI en évènements internes. Les routes gardent
+  leur logique intacte — découpage en phrases, TTS en deux phases, détection
+  serveur des indices, comptage des échanges.
+- `server/peter-prompt.ts` : le prompt v5 vivait dans l'objet Assistant chez
+  OpenAI, devenu inaccessible. Il est compilé dans le bundle et renvoyé à chaque
+  tour. Le Markdown reste la source de vérité, avec un test qui échoue en cas de
+  divergence.
+- Colonne `conversation_id` ; `thread_id` conservé en lecture seule.
+- `server/ensure-schema.ts` : garde-fou additif au démarrage.
+- Modèle configurable (`OPENAI_MODEL`, défaut `gpt-5.6-terra`).
+
+**Ce qui n'a pas pu être suivi**: le plan de migration écrit le 7 juin prévoyait
+shadow, canary et retour arrière via `OPENAI_CONVERSATION_PROVIDER=assistants`.
+Ces trois garde-fous supposent que l'ancienne API réponde encore. Elle ne répond
+plus : la bascule a été directe, sans filet. Écrire le plan trois mois avant
+l'échéance ne suffisait pas — il fallait l'exécuter avant, tant que le repli
+existait encore.
+
+**Vérification**: `npm run check` propre, 74 tests (28 serveur + 22 client + 24
+nouveaux), build de production, et contrôle que le prompt est bien présent dans
+`dist/index.js` — l'image Docker ne copie pas `docs/`, une lecture disque au
+runtime aurait échoué en production sans échouer en développement.
+
+**Insight**: une dépendance dont la date de fin est connue et documentée reste
+une panne si personne ne la traite avant l'échéance. Le vrai coût n'a pas été la
+migration — une journée — mais les trois semaines de panne silencieuse, dues à
+un symptôme partiel (l'accueil fonctionnait) et à un message d'erreur anonymisé
+sans canal de diagnostic évident. La prochaine amélioration utile n'est pas
+technique : c'est une alerte sur `/api/health/ai`.
+
+---
 
 ### [2026-09-16] — STT en intégration iframe + format audio Safari 🔷
 

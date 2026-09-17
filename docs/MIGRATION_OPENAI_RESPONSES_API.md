@@ -1,7 +1,49 @@
 # Migration OpenAI : Assistants API vers Responses API
 
-Date : 7 juin 2026
+Date du plan : 7 juin 2026
 Échéance annoncée de l'Assistants API : 26 août 2026
+**Statut : migration effectuée le 17 septembre 2026.**
+
+> ## Ce qui s'est réellement passé
+>
+> L'Assistants API a été fermée le 26 août 2026, sans période de grâce : tout
+> appel à `/v1/assistants`, `/v1/threads` et `/v1/threads/runs` échoue. La
+> conversation avec Peter est restée cassée en production pendant trois semaines
+> (le message d'accueil, en playback statique, continuait de fonctionner et
+> masquait la panne).
+>
+> **Le déploiement progressif décrit plus bas n'a pas pu être suivi.** Shadow,
+> canary et retour arrière supposent tous que l'ancienne API réponde encore :
+> il n'y avait plus rien vers quoi revenir, donc plus de filet. La bascule a été
+> directe, sans variable `OPENAI_CONVERSATION_PROVIDER` ni double fournisseur —
+> cet échafaudage n'avait plus d'objet.
+>
+> ### Implémentation retenue
+>
+> | Élément | Emplacement |
+> |---|---|
+> | Fournisseur Responses + Conversations | `server/peter-conversation.ts` |
+> | Prompt Peter v5 compilé dans le bundle | `server/peter-prompt.ts` (généré) |
+> | Générateur du prompt | `scripts/build-peter-prompt.mjs` (`npm run peter:prompt:build`) |
+> | Colonne de session | `conversation_id` (`thread_id` conservé en lecture seule) |
+> | Garde-fou de schéma au démarrage | `server/ensure-schema.ts` |
+> | Modèle | `OPENAI_MODEL`, défaut `gpt-5.6-terra` |
+>
+> Le prompt ne peut pas être lu depuis `docs/` au runtime : l'image Docker ne
+> copie que `dist/` et `attached_assets/`. Il est donc compilé dans le bundle,
+> le Markdown restant la source de vérité relue par les humains, avec un test
+> qui échoue si les deux divergent.
+>
+> ### Conséquence sur les sessions existantes
+>
+> Les `thread_id` en base pointent vers des threads supprimés. Les sessions
+> commencées avant la fermeture ont perdu leur historique côté OpenAI ; elles
+> repartent sur une nouvelle conversation au premier message. Aucune donnée
+> pédagogique n'est touchée : indices, score et synthèses vivent en base.
+>
+> Le reste de ce document est conservé tel quel, comme trace du plan initial.
+
+---
 
 ## Objectif
 
