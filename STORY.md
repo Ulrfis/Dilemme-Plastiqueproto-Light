@@ -67,6 +67,41 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
 
+### [2026-09-17] — Instrumentation TTS et sondes Gradium WebSocket 🔹
+
+**Intent**: avant de réécrire la chaîne TTS en WebSocket (lot 3), mesurer ce
+qu'on cherche à améliorer et lever deux inconnues bloquantes.
+
+**Outcome**:
+
+- `generateTtsAudio` émet un évènement `gradium_transport` qui décompose ce que
+  `duration_ms` confondait : `queue_wait_ms` (attente dans la file de
+  concurrence), `ttfb_ms` (jusqu'au **premier** octet audio) et `total_ms`.
+  L'écart entre les deux derniers est du temps de bufferisation pur — de
+  l'attente en silence pour l'élève. Câblé sur phase 1, 2a, 2b et l'accueil.
+- `scripts/probe-gradium-ws.mjs` (`npm run probe:gradium`) répond aux deux
+  questions qui bloquent le lot 3 : la fréquence d'échantillonnage réelle, et si
+  le multiplexage de sockets fonctionne.
+- `scripts/bench-voice-pipeline.mjs` (`npm run bench:voice`) compare REST et
+  WebSocket sur trois longueurs calées sur le pipeline réel, en `pcm` et `opus`.
+
+**Friction**: les deux scripts ont d'abord été écrits avec le `WebSocket` global
+de Node. Il accepte `{ headers }` sans broncher **et l'ignore en silence** — on
+se serait connecté sans authentification, pour une erreur incompréhensible à
+l'arrivée. Bascule sur le paquet `ws`, déjà dépendance du projet, et la raison
+est écrite en tête de chaque script pour que personne ne refasse le chemin.
+
+**Ce qui n'a pas pu être fait ici**: l'environnement d'agent n'a aucune clé API
+et `api.gradium.ai` y est bloqué par la politique réseau. Les sondes sont donc
+livrées prêtes à tourner, pas exécutées. Les chiffres doivent être produits
+depuis Replit, Coolify ou une machine locale.
+
+**Insight**: une mesure qui ne distingue pas « le service est lent » de « on
+bufferise en attendant » ne permet de choisir aucun correctif. `duration_ms`
+seul faisait exactement cette confusion.
+
+---
+
 ### [2026-09-17] — La file audio ne retient plus la voix de Peter 🔷
 
 **Intent**: Peter met trop longtemps à parler. Auditer la chaîne

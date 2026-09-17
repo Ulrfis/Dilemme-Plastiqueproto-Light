@@ -10,6 +10,8 @@
     "test": "node --experimental-strip-types --test server/**/*.test.ts client/src/**/*.test.ts",
     "peter:prompt:build": "node scripts/build-peter-prompt.mjs",
     "test:load:class": "node scripts/load-test-class.mjs",
+    "probe:gradium": "node scripts/probe-gradium-ws.mjs",
+    "bench:voice": "node scripts/bench-voice-pipeline.mjs",
     "check": "tsc",
     "db:push": "drizzle-kit push",
     "db:verify": "node scripts/verify-database.mjs"

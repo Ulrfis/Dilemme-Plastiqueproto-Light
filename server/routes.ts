@@ -254,12 +254,33 @@ function fixWavHeader(buf: Buffer): void {
 // Helper: Generate TTS audio from Gradium (returns Buffer)
 // previousText: conservé dans la signature pour compatibilité des appelants — non utilisé par l'API REST Gradium
 // quality: paramètre conservé pour compatibilité — Gradium utilise un modèle unique ("default")
+/**
+ * Contexte de mesure, optionnel. Quand il est fourni, `generateTtsAudio` émet un
+ * évènement `gradium_transport` qui décompose le temps en trois segments que les
+ * mesures actuelles confondent dans un seul `duration_ms` :
+ *
+ *   queue_wait_ms — attente dans la file de concurrence (charge locale)
+ *   ttfb_ms       — de l'envoi au PREMIER octet audio (réactivité de Gradium)
+ *   total_ms      — jusqu'au dernier octet (durée de génération complète)
+ *
+ * C'est `ttfb_ms` qui décide si un vrai streaming vaut le chantier : si le
+ * premier octet arrive très tôt et le dernier très tard, tout l'écart est du
+ * temps que l'élève passe à attendre pour rien.
+ */
+interface TtsTelemetry {
+  sessionId?: string | null;
+  userName?: string | null;
+  /** Étiquette de l'appelant : 'phase1', 'welcome', 'resume'… */
+  label: string;
+}
+
 async function generateTtsAudio(
   text: string,
   previousText?: string,
   quality: 'fast' | 'quality' = 'quality',
   priority: QueuePriority = 'foreground',
   dropIfBusy = false,
+  telemetry?: TtsTelemetry,
 ): Promise<Buffer> {
   const GRADIUM_API_KEY = process.env.GRADIUM_API_KEY;
   const GRADIUM_VOICE_ID = process.env.GRADIUM_VOICE_ID;
@@ -291,7 +312,12 @@ async function generateTtsAudio(
     },
   };
 
+  const enqueuedAt = Date.now();
+
   return elevenLabsQueue.run(async () => {
+    const sentAt = Date.now();
+    let firstByteAt = 0;
+
     const response = await gradiumFetch('https://api.gradium.ai/api/post/speech/tts', {
       method: 'POST',
       headers: {
@@ -312,9 +338,33 @@ async function generateTtsAudio(
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        // Gradium envoie le WAV progressivement : le premier chunk arrive bien
+        // avant la fin de la génération. Tout ce qui sépare ces deux instants
+        // est du temps que le serveur passe à bufferiser au lieu de servir.
+        if (firstByteAt === 0) firstByteAt = Date.now();
         chunks.push(Buffer.from(value));
       }
     }
+
+    const finishedAt = Date.now();
+    if (telemetry) {
+      captureServerTiming(telemetry.sessionId ?? null, {
+        step: 'gradium_transport',
+        duration_ms: finishedAt - sentAt,
+        success: true,
+        transport: 'rest',
+        label: telemetry.label,
+        queue_wait_ms: sentAt - enqueuedAt,
+        ttfb_ms: firstByteAt > 0 ? firstByteAt - sentAt : undefined,
+        total_ms: finishedAt - sentAt,
+        chars: text.length,
+      }, telemetry.userName);
+    }
+    console.log(
+      `[TTS] ${text.length} chars — attente file ${sentAt - enqueuedAt}ms,`,
+      `premier octet ${firstByteAt > 0 ? firstByteAt - sentAt : '?'}ms,`,
+      `total ${finishedAt - sentAt}ms`,
+    );
 
     const audioBuffer = Buffer.concat(chunks);
     if (audioBuffer.byteLength === 0) {
@@ -755,7 +805,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const welcomeMessage = getWelcomeMessage(session.userName);
       const welcomeAudioToken = crypto.randomUUID();
       ttsRequestStore.set(welcomeAudioToken, {
-        promise: generateTtsAudio(welcomeMessage, undefined, 'quality'),
+        promise: generateTtsAudio(welcomeMessage, undefined, 'quality', 'foreground', false, { sessionId: session.id, userName: session.userName, label: 'welcome' }),
         createdAt: Date.now(),
         sessionId: session.id,
         userName: session.userName,
@@ -1537,7 +1587,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         console.log(`[Chat Stream API] Phase 1 TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." [Gradium]`);
 
-        const ttsPromise = generateTtsAudio(combined, undefined, 'quality')
+        const ttsPromise = generateTtsAudio(combined, undefined, 'quality', 'foreground', false, { sessionId, userName, label: 'phase1' })
           .then((audioBuffer) => {
             captureServerTiming(sessionId, {
               step: 'gradium_phase1',
@@ -1602,7 +1652,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })}\n\n`);
         }
 
-        const ttsPromise = generateTtsAudio(combined, phase1Text || undefined, 'quality')
+        const ttsPromise = generateTtsAudio(combined, phase1Text || undefined, 'quality', 'foreground', false, { sessionId, userName, label: 'phase2a' })
           .then((audioBuffer) => {
             captureServerTiming(sessionId, {
               step: 'gradium_phase2a',
@@ -1657,7 +1707,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[Chat Stream API] Phase 2b TTS: ${count} sentence(s) → "${combined.substring(0, 60)}..." [Gradium]`);
         const phase2bT0 = Date.now();
 
-        const ttsPromise = generateTtsAudio(combined, prevText, 'quality')
+        const ttsPromise = generateTtsAudio(combined, prevText, 'quality', 'foreground', false, { sessionId, userName, label: 'phase2b' })
           .then((audioBuffer) => {
             captureServerTiming(sessionId, {
               step: 'gradium_phase2b',
