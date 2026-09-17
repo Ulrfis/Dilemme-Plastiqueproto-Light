@@ -27,7 +27,13 @@ Date du plan : 7 juin 2026
 > | Générateur du prompt | `scripts/build-peter-prompt.mjs` (`npm run peter:prompt:build`) |
 > | Colonne de session | `conversation_id` (`thread_id` conservé en lecture seule) |
 > | Garde-fou de schéma au démarrage | `server/ensure-schema.ts` |
-> | Modèle | `OPENAI_MODEL`, défaut `gpt-5.6-terra` |
+> | Modèle | `OPENAI_MODEL`, défaut `gpt-5.6-luna` |
+> | Raisonnement | `OPENAI_REASONING_EFFORT`, défaut `none` |
+>
+> `reasoning.effort` est envoyé à chaque tour. Omis, GPT-5.6 applique `medium` :
+> Peter réfléchit avant chaque réplique et le premier token — donc la première
+> phrase envoyée au TTS — arrive nettement plus tard. En conversation vocale,
+> c'est audible.
 >
 > Le prompt ne peut pas être lu depuis `docs/` au runtime : l'image Docker ne
 > copie que `dist/` et `attached_assets/`. Il est donc compilé dans le bundle,

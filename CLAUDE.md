@@ -18,7 +18,8 @@ Application éducative mobile-first pour enseigner la pollution plastique à des
 - Base de données : PostgreSQL (Drizzle ORM — `drizzle.config.ts`)
 - STT : OpenAI Whisper
 - LLM : OpenAI Responses API + Conversations API (modèle via `OPENAI_MODEL`,
-  défaut `gpt-5.6-terra`). L'Assistants API a été fermée le 26 août 2026.
+  défaut `gpt-5.6-luna` ; raisonnement via `OPENAI_REASONING_EFFORT`, défaut
+  `none`). L'Assistants API a été fermée le 26 août 2026.
 - TTS : ElevenLabs
 - Analytics : PostHog + Google Sheets (sync via `google-apps-script.js`)
 - Déploiement : Replit (intégré, secrets gérés dans Replit)
@@ -33,6 +34,8 @@ Application éducative mobile-first pour enseigner la pollution plastique à des
   à chaque tour — il ne vit plus chez OpenAI. Ne jamais éditer le `.ts` à la main
 - Contexte de jeu passé en `instructions` par tour (ex-`additional_instructions`) :
   il ne doit JAMAIS entrer dans l'historique de conversation
+- `reasoning.effort` doit TOUJOURS être envoyé : omis, GPT-5.6 raisonne en
+  `medium` et ajoute une latence très visible en conversation vocale
 - Comptage des indices trouvés — logique sensible (cf. STORY.md §Fiabilité comptage)
 - Retour sur /tutorial : Peter reprend la conversation contextuellement (voir STORY.md 2026-05-02)
 

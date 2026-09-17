@@ -6,6 +6,7 @@ import {
   PeterConversationProvider,
   buildTurnInstructions,
   getPeterModel,
+  getPeterReasoningEffort,
   type PeterStreamEvent,
 } from './peter-conversation.ts';
 import { PETER_INSTRUCTIONS } from './peter-prompt.ts';
@@ -73,18 +74,52 @@ async function collect(events: AsyncIterable<PeterStreamEvent>): Promise<PeterSt
 
 // ── Modèle ────────────────────────────────────────────────────────────────
 
-test('getPeterModel defaults to the balanced model and honours OPENAI_MODEL', () => {
+test('getPeterModel defaults to the fastest model and honours OPENAI_MODEL', () => {
   const previous = process.env.OPENAI_MODEL;
   try {
     delete process.env.OPENAI_MODEL;
-    assert.equal(getPeterModel(), 'gpt-5.6-terra');
-
-    process.env.OPENAI_MODEL = 'gpt-5.6-luna';
     assert.equal(getPeterModel(), 'gpt-5.6-luna');
+
+    process.env.OPENAI_MODEL = 'gpt-5.6-sol';
+    assert.equal(getPeterModel(), 'gpt-5.6-sol');
   } finally {
     if (previous === undefined) delete process.env.OPENAI_MODEL;
     else process.env.OPENAI_MODEL = previous;
   }
+});
+
+function withReasoningEffort(value: string | undefined, run: () => void) {
+  const previous = process.env.OPENAI_REASONING_EFFORT;
+  try {
+    if (value === undefined) delete process.env.OPENAI_REASONING_EFFORT;
+    else process.env.OPENAI_REASONING_EFFORT = value;
+    run();
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_REASONING_EFFORT;
+    else process.env.OPENAI_REASONING_EFFORT = previous;
+  }
+}
+
+test('reasoning is disabled by default — GPT-5.6 would otherwise think at medium', () => {
+  withReasoningEffort(undefined, () => {
+    assert.equal(getPeterReasoningEffort(), 'none');
+  });
+});
+
+test('getPeterReasoningEffort honours a valid override, case-insensitively', () => {
+  withReasoningEffort('low', () => assert.equal(getPeterReasoningEffort(), 'low'));
+  withReasoningEffort('  HIGH ', () => assert.equal(getPeterReasoningEffort(), 'high'));
+  withReasoningEffort('xhigh', () => assert.equal(getPeterReasoningEffort(), 'xhigh'));
+});
+
+test('an unknown reasoning effort falls back instead of breaking every turn', () => {
+  // Une faute de frappe dans une variable Coolify ne doit pas mettre Peter à terre.
+  withReasoningEffort('fastest', () => {
+    assert.equal(getPeterReasoningEffort(), 'none');
+  });
+  withReasoningEffort('', () => {
+    assert.equal(getPeterReasoningEffort(), 'none');
+  });
 });
 
 // ── Instructions ──────────────────────────────────────────────────────────
@@ -172,6 +207,8 @@ test('streamTurn normalises a successful OpenAI stream', async () => {
   const params = calls.find(c => c.method === 'responses.create')!.args[0] as Record<string, any>;
   assert.equal(params.conversation, 'conv_1');
   assert.equal(params.stream, true);
+  // Le champ doit toujours être envoyé : omis, l'API raisonne en `medium`.
+  assert.deepEqual(params.reasoning, { effort: 'none' });
 });
 
 test('the game context travels in instructions, never in conversation history', async () => {

@@ -33,14 +33,58 @@ import { PETER_INSTRUCTIONS, PETER_PROMPT_VERSION } from './peter-prompt.ts';
 /**
  * Modèle utilisé pour Peter. Surchargeable par `OPENAI_MODEL`.
  *
- * `gpt-5.6-terra` équilibre intelligence et coût : Peter tient une conversation
- * pédagogique en français, avec une contrainte de latence forte (la première
- * phrase part au TTS dès qu'elle est complète) et jusqu'à 25 élèves simultanés.
+ * `gpt-5.6-luna` est le plus rapide et le moins cher de la famille : Peter tient
+ * une conversation pédagogique en français où la latence prime — la première
+ * phrase part au TTS dès qu'elle est complète, et une classe de 25 élèves parle
+ * en même temps. La qualité de dialogue attendue ne demande pas un modèle de
+ * raisonnement profond : tout le cadrage pédagogique vient du prompt v5.
  */
-const DEFAULT_MODEL = 'gpt-5.6-terra';
+const DEFAULT_MODEL = 'gpt-5.6-luna';
 
 export function getPeterModel(): string {
   return process.env.OPENAI_MODEL || DEFAULT_MODEL;
+}
+
+/**
+ * Niveaux acceptés par l'API pour la famille GPT-5.6.
+ *
+ * ⚠️ Le SDK (`openai@6.8.1`) type `ReasoningEffort` comme
+ * `'minimal' | 'low' | 'medium' | 'high' | null` : ses définitions sont en
+ * retard sur l'API, qui accepte aussi `none`, `xhigh` et `max`. D'où le cast au
+ * point d'appel — à retirer quand le SDK aura rattrapé.
+ */
+export type PeterReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+const REASONING_EFFORTS: readonly PeterReasoningEffort[] = [
+  'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+];
+
+/**
+ * Effort de raisonnement. Surchargeable par `OPENAI_REASONING_EFFORT`.
+ *
+ * Défaut `none` : pas de phase de réflexion avant la réponse, donc le premier
+ * token — et donc la première phrase envoyée au TTS — arrive au plus vite.
+ *
+ * ⚠️ Ce réglage n'est PAS optionnel pour la vitesse : sans lui, GPT-5.6 applique
+ * `medium` par défaut et Peter réfléchit avant chaque réplique, ce qui ajoute
+ * une latence très visible dans une conversation vocale.
+ *
+ * Une valeur inconnue est ignorée au profit du défaut : une faute de frappe
+ * dans une variable d'environnement ne doit pas faire échouer tous les tours.
+ */
+const DEFAULT_REASONING_EFFORT: PeterReasoningEffort = 'none';
+
+export function getPeterReasoningEffort(): PeterReasoningEffort {
+  const raw = process.env.OPENAI_REASONING_EFFORT?.trim().toLowerCase();
+  if (!raw) return DEFAULT_REASONING_EFFORT;
+  const match = REASONING_EFFORTS.find(effort => effort === raw);
+  if (!match) {
+    console.warn(
+      `[Peter] OPENAI_REASONING_EFFORT="${raw}" inconnu — repli sur "${DEFAULT_REASONING_EFFORT}"`,
+    );
+    return DEFAULT_REASONING_EFFORT;
+  }
+  return match;
 }
 
 /** Évènements normalisés consommés par les routes. */
@@ -138,6 +182,9 @@ export class PeterConversationProvider {
         conversation: input.conversationId,
         input: [{ role: 'user', content: input.userMessage }],
         instructions: buildTurnInstructions(input.dynamicInstructions),
+        // Sans ce champ, GPT-5.6 raisonne en `medium` par défaut et retarde
+        // le premier token. Cast : voir PeterReasoningEffort (types SDK en retard).
+        reasoning: { effort: getPeterReasoningEffort() as 'minimal' },
         stream: true,
       },
       { signal: controller.signal },
@@ -229,7 +276,7 @@ export class PeterConversationProvider {
       return {
         ok: true,
         model,
-        message: `Modèle ${retrieved.id} accessible (prompt Peter v${PETER_PROMPT_VERSION})`,
+        message: `Modèle ${retrieved.id} accessible — raisonnement "${getPeterReasoningEffort()}", prompt Peter v${PETER_PROMPT_VERSION}`,
       };
     } catch (error) {
       return {

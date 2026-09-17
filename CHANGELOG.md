@@ -43,9 +43,16 @@ n'était visible ni dans la console ni pour l'élève.
   écrit, et a été retiré du schéma de `PATCH /api/sessions/:id` (aucun client ne
   l'envoyait, et un navigateur n'a pas à réécrire l'identifiant de conversation
   d'une session).
-- **Modèle** : configurable par `OPENAI_MODEL`, défaut `gpt-5.6-terra`
-  (équilibre intelligence/coût, adapté à la contrainte de latence et à une
-  classe de 25 élèves). `OPENAI_ASSISTANT_ID` disparaît.
+- **Modèle** : configurable par `OPENAI_MODEL`, défaut `gpt-5.6-luna` — le plus
+  rapide de la famille. `OPENAI_ASSISTANT_ID` disparaît.
+- **Raisonnement désactivé** : `reasoning.effort` est configurable par
+  `OPENAI_REASONING_EFFORT`, défaut `none`. Ce champ est toujours envoyé, et ce
+  n'est pas un détail : omis, GPT-5.6 applique `medium` et Peter réfléchit avant
+  chaque réplique, ce qui retarde le premier token — donc la première phrase
+  envoyée au TTS — de façon très audible en conversation vocale. Une valeur
+  inconnue retombe sur le défaut au lieu de faire échouer tous les tours.
+  Le SDK `openai@6.8.1` ne type pas encore `none`, `xhigh` ni `max` : d'où le
+  cast isolé et commenté au point d'appel.
 - **Le déploiement progressif prévu par `docs/MIGRATION_OPENAI_RESPONSES_API.md`
   n'a pas pu être suivi** : shadow, canary et retour arrière supposent que
   l'ancienne API réponde encore. La bascule est directe, sans double
