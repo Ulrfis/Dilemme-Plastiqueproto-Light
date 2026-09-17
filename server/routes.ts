@@ -18,7 +18,7 @@ import { CLUE_CHALLENGE_EXCHANGES, MAX_CONVERSATION_EXCHANGES, TOTAL_TUTORIAL_CL
 import { buildPeterExchangeInstructions, buildPeterGameContext } from "./peter-game-context";
 import { PeterConversationProvider, getPeterModel } from "./peter-conversation";
 import { PETER_PROMPT_VERSION } from "./peter-prompt";
-import { getWelcomeMessage } from "@shared/welcome-audio";
+import { getWelcomeMessage, getWelcomeSegments, WELCOME_BODY_SENTENCES } from "@shared/welcome-audio";
 import { pool } from "./db";
 import { checkDatabaseHealth } from "./database-health";
 
@@ -178,6 +178,12 @@ function requireAdmin(req: any, res: any): boolean {
 const ttsCache = new Map<string, Buffer>();
 const TTS_CACHE_MAX_SIZE = 100; // Limit cache to 100 entries to prevent memory issues
 
+// Clés que l'éviction FIFO doit épargner. Y vivent les deux phrases invariables
+// du message d'accueil, générées une fois au démarrage : sans épinglage, une
+// classe de 25 élèves les chasserait du cache en quelques minutes et on
+// repaierait leur génération à chaque session.
+const ttsCachePinned = new Set<string>();
+
 // PHASE 3 OPTIMIZATION: Pre-generated TTS store
 // Stores TTS generation promises by token so the server can start generating
 // TTS as soon as the LLM finishes, before the client requests it.
@@ -188,15 +194,22 @@ interface TtsRequest {
   // populate session_id + user_name in PostHog.
   sessionId?: string | null;
   userName?: string | null;
+  /** Durée de vie propre à ce jeton. Par défaut `TTS_REQUEST_TTL`. */
+  ttlMs?: number;
 }
 const ttsRequestStore = new Map<string, TtsRequest>();
 const TTS_REQUEST_TTL = 60000; // 60 seconds TTL for pre-generated audio
+
+// Les jetons d'accueil vivent plus longtemps : entre la saisie du prénom et
+// l'arrivée sur l'écran tutoriel, un élève qui traîne (ou un téléphone qui
+// s'endort) dépassait les 60 s et perdait tout le bénéfice de la pré-génération.
+const WELCOME_TOKEN_TTL = 5 * 60 * 1000;
 
 // Cleanup expired TTS requests every 30 seconds
 setInterval(() => {
   const now = Date.now();
   ttsRequestStore.forEach((req, token) => {
-    if (now - req.createdAt > TTS_REQUEST_TTL) {
+    if (now - req.createdAt > (req.ttlMs ?? TTS_REQUEST_TTL)) {
       ttsRequestStore.delete(token);
     }
   });
@@ -377,16 +390,48 @@ async function generateTtsAudio(
     // RIFF size et data size avec les vraies longueurs.
     fixWavHeader(audioBuffer);
 
-    // Cache the result
+    // Cache the result — l'éviction FIFO saute les entrées épinglées.
     if (ttsCache.size >= TTS_CACHE_MAX_SIZE) {
-      const firstKey = ttsCache.keys().next().value as string;
-      if (firstKey) ttsCache.delete(firstKey);
+      for (const key of ttsCache.keys()) {
+        if (ttsCachePinned.has(key)) continue;
+        ttsCache.delete(key);
+        break;
+      }
     }
     ttsCache.set(textHash, audioBuffer);
     console.log('[TTS] Audio generated and cached:', audioBuffer.byteLength, 'bytes');
 
     return audioBuffer;
   }, { priority, dropIfBusy });
+}
+
+/**
+ * Génère et épingle les phrases invariables du message d'accueil.
+ *
+ * Appelé une fois au démarrage. Après ça, seule la phrase contenant le prénom
+ * demande une génération à la création d'une session — le reste sort du cache.
+ *
+ * Volontairement tolérant : si Gradium est indisponible au boot, on log et on
+ * continue. Le serveur doit démarrer, et le chemin normal régénérera à la
+ * demande.
+ */
+async function warmWelcomeSegments(): Promise<void> {
+  if (!process.env.GRADIUM_API_KEY || !process.env.GRADIUM_VOICE_ID) return;
+
+  for (const sentence of WELCOME_BODY_SENTENCES) {
+    try {
+      await generateTtsAudio(sentence, undefined, 'quality', 'background', false, {
+        label: 'welcome_warm',
+      });
+      ttsCachePinned.add(crypto.createHash('md5').update(`gradium:${sentence}`).digest('hex'));
+      console.log('[TTS] Segment d\'accueil épinglé en cache:', sentence.substring(0, 40) + '…');
+    } catch (err) {
+      console.warn(
+        '[TTS] Préchauffage du segment d\'accueil échoué (non bloquant):',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 }
 
 const openai = new OpenAI({
@@ -413,6 +458,11 @@ async function validatePeterModel() {
 
 // Appeler au démarrage
 validatePeterModel();
+
+// Préchauffe les phrases invariables de l'accueil. Décalé de 8 s pour ne pas
+// concurrencer le warming Gradium de `server/index.ts` (premier tir à 6 s) ni
+// retarder l'ouverture du port.
+setTimeout(() => { void warmWelcomeSegments(); }, 8000);
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Public liveness/readiness endpoint used by Docker and Coolify. It checks
@@ -802,16 +852,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Start the personalized first Peter message while the client navigates
       // to the tutorial. The visible text and the voice use the exact same
       // server-validated name stored on the session.
+      //
+      // Un jeton par phrase : seule la première contient le prénom et demande
+      // une vraie génération. Les deux autres sont épinglées en cache depuis le
+      // démarrage, donc résolues immédiatement — et surtout, le client peut
+      // commencer à jouer dès la première au lieu d'attendre les ~22 secondes
+      // d'audio du message entier.
       const welcomeMessage = getWelcomeMessage(session.userName);
-      const welcomeAudioToken = crypto.randomUUID();
-      ttsRequestStore.set(welcomeAudioToken, {
-        promise: generateTtsAudio(welcomeMessage, undefined, 'quality', 'foreground', false, { sessionId: session.id, userName: session.userName, label: 'welcome' }),
-        createdAt: Date.now(),
-        sessionId: session.id,
-        userName: session.userName,
+      const welcomeSegments = getWelcomeSegments(session.userName);
+      const welcomeAudioTokens = welcomeSegments.map((segment, index) => {
+        const token = crypto.randomUUID();
+        ttsRequestStore.set(token, {
+          promise: generateTtsAudio(segment, undefined, 'quality', 'foreground', false, {
+            sessionId: session.id,
+            userName: session.userName,
+            label: `welcome_${index + 1}`,
+          }),
+          createdAt: Date.now(),
+          sessionId: session.id,
+          userName: session.userName,
+          ttlMs: WELCOME_TOKEN_TTL,
+        });
+        return token;
       });
 
-      res.json({ ...session, welcomeMessage, welcomeAudioToken });
+      res.json({
+        ...session,
+        welcomeMessage,
+        welcomeAudioTokens,
+        // Conservé pour un client encore en cache navigateur pendant le
+        // déploiement : il joue la première phrase au lieu de rien.
+        welcomeAudioToken: welcomeAudioTokens[0],
+      });
     } catch (error) {
       console.error('Error creating session:', error);
       res.status(400).json({ error: 'Invalid session data' });

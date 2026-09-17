@@ -250,40 +250,68 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
       
       const welcomeStartTime = Date.now();
       try {
-        let audioBlob: Blob | null = null;
-        let usedPregen = false;
+        const tokens = sessionFlow.welcomeAudioTokens ?? [];
 
-        if (sessionFlow.welcomeAudioToken) {
-          console.log('[TutorialScreen] Loading pre-generated personalized welcome audio');
-          const audioResponse = await fetch(`/api/tts/play/${sessionFlow.welcomeAudioToken}`);
-          if (audioResponse.ok) {
-            audioBlob = await audioResponse.blob();
-            usedPregen = audioBlob.size >= 100;
-            console.log('[TutorialScreen] Personalized welcome audio ready, size:', audioBlob.size);
-          } else {
-            captureEvent('api_error', {
-              endpoint: '/api/tts/play',
-              status: audioResponse.status,
-              context: 'welcome_pregen_audio',
-              fallback_triggered: true,
-            });
-            console.warn('[TutorialScreen] Personalized welcome audio returned', audioResponse.status, '— falling back');
-          }
+        // Les trois requêtes partent EN MÊME TEMPS — c'est ce qui fait le gain.
+        // Les phrases 2 et 3 sortent du cache serveur, donc leur transfert se
+        // déroule pendant que la phrase 1 se génère puis se joue. La file audio
+        // respecte l'ordre : un segment arrivé en avance attend son tour.
+        let enqueued = 0;
+        let firstSegmentOk = false;
+
+        if (tokens.length > 0) {
+          audioQueue.reset();
+          await Promise.all(
+            tokens.map(async (token, index) => {
+              const position = index + 1;
+              try {
+                const response = await fetch(`/api/tts/play/${token}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const blob = await response.blob();
+                if (blob.size < 100) throw new Error('blob vide');
+                audioQueue.enqueue(blob, `welcome-${position}`, position);
+                enqueued += 1;
+                if (position === 1) firstSegmentOk = true;
+              } catch (segmentError) {
+                // Débloquer la file : sans ça, les segments suivants
+                // attendraient indéfiniment leur prédécesseur manquant.
+                audioQueue.skipIndex(position);
+                captureEvent('api_error', {
+                  endpoint: '/api/tts/play',
+                  context: 'welcome_pregen_audio',
+                  segment_index: position,
+                  error_message: segmentError instanceof Error ? segmentError.message : String(segmentError),
+                  fallback_triggered: position === 1,
+                });
+              }
+            }),
+          );
         }
 
-        // Keep a resilient fallback if the pre-generated personalized audio
-        // expired or could not be loaded.
-        if (!audioBlob || audioBlob.size < 100) {
-          console.log('[TutorialScreen] Generating personalized welcome audio on demand');
-          audioBlob = await textToSpeechWithRetry(welcomeMessage);
+        // Repli complet UNIQUEMENT si la première phrase manque : rien n'a encore
+        // été joué, on peut repartir du message entier sans se superposer.
+        // Si c'est une phrase ultérieure qui manque, l'accueil est déjà en cours
+        // de lecture — mieux vaut un accueil écourté qu'un redémarrage par-dessus.
+        if (!firstSegmentOk) {
+          console.log('[TutorialScreen] Welcome first segment missing — regenerating the whole message');
+          audioQueue.clear();
+          audioQueue.reset();
+          const audioBlob = await textToSpeechWithRetry(welcomeMessage);
+          captureEvent('welcome_audio_latency', {
+            source: 'live_fallback',
+            latency_ms: Date.now() - welcomeStartTime,
+            segments_expected: tokens.length,
+            segments_loaded: enqueued,
+          });
+          await playAudio(audioBlob);
+        } else {
+          captureEvent('welcome_audio_latency', {
+            source: 'personalized_pregen',
+            latency_ms: Date.now() - welcomeStartTime,
+            segments_expected: tokens.length,
+            segments_loaded: enqueued,
+          });
         }
-
-        captureEvent('welcome_audio_latency', {
-          source: usedPregen ? 'personalized_pregen' : 'live_fallback',
-          latency_ms: Date.now() - welcomeStartTime,
-        });
-
-        await playAudio(audioBlob);
       } catch (error) {
         console.error('[TutorialScreen] Failed to play welcome audio:', error);
         toast({

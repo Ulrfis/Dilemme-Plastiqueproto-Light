@@ -67,6 +67,61 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
 
+### [2026-09-17] — Message d'accueil découpé en trois phrases 🔷
+
+**Intent**: après le lot 1, les tours de conversation sont nettement plus
+réactifs, mais le message d'accueil reste lent — et c'est la première impression
+que l'élève a de Peter.
+
+**Cause racine**: le lot 1 n'avait rien pu faire pour l'accueil, qui ne passe ni
+par la file audio ni par le stream de chat. Une fois les tours accélérés, il
+ressortait seul. Le message fait 316 caractères, soit **~22 secondes de parole**,
+généré en un bloc et servi en WAV non compressé — environ **1 Mo** à 24 kHz, le
+double à 48 kHz. Rien ne démarrait avant que la totalité soit générée *puis*
+transférée. Et le cache n'aidait jamais : sa clé est le hash du texte complet,
+prénom inclus, donc chaque élève déclenchait une génération à froid.
+
+**Outcome**:
+
+- `shared/welcome-audio.ts` : `getWelcomeSegments()` découpe le message en trois
+  phrases. Seule la première contient le prénom. `getWelcomeMessage()` en devient
+  la concaténation exacte — le texte affiché n'a pas bougé d'un caractère.
+- `server/routes.ts` : les deux phrases invariables sont générées une fois au
+  démarrage et **épinglées** dans `ttsCache`, que l'éviction FIFO saute désormais.
+  Sans épinglage, une classe de 25 élèves les chasserait en quelques minutes.
+- `POST /api/sessions` renvoie un jeton par phrase. Seule la première demande une
+  vraie génération ; les deux autres sortent du cache.
+- `TutorialScreen` lance les trois requêtes **en parallèle** et les empile dans
+  `audioQueue`, qui gère déjà l'ordre. Le premier son ne dépend plus que de
+  ~147 Ko au lieu de ~1 Mo.
+- Durée de vie des jetons d'accueil portée de 60 s à 5 min (`ttlMs` par entrée) :
+  un élève qui traînait entre la saisie du prénom et l'écran perdait tout le
+  bénéfice de la pré-génération.
+
+**Friction**: le premier repli écrit relançait le message entier dès qu'un
+segment manquait — y compris le troisième, alors que le premier jouait déjà, ce
+qui aurait superposé deux audios. Corrigé : `skipIndex()` débloque la file pour
+un segment tardif manquant, et le repli complet ne se déclenche que si la
+**première** phrase manque, quand rien n'a encore été joué.
+
+**Architecture**:
+```
+Avant : 1 génération de 316 car → ~1 Mo transféré → 🔊
+Après : 3 requêtes parallèles ─ S1 (44 car, généré)  → 🔊 dès ~147 Ko
+                              ├ S2 (cache, 0 génération) ─┐ se téléchargent
+                              └ S3 (cache, 0 génération) ─┘ pendant que S1 joue
+```
+
+**Vérification**: `npm run check` propre, 84 tests (80 + 4 nouveaux), build de
+production. Un test compare la concaténation des segments au message affiché sur
+cinq prénoms, dont un vide et un à espaces multiples.
+
+**Insight**: la latence perçue ne dépendait pas de la vitesse de Gradium mais de
+la **quantité d'audio exigée avant le premier son**. Découper sur des frontières
+de phrase ne coûte rien à la qualité et divise cette quantité par sept.
+
+---
+
 ### [2026-09-17] — Instrumentation TTS et sondes Gradium WebSocket 🔹
 
 **Intent**: avant de réécrire la chaîne TTS en WebSocket (lot 3), mesurer ce

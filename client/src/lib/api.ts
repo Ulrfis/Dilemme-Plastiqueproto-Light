@@ -12,7 +12,10 @@ function sessionAuthHeaders(): Record<string, string> {
 
 export type CreatedTutorialSession = TutorialSession & {
   welcomeMessage: string;
-  welcomeAudioToken: string;
+  /** Un jeton par phrase du message d'accueil, dans l'ordre de lecture. */
+  welcomeAudioTokens: string[];
+  /** Première phrase seule — conservé pour un client servi depuis un cache ancien. */
+  welcomeAudioToken?: string;
 };
 
 export async function createSession(data: InsertTutorialSession): Promise<CreatedTutorialSession> {

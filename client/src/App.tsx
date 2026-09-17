@@ -406,7 +406,13 @@ function WelcomePage() {
       });
       setSessionId(session.id);
       setAccessToken(session.accessToken || '');
-      setWelcome(session.welcomeMessage, session.welcomeAudioToken);
+      // Le serveur renvoie un jeton par phrase. Le repli sur le singulier
+      // couvre la fenêtre de déploiement où un client ancien parle à un serveur
+      // neuf, ou l'inverse.
+      setWelcome(
+        session.welcomeMessage,
+        session.welcomeAudioTokens ?? (session.welcomeAudioToken ? [session.welcomeAudioToken] : []),
+      );
       captureFeatureUsed('session_created', { sessionId: session.id, userName: name });
       setLocation('/tutorial');
     } catch (error) {
