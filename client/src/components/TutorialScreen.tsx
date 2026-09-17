@@ -136,6 +136,13 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   // PHASE 2 OPTIMIZATION: Enable streaming by default for better latency
   const useStreaming = useRef(true); // Set to false to use old non-streaming pipeline
 
+  // Indices détectés par le serveur pour le tour en cours, en attente de
+  // l'animation de la bouteille. Celle-ci se déclenche au premier octet de voix
+  // (`onPlaybackStart`) et non à la réception : c'est ce qui garde la
+  // synchronisation son/animation sans avoir à retenir l'audio.
+  const pendingCluesRef = useRef<string[]>([]);
+  const successShownForTurnRef = useRef<string | null>(null);
+
   // Live transcript Deepgram pendant l'enregistrement (passe de correction Whisper au stop)
   // committedRef = somme des transcriptions "is_final" reçues (verrouillées)
   // currentInterim = dernier interim, remplacé à chaque message
@@ -182,6 +189,25 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
   });
 
   const pendingVoiceTurnRef = useRef<null | (() => void)>(null);
+
+  /**
+   * Déclenche l'animation de la bouteille pour le tour `turnId`, au plus une
+   * fois. Appelée au démarrage de la voix (cas normal) et en filet depuis
+   * `onComplete` — sans quoi un élève en mode texte, ou dont le TTS a échoué,
+   * ne verrait jamais sa récompense.
+   */
+  const triggerSuccessAnimation = useCallback((turnId: string) => {
+    if (pendingCluesRef.current.length === 0) return;
+    if (successShownForTurnRef.current === turnId) return;
+    successShownForTurnRef.current = turnId;
+    // `pendingCluesRef` n'est PAS vidé ici : `onComplete` s'en sert ensuite pour
+    // les événements `clue_discovered`. Il est réinitialisé au tour suivant.
+    setShowSuccess(true);
+    setTimeout(() => setShowSuccess(false), 4500);
+  }, []);
+
+  const currentTurnIdRef = useRef<string>('');
+
   const audioQueue = useAudioQueue({
     playAudio,
     onQueueEmpty: () => {
@@ -194,6 +220,9 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     },
     onPlaybackStart: () => {
       console.log('[TutorialScreen] First sentence audio started playing');
+      // La bouteille apparaît pile au premier octet de voix — intention
+      // d'origine de la synchronisation, tenue sans mettre la file en pause.
+      triggerSuccessAnimation(currentTurnIdRef.current);
       const now = Date.now();
       if (turnFirstAudioAtRef.current === 0) turnFirstAudioAtRef.current = now;
       const latencyMs = exchangeStartTimeRef.current > 0 ? now - exchangeStartTimeRef.current : undefined;
@@ -658,13 +687,30 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
     phase1ReadyTimeRef.current = 0;
     phase1ReportedRef.current = false;
 
+    // `clear()` seul suffit à isoler les tours : il vide la file, remet l'index
+    // attendu à 1 et réarme `onPlaybackStart`. La file n'est PLUS mise en pause —
+    // c'était elle qui retenait tout l'audio jusqu'à la fin du stream LLM.
     audioQueue.clear();
-    audioQueue.pause();
+    pendingCluesRef.current = [];
+    currentTurnIdRef.current = turnId;
     streamGenerationRef.current++;
     const currentGeneration = streamGenerationRef.current;
 
     try {
       await sendChatMessageStreaming(sessionId, userMessage, {
+        // Arrive avant le premier token du LLM : le serveur détecte les indices
+        // sur le message de l'élève. On prépare les données de l'animation ;
+        // son déclenchement attend le premier son (`onPlaybackStart`).
+        onCluesDetected: (detectedClues, foundClues) => {
+          if (streamGenerationRef.current !== currentGeneration) return;
+          if (foundClues.length > 0) setFoundClues(foundClues);
+          if (detectedClues.length > 0) {
+            console.log('[TutorialScreen] Clues detected early:', detectedClues);
+            setNewClues(detectedClues);
+            pendingCluesRef.current = detectedClues;
+          }
+        },
+
         onSentence: (sentence, index) => {
           if (streamGenerationRef.current !== currentGeneration) return;
           console.log('[TutorialScreen] Received sentence #' + index + ':', sentence.substring(0, 50) + '...');
@@ -822,17 +868,20 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             }
           });
 
-          const previousClues = foundClues;
-          const detectedNewClues = newFoundClues.filter(clue => !previousClues.includes(clue));
+          // Source de vérité : les indices envoyés par le serveur en début de
+          // tour (`clues_detected`). On ne les recalcule plus depuis l'état
+          // React, que `onCluesDetected` a déjà mis à jour. Le repli couvre le
+          // cas où l'événement précoce n'aurait pas été reçu.
+          const detectedNewClues = pendingCluesRef.current.length > 0
+            ? pendingCluesRef.current
+            : newFoundClues.filter(clue => !foundClues.includes(clue));
 
           console.log('[TutorialScreen] Clue detection:', {
-            previousClues,
             newFoundClues,
             detectedNewClues,
           });
 
           if (detectedNewClues.length > 0) {
-            console.log('[TutorialScreen] New clues detected — showing animation before audio');
             const tutStart = tutorialStartedAtRef.current;
             detectedNewClues.forEach((clue) => {
               const clue_index = newFoundClues.indexOf(clue);
@@ -850,8 +899,11 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             });
             setFoundClues(newFoundClues);
             setNewClues(detectedNewClues);
-            setShowSuccess(true);
-            setTimeout(() => setShowSuccess(false), 4500);
+            // Filet : normalement l'animation est déjà partie au premier son.
+            // Elle ne l'est pas si le TTS a échoué ou si l'élève est en mode
+            // texte — sans ce rattrapage, il ne verrait jamais sa récompense.
+            pendingCluesRef.current = detectedNewClues;
+            triggerSuccessAnimation(turnId);
           }
 
           // Voice turn timing — only meaningful for voice turns (not text-only).
@@ -897,7 +949,10 @@ export default function TutorialScreen({ sessionId, userName, onComplete }: Tuto
             pendingVoiceTurnRef.current = emitFn;
           }
 
-          audioQueue.resume();
+          // Plus de `resume()` : la file n'a jamais été mise en pause. Ce
+          // garde-fou devient d'autant plus important — sans pause, la file peut
+          // s'être entièrement vidée AVANT `onComplete` sur une réponse courte,
+          // et `onQueueEmpty` serait alors parti sans rien à émettre.
           // Edge case: if queue is already empty (no Phase 2/2a audio enqueued yet),
           // emit immediately so per-exchange telemetry is never silent.
           if (pendingVoiceTurnRef.current && audioQueue.queueLength === 0 && !audioQueue.isPlaying) {

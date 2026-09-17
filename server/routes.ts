@@ -1426,6 +1426,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allFoundSoFar = combined1.filter((v, i) => combined1.indexOf(v) === i);
       const missingClues = allTargetKeywords.filter(k => !allFoundSoFar.includes(k));
 
+      // Les indices sont détectés sur le message de l'élève, donc connus AVANT
+      // d'appeler le LLM. Les envoyer tout de suite permet au client d'avoir les
+      // données de l'animation prêtes quand la voix démarre, sans avoir à
+      // retenir l'audio jusqu'à `complete`. Émis même quand `detectedClues` est
+      // vide : l'absence d'animation est une information utile au client.
+      res.write(`data: ${JSON.stringify({
+        type: 'clues_detected',
+        detectedClues,
+        foundClues: allFoundSoFar,
+        turnId,
+      })}\n\n`);
+
       // Use server-side message count as the authoritative exchange counter
       // session.messageCount = completed exchanges so far; current exchange = +1
       const serverExchangeCount = (session.messageCount ?? 0) + 1;
@@ -1881,34 +1893,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })}\n\n`);
       }
 
-      // Save full response to storage
-      await storage.addMessage({
-        sessionId,
-        role: 'assistant',
-        content: fullResponse,
-      });
-
-      // Only the student's message can change the game state.
-      const assistantMentionedMissingClues = detectClues(fullResponse, [...session.foundClues, ...detectedClues]);
-      if (assistantMentionedMissingClues.length > 0) {
-        captureServerEvent('clue_revealed_by_assistant', sessionId, {
-          endpoint: '/api/chat/stream',
-          clues: assistantMentionedMissingClues,
-          turn_id: turnId,
-        }, userName);
-      }
-      if (detectedClues.length > 0) {
-        const updatedClues = [...session.foundClues, ...detectedClues];
-        await storage.updateSession(sessionId, {
-          foundClues: updatedClues,
-          score: updatedClues.length,
-        });
-      }
-
-      // Incrémenter le compteur de messages pour la synchronisation Google Sheets
-      await storage.incrementMessageCount(sessionId);
-      console.log('[Chat Stream API] Message count incremented for session:', sessionId);
-
+      // `complete` part AVANT la persistance : le texte et l'audio sont déjà
+      // chez le client, et aucune de ces écritures ne conditionne la réponse.
+      // Les garder en amont ajoutait 2 à 3 allers-retours PostgreSQL entre la
+      // fin de la génération et le déblocage de l'UI.
       res.write(`data: ${JSON.stringify({
         type: 'complete',
         fullResponse,
@@ -1918,6 +1906,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
         turnId,
       })}\n\n`);
       turnFinished = true;
+
+      // Persistance après coup. Un échec ici ne doit PAS devenir une erreur
+      // visible par l'élève : il a reçu sa réponse, le tour a bien eu lieu.
+      // On capture côté serveur pour que l'incident reste diagnosticable.
+      try {
+        await storage.addMessage({
+          sessionId,
+          role: 'assistant',
+          content: fullResponse,
+        });
+
+        // Only the student's message can change the game state.
+        const assistantMentionedMissingClues = detectClues(fullResponse, [...session.foundClues, ...detectedClues]);
+        if (assistantMentionedMissingClues.length > 0) {
+          captureServerEvent('clue_revealed_by_assistant', sessionId, {
+            endpoint: '/api/chat/stream',
+            clues: assistantMentionedMissingClues,
+            turn_id: turnId,
+          }, userName);
+        }
+        if (detectedClues.length > 0) {
+          const updatedClues = [...session.foundClues, ...detectedClues];
+          await storage.updateSession(sessionId, {
+            foundClues: updatedClues,
+            score: updatedClues.length,
+          });
+        }
+
+        // Incrémenter le compteur de messages pour la synchronisation Google Sheets
+        await storage.incrementMessageCount(sessionId);
+        console.log('[Chat Stream API] Message count incremented for session:', sessionId);
+      } catch (persistError) {
+        // Conséquence concrète : sans `incrementMessageCount`, le numéro
+        // d'échange ne progresse pas et le tour suivant réutilisera le même.
+        console.error('[Chat Stream API] Persistence failed after complete:', persistError);
+        captureServerError(
+          '/api/chat/stream',
+          sessionId,
+          persistError,
+          { context: 'post_complete_persistence', turn_id: turnId },
+          userName,
+        );
+      }
+
       turnLease.release();
       turnLease = null;
 

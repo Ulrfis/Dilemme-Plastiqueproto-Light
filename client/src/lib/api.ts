@@ -163,6 +163,13 @@ export async function textToSpeechStreaming(text: string): Promise<Blob> {
 
 export interface StreamChatCallbacks {
   onSentence?: (sentence: string, index: number) => void;
+  /**
+   * Indices détectés dans le message de l'élève. Émis dès l'ouverture du stream,
+   * avant tout appel au LLM — le serveur les connaît déjà à cet instant.
+   * `detectedClues` peut être vide : c'est alors l'information qu'il n'y aura
+   * pas d'animation pour ce tour.
+   */
+  onCluesDetected?: (detectedClues: string[], foundClues: string[]) => void;
   // count: number of sentence indices covered by this audio token (default 1).
   // When count > 1, the client must skip indices (index+1)...(index+count-1) in the audio queue.
   onSentenceAudio?: (index: number, audioToken: string, count: number, phase?: 'phase1' | 'phase2') => void;
@@ -231,6 +238,8 @@ export async function sendChatMessageStreaming(
 
           if (data.type === 'sentence' && callbacks.onSentence) {
             callbacks.onSentence(data.text, data.index);
+          } else if (data.type === 'clues_detected' && callbacks.onCluesDetected) {
+            callbacks.onCluesDetected(data.detectedClues ?? [], data.foundClues ?? []);
           } else if (data.type === 'sentence_audio' && callbacks.onSentenceAudio) {
             callbacks.onSentenceAudio(data.index, data.audioToken, data.count ?? 1, data.phase);
           } else if (data.type === 'sentence_audio_error' && callbacks.onSentenceAudioError) {

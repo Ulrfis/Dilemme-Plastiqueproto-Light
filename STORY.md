@@ -67,6 +67,70 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
 
+### [2026-09-17] — La file audio ne retient plus la voix de Peter 🔷
+
+**Intent**: Peter met trop longtemps à parler. Auditer la chaîne
+STT → LLM → TTS et réduire la latence sans casser la continuité de la voix.
+
+**Cause racine**: le projet avait construit le 2026-03-15 une architecture TTS en
+deux phases pour que le son démarre vers 2-3 s — la première phrase part chez
+Gradium dès qu'elle est complète, pendant que le LLM écrit la suite. Le même
+jour, pour synchroniser l'animation de la bouteille avec le début de la voix, un
+`audioQueue.pause()` a été ajouté en début de tour avec un `resume()` dans
+`onComplete`. Les deux changements sont bons séparément ; ensemble, le second
+annule le premier. Depuis six mois, **aucun son ne pouvait sortir avant le
+dernier token du LLM**, plus deux à trois écritures PostgreSQL. Les blocs audio
+arrivaient prêts et attendaient en file.
+
+**Outcome**:
+
+- `server/routes.ts` : nouvel évènement SSE `clues_detected`, émis dès
+  l'ouverture du stream. Les indices sont détectés sur le message de l'élève
+  (`detectClues`, l. 1399) donc connus avant même l'appel au LLM — il suffisait
+  de les envoyer.
+- `client/src/components/TutorialScreen.tsx` : l'animation se déclenche
+  désormais depuis `onPlaybackStart`, un callback que `useAudioQueue` exposait
+  déjà et qui se produit exactement au premier bloc audio joué. L'intention
+  d'origine — « la bouteille apparaît quand la voix démarre » — est tenue, sans
+  retenir quoi que ce soit. `pause()` et `resume()` sont retirés ; `clear()`
+  suffit à isoler les tours.
+- `server/routes.ts` : `complete` est émis **avant** la persistance, et celle-ci
+  passe dans un `try/catch` qui capture sans transformer un incident de base en
+  erreur visible par l'élève.
+- `server/chat-stream-clue-events.test.ts` : verrouille l'invariant qui rend
+  l'envoi précoce sûr — `detectClues` ne renvoie jamais un indice déjà trouvé,
+  donc `clues_detected` et `complete` portent la même liste. Sans lui, la liste
+  d'indices pourrait changer en cours de tour.
+
+**Architecture**:
+```
+Avant : [file en PAUSE] ───────── fin LLM + 3 écritures PG → showSuccess → resume → 🔊
+Après : clues_detected (~0 ms) → phase 1 prête → 🔊 → onPlaybackStart → showSuccess
+```
+
+**Surprise**: l'audit cherchait des réglages à optimiser (modèles, formats,
+concurrence). Le coût principal n'était dans aucun réglage : c'était deux
+correctifs justes qui, composés, se neutralisaient. Aucun des deux n'était une
+erreur au moment où il a été écrit.
+
+**Ce qui n'a pas encore été fait**: l'audit a montré que `docs/integrations/gradium.md`
+est faux sur un point décisif — il affirme qu'il n'y a « aucun streaming côté
+Gradium », alors qu'une API WebSocket existe (`wss://eu.api.gradium.ai/api/speech/tts`,
+155-260 ms jusqu'au premier son, plusieurs messages de texte dans une seule
+génération). Une seule voix continue par réponse supprimerait les ruptures entre
+phrases par construction. De même, le STT doit passer sur ElevenLabs Scribe v2
+Realtime. Ces deux chantiers sont cadrés mais non engagés.
+
+**Vérification**: `npm run check` propre, 80 tests (77 existants inchangés + 3
+nouveaux), build de production.
+
+**Insight**: une optimisation n'est acquise que si quelque chose la mesure. Le
+projet émettait déjà `phase1_to_playback_ms` — l'écart entre « audio prêt » et
+« audio joué » — et cette métrique décrivait le problème depuis six mois sans
+que personne ne la regarde.
+
+---
+
 ### [2026-09-17] — Peter migré sur Responses API après la fermeture d'Assistants 🔷
 
 **Intent**: la conversation avec Peter échouait à chaque échange en production.
