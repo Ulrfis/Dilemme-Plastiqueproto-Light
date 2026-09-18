@@ -177,6 +177,32 @@ ne touchez à rien.
 
 ---
 
+## 5 bis. Lancer la sonde Gradium
+
+Mesure la réactivité du service de synthèse vocale **depuis le serveur de
+production**, là où la clé et le réseau existent déjà.
+
+Ouvrez cette adresse dans votre navigateur, en remplaçant les deux morceaux :
+
+```
+https://VOTRE-DOMAINE/api/health/gradium-probe?token=VOTRE_ADMIN_TOKEN
+```
+
+`VOTRE_ADMIN_TOKEN` est la variable `ADMIN_TOKEN` dans Coolify.
+
+Le résultat s'affiche en texte lisible : fréquence d'échantillonnage, temps
+jusqu'au premier son, comparaison avec le fonctionnement actuel. Ajoutez
+`&format=json` pour la version brute.
+
+La sonde ne modifie rien — elle génère trois courtes phrases et mesure. Elle
+consomme quelques crédits Gradium. Comptez une dizaine de secondes.
+
+> ⚠️ Le verdict sur la fréquence repose sur un débit de parole supposé. S'il
+> s'annonce en confiance « moyenne » ou « faible », il faut vérifier à l'oreille
+> avant de s'en servir.
+
+---
+
 ## 6. Ce qui n'est PAS réglable par variable
 
 Utile à savoir pour ne pas chercher en vain :

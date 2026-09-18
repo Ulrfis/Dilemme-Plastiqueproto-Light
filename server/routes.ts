@@ -9,6 +9,7 @@ import { z } from "zod";
 import { insertTutorialSessionSchema, insertConversationMessageSchema, insertFeedbackSurveySchema } from "@shared/schema";
 import crypto from "crypto";
 import { gradiumFetch, getPoolStats, getPoolHistory, POOL_HISTORY_CAPACITY, POOL_SAMPLE_INTERVAL_MS } from "./gradium-agent";
+import { runGradiumProbe } from "./gradium-probe";
 import { captureServerError, captureServerEvent, captureServerTiming } from "./posthog";
 import { BoundedPriorityQueue, QueueOverloadedError, type QueuePriority } from "./concurrency-limit";
 import { createRateLimiter, positiveIntFromEnv } from "./request-limiter";
@@ -672,6 +673,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
 </script>
 </body>
 </html>`);
+  });
+
+  /**
+   * Sonde le WebSocket Gradium depuis le serveur et renvoie le résultat en
+   * texte lisible (ou en JSON avec `?format=json`).
+   *
+   * Contrairement aux autres routes d'administration, le jeton est accepté
+   * **aussi en paramètre d'URL**. C'est un écart assumé : sans lui, la seule
+   * façon de lancer la mesure serait un outil en ligne de commande, alors que
+   * la personne qui en a besoin travaille dans un navigateur. La route est en
+   * lecture seule et ne renvoie aucune donnée d'élève ; le coût d'un jeton qui
+   * traînerait dans un historique se limite à l'accès aux diagnostics.
+   */
+  app.get('/api/health/gradium-probe', async (req, res) => {
+    const adminToken = process.env.ADMIN_TOKEN;
+    if (!adminToken) return res.status(404).json({ error: 'Not found' });
+
+    const provided =
+      (req.headers['x-admin-token'] as string | undefined) ||
+      (typeof req.query.token === 'string' ? req.query.token : undefined);
+    if (provided !== adminToken) return res.status(403).json({ error: 'Forbidden' });
+
+    const region = typeof req.query.region === 'string' ? req.query.region : 'eu';
+
+    try {
+      const probe = await runGradiumProbe(region);
+
+      if (req.query.format === 'json') {
+        return res.json(probe);
+      }
+
+      // Par défaut : du texte que l'on peut lire et recopier tel quel.
+      const lines = [
+        'SONDE GRADIUM — ' + new Date().toISOString(),
+        '='.repeat(60),
+        '',
+        `Hôte     : ${probe.wsUrl || '(aucun)'}${probe.usedFallbackHost ? '  [repli sur l\'hôte global]' : ''}`,
+        '',
+        'RÉSUMÉ',
+        ...probe.resume.map(l => '  • ' + l),
+        '',
+        'DÉTAIL',
+        '  ' + JSON.stringify(
+          {
+            sampleRate: probe.sampleRate,
+            reactivity: probe.reactivity,
+            multiplexing: probe.multiplexing,
+          },
+          null,
+          2,
+        ).split('\n').join('\n  '),
+      ];
+      if (probe.errors.length > 0) {
+        lines.push('', 'ERREURS', ...probe.errors.map(l => '  • ' + l));
+      }
+      res.type('text/plain; charset=utf-8').send(lines.join('\n'));
+    } catch (error) {
+      console.error('[Gradium Probe] Échec:', error);
+      res.status(500).json({
+        error: 'Probe failed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
   });
 
   // Snapshot of the undici connection pool used for Gradium (point-in-time).
