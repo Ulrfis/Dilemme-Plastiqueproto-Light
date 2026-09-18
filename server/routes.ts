@@ -314,6 +314,14 @@ async function generateTtsAudio(
 
   console.log('[TTS]', quality.toUpperCase(), 'mode — generating', text.length, 'chars [Gradium default]');
 
+  // `padding_bonus` règle la vitesse de diction : négatif = plus rapide
+  // (−4.0 à −0.1), positif = plus lent (0.1 à 4.0). Laissé vide par défaut —
+  // c'est un choix d'oreille, pas un réglage de latence, et il change le
+  // caractère de la voix de Peter. À poser après écoute, si son débit paraît
+  // trop pressé ou trop traînant.
+  const rawPadding = Number.parseFloat(process.env.GRADIUM_PADDING_BONUS ?? '');
+  const paddingBonus = Number.isFinite(rawPadding) ? rawPadding : undefined;
+
   const body: Record<string, unknown> = {
     text,
     voice_id: GRADIUM_VOICE_ID,
@@ -322,6 +330,7 @@ async function generateTtsAudio(
     only_audio: true,
     json_config: {
       language: 'fr',
+      ...(paddingBonus !== undefined ? { padding_bonus: paddingBonus } : {}),
     },
   };
 
@@ -437,6 +446,11 @@ async function warmWelcomeSegments(): Promise<void> {
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   organization: 'org-z0AK8zYLTeapGaiDZFQ5co2N',
+  // Le SDK retente deux fois par défaut, en silence. Sur un tour déjà lent, ces
+  // reprises se cumulaient et faisaient un temps de réponse sans rapport avec
+  // les autres — une des sources de l'irrégularité perçue. Le vrai garde-fou
+  // reste applicatif (`OPENAI_RUN_TIMEOUT_MS`).
+  maxRetries: 1,
 });
 
 // Peter tourne sur la Responses API depuis la fermeture de l'Assistants API
@@ -1633,11 +1647,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // unnatural micro-segments. Phase 1 fires as soon as the combined buffer reaches
       // MIN_SENTENCE_CHARS, or at stream completion if nothing was long enough.
       // ─────────────────────────────────────────────────────────────────────────
-      const MIN_SENTENCE_CHARS = 55;
-      const MAX_PHASE1_SENTENCES = 2;  // Prevent Phase 1 from grouping too many short sentences
-      // Phase 2 early dispatch thresholds: fire Phase 2a mid-stream to avoid silence gaps
-      const PHASE2_EARLY_CHARS = 120;      // dispatch Phase 2a when accumulated text reaches this
-      const PHASE2_EARLY_SENTENCES = 3;    // OR when accumulated sentence count reaches this
+      // RÉGULARITÉ DU DÉBIT — chaque bloc est un appel Gradium indépendant, avec
+      // sa propre prosodie et un blanc de lecture à la jointure. Le nombre de
+      // blocs faisait donc varier le débit perçu d'une réponse à l'autre, de
+      // façon arbitraire : deux phrases de 45 et 50 caractères tenaient en un
+      // seul bloc (fluide), deux phrases de 70 et 60 en produisaient deux
+      // (haché), pour une longueur comparable. Quatre phrases finissaient par un
+      // fragment isolé de quelques mots, avec son propre registre.
+      //
+      // Les seuils de déclenchement anticipé sont donc relevés : la phase 2a
+      // n'est plus envoyée en cours de stream pour une réponse normale, elle
+      // part d'un bloc à la fin. Une réponse de Peter tient alors en un ou deux
+      // blocs — jamais trois — et ne se termine plus sur un fragment orphelin.
+      // Le déclenchement anticipé reste, comme soupape, pour les réponses
+      // réellement longues où le silence se ferait sentir.
+      //
+      // Réglable sans redéploiement : ces valeurs se règlent à l'oreille.
+      const MIN_SENTENCE_CHARS = positiveIntFromEnv('TTS_PHASE1_MIN_CHARS', 55);
+      const MAX_PHASE1_SENTENCES = positiveIntFromEnv('TTS_PHASE1_MAX_SENTENCES', 2);
+      const PHASE2_EARLY_CHARS = positiveIntFromEnv('TTS_PHASE2_EARLY_CHARS', 220);
+      const PHASE2_EARLY_SENTENCES = positiveIntFromEnv('TTS_PHASE2_EARLY_SENTENCES', 4);
       let phase1Done = false;
       let phase1Text = "";                        // text sent in Phase 1 (used as previous_text for Phase 2)
       let phase1ShortBuffer: Array<{ text: string; index: number }> = []; // short sentences accumulating before Phase 1 fires

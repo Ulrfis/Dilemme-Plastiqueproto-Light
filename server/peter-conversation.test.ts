@@ -211,6 +211,31 @@ test('streamTurn normalises a successful OpenAI stream', async () => {
   assert.deepEqual(params.reasoning, { effort: 'none' });
 });
 
+test('streamTurn pins a cache key and caps the output length', async () => {
+  // Les deux servent la régularité du tour, pas sa qualité :
+  //  - `prompt_cache_key` stable par conversation → les ~7 000 tokens de prompt
+  //    ont plus de chances d'être servis depuis le cache, donc un délai avant
+  //    le premier token plus constant d'un tour à l'autre ;
+  //  - `max_output_tokens` empêche une réponse emballée de rendre un tour
+  //    beaucoup plus lent que les autres.
+  const { client, calls } = fakeOpenAI({ streamEvents: [] });
+  const provider = new PeterConversationProvider(client);
+
+  await provider.streamTurn({
+    conversationId: 'conv_42',
+    userMessage: 'Je vois des bouteilles',
+    dynamicInstructions: '',
+  });
+
+  const params = calls.find(c => c.method === 'responses.create')!.args[0] as Record<string, any>;
+  assert.equal(params.prompt_cache_key, 'conv_42');
+  assert.equal(typeof params.max_output_tokens, 'number');
+  assert.ok(
+    params.max_output_tokens >= 200,
+    'un plafond trop bas tronquerait une réponse normale de Peter en pleine phrase',
+  );
+});
+
 test('the game context travels in instructions, never in conversation history', async () => {
   // Invariant pédagogique : seul le vrai message de l'élève entre dans
   // l'historique. Le contexte de jeu (indices trouvés/manquants) est rejoué à

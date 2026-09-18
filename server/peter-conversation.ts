@@ -74,6 +74,21 @@ const REASONING_EFFORTS: readonly PeterReasoningEffort[] = [
  */
 const DEFAULT_REASONING_EFFORT: PeterReasoningEffort = 'none';
 
+/**
+ * Plafond de tokens de sortie. Surchargeable par `OPENAI_MAX_OUTPUT_TOKENS`.
+ *
+ * 400 tokens ≈ 1 400 caractères, soit largement au-dessus des « une ou deux
+ * phrases courtes » que demande le prompt v5. Ce n'est pas un réglage de style :
+ * c'est le garde-fou qui empêche une réponse emballée de rendre un tour
+ * beaucoup plus lent que les autres.
+ */
+const DEFAULT_MAX_OUTPUT_TOKENS = 400;
+
+export function getPeterMaxOutputTokens(): number {
+  const raw = Number.parseInt(process.env.OPENAI_MAX_OUTPUT_TOKENS ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_OUTPUT_TOKENS;
+}
+
 export function getPeterReasoningEffort(): PeterReasoningEffort {
   const raw = process.env.OPENAI_REASONING_EFFORT?.trim().toLowerCase();
   if (!raw) return DEFAULT_REASONING_EFFORT;
@@ -185,6 +200,19 @@ export class PeterConversationProvider {
         // Sans ce champ, GPT-5.6 raisonne en `medium` par défaut et retarde
         // le premier token. Cast : voir PeterReasoningEffort (types SDK en retard).
         reasoning: { effort: getPeterReasoningEffort() as 'minimal' },
+        // Le prompt de Peter fait ~7 000 tokens, identiques à chaque tour et pour
+        // tous les élèves. Une clé stable par conversation demande à OpenAI de
+        // router les tours d'une même session vers la même machine, ce qui rend
+        // les succès de cache — et donc le délai avant le premier token — plus
+        // réguliers d'un tour à l'autre.
+        prompt_cache_key: input.conversationId,
+        // Garde-fou matériel, pas un outil de style : le prompt demande une ou
+        // deux phrases courtes, mais rien ne l'imposait. Une réponse qui
+        // s'emballe faisait un tour beaucoup plus lent que les autres. Le
+        // plafond est large — il n'écourte pas une réponse normale, il coupe
+        // seulement les cas pathologiques. Une réponse tronquée arrive en
+        // `response.incomplete`, que les routes savent déjà jouer telle quelle.
+        max_output_tokens: getPeterMaxOutputTokens(),
         stream: true,
       },
       { signal: controller.signal },

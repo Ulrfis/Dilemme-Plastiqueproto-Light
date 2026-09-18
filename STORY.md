@@ -67,6 +67,65 @@ Marie, a 14-year-old student in a Geneva classroom. She's skeptical about tradit
 
 *Each feature gets an entry. Major features (🔷) get full treatment. Minor features (🔹) get brief notes.*
 
+### [2026-09-18] — Régulariser le débit de Peter 🔷
+
+**Intent**: « Peter oscille pas mal dans ses réponses, parfois très hésitant,
+parfois très vite, c'est trop variable. Il faut faire plus homogène, mais un peu,
+pas trop non plus (rester humain...) ».
+
+**Cause racine**: chaque bloc audio est un appel Gradium **indépendant**, avec sa
+propre prosodie et un blanc à la jointure pendant que l'élément `<audio>`
+enchaîne. Le nombre de blocs dépendait de l'endroit où tombaient les frontières
+de phrase par rapport au seuil de 55 caractères — donc de façon arbitraire du
+point de vue de l'élève. Simulation du découpage d'alors :
+
+| Réponse | Blocs |
+|---|---|
+| 2 phrases de 45 + 50 car | **1** — fluide |
+| 2 phrases de 70 + 60 car | **2** — haché, pour une longueur comparable |
+| 4 phrases | **3**, dont un fragment orphelin de 40 car avec son propre registre |
+
+**Outcome**:
+
+- Seuils de déclenchement anticipé de la phase 2 relevés (120 → 220 caractères,
+  3 → 4 phrases) : la suite part d'un bloc à la fin plutôt qu'en cours de stream.
+  Une réponse tient désormais en un ou deux blocs — **jamais trois** — et ne se
+  termine plus sur un fragment isolé. Le déclenchement anticipé reste, comme
+  soupape, pour les réponses réellement longues.
+- Les quatre seuils sont pilotables par variables d'environnement
+  (`TTS_PHASE1_*`, `TTS_PHASE2_EARLY_*`) : ils se règlent à l'oreille, pas au
+  raisonnement.
+- `max_output_tokens` (défaut 400) : garde-fou contre une réponse qui s'emballe
+  et rend un tour sans commune mesure avec les autres. Large — il ne raccourcit
+  pas une réponse normale. Une troncature arrive en `response.incomplete`, que
+  les routes savent déjà jouer telle quelle.
+- `prompt_cache_key` stable par conversation : les ~7 000 tokens de prompt ont
+  plus de chances d'être servis depuis le cache, d'où un délai avant le premier
+  token plus constant.
+- `maxRetries: 1` sur le client OpenAI — le défaut du SDK est 2 reprises
+  silencieuses, qui se cumulaient sur un tour déjà lent.
+- `GRADIUM_PADDING_BONUS` exposé, vide par défaut : règle la vitesse de diction
+  (négatif = plus rapide). Choix d'oreille, à poser après écoute.
+
+**Ce qui n'est pas réglé**: une réponse d'une phrase donnera toujours un bloc et
+une réponse de deux phrases longues en donnera deux. Cette variance-là est
+inhérente au découpage : la supprimer demanderait de retarder le premier son.
+Seul le lot 3 — une seule génération Gradium par réponse, alimentée au fil du
+LLM — la fait disparaître par construction.
+
+**Vérification**: `npm run check` propre, 85 tests (84 + 1 nouveau sur
+`prompt_cache_key` et `max_output_tokens`), build de production. Le changement de
+seuils est vérifié par **simulation du découpage**, pas par test unitaire : la
+logique vit en ligne dans le handler de `/api/chat/stream` et sera supprimée par
+le lot 3 — l'extraire pour la tester maintenant serait du travail jeté.
+
+**Insight**: le réglage qui produisait l'irrégularité n'était pas une valeur trop
+haute ou trop basse, mais le fait que le résultat dépendait d'une coïncidence
+entre la longueur des phrases et un seuil. Rendre le comportement *prévisible*
+comptait plus que le rendre *rapide*.
+
+---
+
 ### [2026-09-17] — Message d'accueil découpé en trois phrases 🔷
 
 **Intent**: après le lot 1, les tours de conversation sont nettement plus
